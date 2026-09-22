@@ -17,7 +17,7 @@ Safari 26+). Zero runtime dependencies.
 
 ## Demo
 
-Storybook is available here: https://vhult-graph.ivanalglave.workers.dev/
+Storybook is available here: https://graph.vhult.com
 
 ## Performance
 

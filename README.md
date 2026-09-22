@@ -5,7 +5,7 @@ Super fast WebGPU graph rendering engine..
 <img width="448" height="397" alt="image" src="https://github.com/user-attachments/assets/67372405-85ef-4394-9f5d-4096b1bd4dfe" />
 
 ## Demo
-Storybook is available here: https://vhult-graph.ivanalglave.workers.dev/
+Storybook is available here: https://graph.vhult.com
 
 ## Performance
 The goal of this library is to make a new generation graph rendering using webGPU with the highest possible level of performance.

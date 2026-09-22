@@ -23,6 +23,11 @@ export interface StageSpec<A> {
   dispose?: () => void;
 }
 
+export interface StoryContext {
+  id: string;
+  globals?: { hud?: string };
+}
+
 interface Current {
   storyId: string;
   root: HTMLElement;
@@ -36,15 +41,17 @@ interface Current {
 
 let current: Current | null = null;
 
-/** `context` is the Storybook story context; only its id is used. */
-export function stage<A>(args: A, context: { id: string }, spec: StageSpec<A>): HTMLElement {
+/** `context` is the Storybook story context; only its id and globals are used. */
+export function stage<A>(args: A, context: StoryContext, spec: StageSpec<A>): HTMLElement {
   const options = spec.options?.(args) ?? {};
   const optionsKey = JSON.stringify(options);
+  const hudOn = context.globals?.hud !== "off";
 
   if (current && current.storyId === context.id && current.optionsKey === optionsKey) {
     const cur = current;
     const prev = cur.args as A;
     cur.args = args;
+    cur.hud.setVisible(hudOn);
     void cur.ready.then((g) => g && cur === current && spec.update?.(g, args, prev, cur.hud));
     return cur.root;
   }
@@ -56,6 +63,7 @@ export function stage<A>(args: A, context: { id: string }, spec: StageSpec<A>): 
   const canvas = document.createElement("canvas");
   root.append(canvas);
   const hud = new Hud(root);
+  hud.setVisible(hudOn);
 
   const errors: string[] = [];
   const cur: Current = { storyId: context.id, root, optionsKey, args, graph: null, ready: Promise.resolve(null), hud, dispose: spec.dispose };

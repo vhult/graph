@@ -29,11 +29,13 @@ export class Hud {
   private lastFrames = 0;
   private lastT = 0;
   private lastText = "";
+  private lastFps = 0;
   private note = "";
   private loadMs: number | null = null;
   private genMs: number | null = null;
   private pageBytes = NaN;
   private memoryTimer: ReturnType<typeof setInterval> | undefined;
+  private visible = true;
 
   constructor(parent: HTMLElement) {
     this.el = document.createElement("div");
@@ -44,6 +46,29 @@ export class Hud {
 
   attach(graph: Graph): void {
     this.graph = graph;
+    if (this.visible) this.start();
+  }
+
+  detach(): void {
+    this.stop();
+    this.graph = null;
+  }
+
+  setVisible(visible: boolean): void {
+    if (visible === this.visible) return;
+    this.visible = visible;
+    this.el.hidden = !visible;
+    if (!visible) {
+      this.stop();
+      return;
+    }
+    if (!this.graph) return;
+    this.start();
+    this.poll();
+  }
+
+  private start(): void {
+    this.lastFrames = this.graph?.readStats(this.stats).renderedFrames ?? 0;
     this.lastT = performance.now();
     this.timer = setInterval(this.poll, POLL_MS);
     if (measurePageMemory && globalThis.crossOriginIsolated) {
@@ -52,10 +77,11 @@ export class Hud {
     }
   }
 
-  detach(): void {
+  private stop(): void {
     clearInterval(this.timer);
     clearInterval(this.memoryTimer);
-    this.graph = null;
+    this.timer = undefined;
+    this.memoryTimer = undefined;
   }
 
   /** Free-form line shown under the stats (e.g. dataset name). */
@@ -100,10 +126,14 @@ export class Hud {
     if (!g) return;
     const s = g.readStats(this.stats);
     const now = performance.now();
-    const frames = s.renderedFrames - this.lastFrames;
-    const fps = (frames * 1000) / (now - this.lastT);
-    this.lastFrames = s.renderedFrames;
-    this.lastT = now;
+    const dt = now - this.lastT;
+    let fps = this.lastFps;
+    if (dt >= POLL_MS / 2) {
+      fps = ((s.renderedFrames - this.lastFrames) * 1000) / dt;
+      this.lastFrames = s.renderedFrames;
+      this.lastT = now;
+      this.lastFps = fps;
+    }
 
     const passes = Object.entries(s.passMs)
       .filter(([, v]) => !Number.isNaN(v))
@@ -112,7 +142,7 @@ export class Hud {
     const gpu = g.caps.timestampQuery ? `${ms(s.gpuMs)} ms  ${passes ? `(${passes})` : ""}` : "n/a (no timestamp-query)";
 
     const lines = [
-      `fps      ${frames === 0 ? "idle (0 GPU work)" : fps.toFixed(0)}`,
+      `fps      ${fps === 0 ? "idle (0 GPU work)" : fps.toFixed(0)}`,
       `gpu      ${gpu}`,
       `worker   ${ms(s.cpuMsAvg)} ms cpu/frame`,
       `visible  ${Number.isNaN(s.visibleNodes) ? "—" : fmt(s.visibleNodes)} / ${fmt(s.nodeCount)} nodes`,

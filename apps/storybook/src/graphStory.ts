@@ -16,7 +16,7 @@ import type { EdgeDebugMode, Graph, GraphOptions } from "@vhult/graph";
 import type { GraphDataset } from "@vhult/graph-bench";
 import type { Loaded } from "./data";
 import type { Hud } from "./hud";
-import { stage } from "./stage";
+import { stage, type StoryContext } from "./stage";
 
 export interface GraphArgs {
   nodes: number;
@@ -116,7 +116,7 @@ export function graphArgTypes<A extends GraphArgs>(sizes: readonly number[], own
 }
 
 export function renderGraph<A extends GraphArgs>(spec: GraphStory<A>) {
-  return (args: A, ctx: { id: string }): HTMLElement =>
+  return (args: A, ctx: StoryContext): HTMLElement =>
     stage(args, ctx, {
       options: (a) => ({
         edgeWidth: a.edgeWidth,

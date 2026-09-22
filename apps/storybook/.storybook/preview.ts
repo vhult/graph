@@ -3,6 +3,21 @@ import { disposeStage } from "../src/stage";
 import "./preview.css";
 
 const preview: Preview = {
+  initialGlobals: { hud: "on" },
+  globalTypes: {
+    hud: {
+      description: "Stats overlay",
+      toolbar: {
+        title: "Stats",
+        icon: "speed",
+        items: [
+          { value: "on", title: "Stats on" },
+          { value: "off", title: "Stats off" },
+        ],
+        dynamicTitle: true,
+      },
+    },
+  },
   parameters: {
     layout: "fullscreen",
     controls: { expanded: true, sort: "none" },
