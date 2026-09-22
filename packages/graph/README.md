@@ -1,8 +1,12 @@
 # @vhult/graph
 
-WebGPU graph rendering engine. Rendering only: no layout, no simulation.
-You give it node positions and edges as typed arrays; it draws them from a Web
-Worker on an `OffscreenCanvas`, so the main thread never touches the GPU.
+Super fast WebGPU graph rendering engine.
+
+<img width="448" height="397" alt="image" src="https://github.com/user-attachments/assets/67372405-85ef-4394-9f5d-4096b1bd4dfe" />
+
+Rendering only: no layout, no simulation. You give it node positions and edges
+as typed arrays; it draws them from a Web Worker on an `OffscreenCanvas`, so the
+main thread never touches the GPU.
 
 ```sh
 npm install @vhult/graph
@@ -10,6 +14,18 @@ npm install @vhult/graph
 
 Requires a WebGPU-capable browser (Chrome/Edge 113+, Firefox 141+ on Windows,
 Safari 26+). Zero runtime dependencies.
+
+## Demo
+
+Storybook is available here: https://vhult-graph.ivanalglave.workers.dev/
+
+## Performance
+
+The goal of this library is to make a new generation graph rendering using
+WebGPU with the highest possible level of performance. It is currently able to
+render a 25 million nodes and 66 million edges graph smoothly on a laptop iGPU.
+
+<img width="677" height="814" alt="image" src="https://github.com/user-attachments/assets/aa8b26e4-05c4-4dee-b9d0-eba157ce742a" />
 
 ## Quick start
 
@@ -89,6 +105,33 @@ Everything is typed; the `.d.ts` files document each option and method.
 | `readStats(out?)` | Frame stats: visible counts, CPU/GPU ms, GPU memory held |
 | `on("error", fn)` | Runtime errors, e.g. device loss |
 | `destroy()` | Release everything |
+
+## Three nodes, one edge
+
+The smallest thing that draws something:
+
+```ts
+import { Graph, packRgba } from "@vhult/graph";
+
+// The canvas needs a CSS size. The engine reads it and tracks resizes.
+const graph = await Graph.create(document.querySelector("canvas")!);
+
+graph.setNodes({
+  count: 3,
+  // x, y interleaved, in world units — any scale you like
+  positions: new Float32Array([0, 0, 100, 0, 50, 80]),
+  // diameters, same world units as the positions
+  sizes: new Float32Array([10, 10, 10]),
+  // packRgba takes 0..1 channels and returns the packed uint the engine wants
+  colors: new Uint32Array(3).fill(packRgba(1, 0.4, 0.2)),
+});
+
+// Pairs of node indices: this joins node 0 to 1, and 1 to 2.
+graph.setEdges({ count: 2, indices: new Uint32Array([0, 1, 1, 2]) });
+
+// Move the camera so the whole graph is on screen.
+graph.camera.fit();
+```
 
 ## License
 
