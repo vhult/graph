@@ -10,5 +10,16 @@
   ],
   "assets": {
     "directory": "./apps/storybook/storybook-static"
+  },
+  "env": {
+    "dev": {
+      "name": "dev-graph",
+      "routes": [
+        { "pattern": "dev.graph.vhult.com", "custom_domain": true }
+      ],
+      "assets": {
+        "directory": "./apps/storybook/storybook-static"
+      }
+    }
   }
 }
