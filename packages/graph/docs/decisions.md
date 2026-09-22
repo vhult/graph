@@ -8,6 +8,22 @@ bandwidth), Edge 153, 1M nodes / 3M edges at fit unless stated.
 
 ---
 
+## 0039 — Pinch zoom is direct, paired on the main thread
+
+Two fingers used to fight: each finger's down re-anchored the drag and the
+alternating moves panned back and forth by the finger gap. Now `PointerInput`
+keeps two touch slots and, while both are down, sends one `PINCH` record per
+move carrying the absolute midpoint and finger distance in device px. The worker
+pans by the midpoint delta and zooms by the distance ratio at the midpoint, so
+applying every record or only the last of a batch gives the same camera, as
+0006 does for pan. Pinch is direct, not glided like the wheel (0026): touch
+moves arrive at screen rate, so there is no gap to fill, and a glide would trail
+the fingers and keep rendering after they stop. The record layout, ring and
+protocol are unchanged; a pointer id per record would have widened the record
+for the same traffic. When one finger lifts, a `POINTER_DOWN` for the other
+re-anchors the drag without a jump. `gpu.mjs input` gained a pinch phase driven
+by CDP touch events; the headless probe has not yet run on this branch.
+
 ## 0038 — Edge sampling keys on density, not length
 
 Keeping an edge with probability `lim / screenLength` makes the threshold a

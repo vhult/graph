@@ -15,6 +15,7 @@ export const INPUT = {
   POINTER_UP: 3,
   POINTER_LEAVE: 4,
   WHEEL: 5,
+  PINCH: 6,
 } as const;
 
 export const MOD = {

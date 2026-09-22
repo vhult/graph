@@ -56,8 +56,9 @@ graph.setEdges({ count: 2, indices: new Uint32Array([0, 1, 1, 2]) }); // source,
 graph.camera.fit();
 ```
 
-Pan and zoom are built in (`controls: false` turns them off). Call
-`graph.destroy()` to release the worker and the GPU device.
+Pan and zoom are built in, with one-finger pan and two-finger pinch zoom on
+touch screens (`controls: false` turns them off). Call `graph.destroy()` to
+release the worker and the GPU device.
 
 **Arrays are transferred, not copied**: after `setNodes` / `setEdges` the arrays
 you passed are detached. Pass `{ copy: true }` as the second argument to keep

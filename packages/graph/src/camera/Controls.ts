@@ -39,11 +39,16 @@ export class Controls {
   private pendingZoomLog = 0;
   private anchorX = 0;
   private anchorY = 0;
+  private pinching = false;
+  private pinchX = 0;
+  private pinchY = 0;
+  private pinchDist = 0;
 
   /** Apply one record. Returns true if the camera changed. */
   apply(rec: InputRecord, camera: Camera2D): boolean {
     switch (rec.type) {
       case INPUT.POINTER_DOWN:
+        this.pinching = false;
         this.pointerX = rec.x;
         this.pointerY = rec.y;
         this.dragging = this.enabled && (rec.buttons & 1) !== 0;
@@ -65,10 +70,12 @@ export class Controls {
       }
 
       case INPUT.POINTER_UP:
+        this.pinching = false;
         this.dragging = false;
         return false;
 
       case INPUT.POINTER_LEAVE:
+        this.pinching = false;
         if (!this.dragging) this.pointerX = this.pointerY = -1;
         return false;
 
@@ -81,6 +88,26 @@ export class Controls {
         this.pendingZoomLog += -rec.dy * speed;
         this.anchorX = rec.x;
         this.anchorY = rec.y;
+        return true;
+      }
+
+      case INPUT.PINCH: {
+        if (!this.enabled) return false;
+        const dx = rec.x - this.pinchX;
+        const dy = rec.y - this.pinchY;
+        const factor = this.pinchDist > 0 && rec.dx > 0 ? rec.dx / this.pinchDist : 1;
+        const anchor = !this.pinching;
+        this.pinching = true;
+        this.pinchX = rec.x;
+        this.pinchY = rec.y;
+        this.pinchDist = rec.dx;
+        if (anchor) {
+          this.pendingZoomLog = 0;
+          return false;
+        }
+        if (dx === 0 && dy === 0 && factor === 1) return false;
+        camera.panByScreen(dx, dy);
+        camera.zoomAt(factor, rec.x, rec.y);
         return true;
       }
     }
