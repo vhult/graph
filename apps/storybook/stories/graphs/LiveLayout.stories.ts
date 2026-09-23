@@ -31,6 +31,12 @@ const loop = { raf: 0, args: null as Args | null };
 
 function start(graph: Graph, base: Float32Array, count: number): void {
   cancelAnimationFrame(loop.raf);
+  const sinJ = new Float32Array(count);
+  const cosJ = new Float32Array(count);
+  for (let k = 0; k < count; k++) {
+    sinJ[k] = Math.sin(k * 2);
+    cosJ[k] = Math.cos(k * 2);
+  }
   let cursor = 0;
   const tick = (t: number): void => {
     const a = loop.args!;
@@ -39,10 +45,14 @@ function start(graph: Graph, base: Float32Array, count: number): void {
       if (cursor + n > count) cursor = 0;
       const out = new Float32Array(n * 2); // transferred to the worker, so fresh each frame
       const phase = t * 0.003;
+      const sp = Math.sin(phase) * a.amplitude;
+      const cp = Math.cos(phase) * a.amplitude;
       for (let i = 0; i < n; i++) {
-        const j = (cursor + i) * 2;
-        out[i * 2] = base[j]! + Math.sin(phase + j) * a.amplitude;
-        out[i * 2 + 1] = base[j + 1]! + Math.cos(phase + j) * a.amplitude;
+        const k = cursor + i;
+        const s = sinJ[k]!;
+        const c = cosJ[k]!;
+        out[i * 2] = base[k * 2]! + sp * c + cp * s;
+        out[i * 2 + 1] = base[k * 2 + 1]! + cp * c - sp * s;
       }
       graph.updateNodePositions(cursor, out);
       cursor += n;
