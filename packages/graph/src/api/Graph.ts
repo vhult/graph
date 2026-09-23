@@ -3,6 +3,7 @@
  * the render worker and returns. The main thread never touches the GPU.
  */
 import { InputRing } from "../bridge/InputRing";
+import { PositionStream } from "../bridge/PositionStream";
 import type { FromWorker, ToWorker } from "../bridge/protocol";
 import { createStateBuffer, STATE_SLOT } from "../bridge/SharedState";
 import { DebugOverlay } from "./DebugOverlay";
@@ -21,6 +22,7 @@ import type {
   LabelSnapshot,
   EdgeData,
   NodeData,
+  NodePositionStream,
   RGBA,
 } from "./types";
 
@@ -71,6 +73,7 @@ export class Graph {
       state: shared ? (state.buffer as SharedArrayBuffer) : null,
       options: {
         background: options.background ?? DEFAULT_BACKGROUND,
+        transparent: options.transparent ?? false,
         controls: options.controls ?? true,
         nodeScale: options.nodeScale ?? 1,
         edgeWidth: options.edgeWidth ?? 1,
@@ -145,7 +148,7 @@ export class Graph {
     private readonly canvas: HTMLCanvasElement,
     private readonly worker: Worker,
     readonly caps: GraphCaps,
-    ring: InputRing | null,
+    private readonly ring: InputRing | null,
     private readonly state: Float64Array,
     private pixelRatio: number,
     autoResize: boolean,
@@ -182,8 +185,9 @@ export class Graph {
     const positions = data.positions && take(data.positions, n * 2, "positions", opts, transfer);
     const colors = data.colors && take(asWords(data.colors), n, "colors", opts, transfer);
     const sizes = data.sizes && take(data.sizes, n, "sizes", opts, transfer);
+    const shapes = data.shapes && take(data.shapes, n, "shapes", opts, transfer);
     this.nodeCount = n;
-    this.send({ t: "nodes", count: n, positions, colors, sizes }, transfer);
+    this.send({ t: "nodes", count: n, positions, colors, sizes, shapes }, transfer);
     if (t0) this.apiEnd("setNodes", t0);
   }
 
@@ -244,6 +248,30 @@ export class Graph {
 
   setNodeSizes(sizes: Float32Array, opts?: CopyOption): void {
     this.setNodes({ count: this.nodeCount, sizes }, opts);
+  }
+
+  setNodeShapes(shapes: Uint8Array, opts?: CopyOption): void {
+    this.setNodes({ count: this.nodeCount, shapes }, opts);
+  }
+
+  streamNodePositions(): NodePositionStream {
+    const count = this.nodeCount;
+    const ring = this.ring;
+    if (!ring) {
+      const positions = new Float32Array(count * 2);
+      return { positions, commit: () => this.updateNodePositions(0, positions, { copy: true }) };
+    }
+    const stream = PositionStream.create(count);
+    this.send({ t: "positionStream", buffer: stream.buffer, count });
+    return {
+      get positions() {
+        return stream.positions;
+      },
+      commit: () => {
+        stream.commit();
+        if (ring.claimWake()) this.worker.postMessage({ t: "wake" } satisfies ToWorker);
+      },
+    };
   }
 
   /** Partial update of positions for nodes `start .. start + data.length / 2`. Dirty-range tracked. */
@@ -475,7 +503,7 @@ function isDetached(buf: ArrayBufferLike): boolean {
  * Validate length, then either copy or mark the backing buffer for transfer.
  * Transfer detaches the WHOLE backing buffer, including other views over it.
  */
-function take<T extends Float32Array | Uint32Array>(arr: T, expected: number, name: string, opts: CopyOption | undefined, transfer: Transferable[]): T {
+function take<T extends Float32Array | Uint32Array | Uint8Array>(arr: T, expected: number, name: string, opts: CopyOption | undefined, transfer: Transferable[]): T {
   if (isDetached(arr.buffer)) {
     throw new GraphError("detached-array", `${name}: array is detached (it was transferred earlier). Pass { copy: true } to keep using it.`);
   }

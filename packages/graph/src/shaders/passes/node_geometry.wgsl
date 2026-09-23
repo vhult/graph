@@ -8,6 +8,7 @@
 @group(2) @binding(1) var<storage, read> instances : array<NodeInstance>;
 
 override BUCKET : u32 = 0u;
+override NODE_SHAPES : bool = false;
 
 struct VOut {
   @builtin(position) pos : vec4<f32>,
@@ -17,6 +18,7 @@ struct VOut {
   @location(1) @interpolate(flat) color : vec4<f32>,
   // device px per uv unit, for analytic AA
   @location(2) @interpolate(flat) radiusPx : f32,
+  @location(3) @interpolate(flat) shape : u32,
 }
 
 @vertex
@@ -38,12 +40,16 @@ fn vs(@builtin(vertex_index) vi : u32, @builtin(instance_index) ii : u32) -> VOu
   o.uv = corner * (ext / rDraw);
   o.color = c;
   o.radiusPx = rDraw;
+  o.shape = select(0u, instanceShape(n.radiusPx), NODE_SHAPES);
   return o;
 }
 
 @fragment
 fn fs(in : VOut) -> @location(0) vec4<f32> {
-  let sd = sdCircle(in.uv);
+  var sd = sdCircle(in.uv);
+  if (NODE_SHAPES) {
+    sd = sdShape(in.uv, in.shape);
+  }
   // Analytic 1 px coverage ramp across the silhouette.
   let a = in.color.a * clamp(0.5 - sd * in.radiusPx, 0.0, 1.0);
   if (a < 0.002) {

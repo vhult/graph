@@ -10,6 +10,7 @@
 import { GraphError } from "../api/errors";
 import type { BenchmarkOptions, BenchmarkResult, CameraView, GraphCaps, LabelSnapshot, RGBA } from "../api/types";
 import { INPUT, type InputRing, type InputRecord } from "../bridge/InputRing";
+import type { PositionStream } from "../bridge/PositionStream";
 import type { InitOptions } from "../bridge/protocol";
 import { STATE_SLOT } from "../bridge/SharedState";
 import { Camera2D } from "../camera/Camera2D";
@@ -93,6 +94,8 @@ export class Engine {
 
   private dirty = Dirty.RESIZE;
   private framePending = false;
+  private stream: PositionStream | null = null;
+  private streamed: Float32Array | null = null;
   /** performance.now() of the previous tick, for the zoom glide. */
   private lastTickMs = 0;
   private frameIndex = 0;
@@ -124,7 +127,7 @@ export class Engine {
     this.caps = readCaps(gpu.adapter, device, init.ring !== null, profiler.slotNames);
 
     this.context = init.canvas.getContext("webgpu") as GPUCanvasContext;
-    this.context.configure({ device, format, alphaMode: "opaque" });
+    this.context.configure({ device, format, alphaMode: init.options.transparent ? "premultiplied" : "opaque" });
 
     this.frameUniform = new FrameUniform(device, layouts.frame);
     graph.flush(); // create the (empty) graph buffers + bind group
@@ -245,6 +248,8 @@ export class Engine {
   }
 
   setNodes(count: number, arrays: NodeArrays): void {
+    if (!arrays.positions) this.syncStreamed();
+    this.streamed = null;
     this.store.setNodes(count, arrays);
     this.labels.setNodeCount(count);
     this.markDirty(Dirty.TOPOLOGY);
@@ -281,6 +286,26 @@ export class Engine {
     this.markDirty(Dirty.POSITIONS);
   }
 
+  setPositionStream(stream: PositionStream): void {
+    this.stream = stream;
+    this.wake();
+  }
+
+  private takeStream(): number {
+    const s = this.stream;
+    if (!s || !s.pending || s.count !== this.store.nodeCount || !this.graph.canStream(s.count)) return 0;
+    const data = s.take()!;
+    this.streamed = data;
+    this.dirty |= Dirty.POSITIONS;
+    return this.graph.streamPositions(data);
+  }
+
+  private syncStreamed(): void {
+    if (!this.streamed) return;
+    if (this.streamed.length === this.store.nodeCount * 2) this.store.updatePositions(0, this.streamed);
+    this.streamed = null;
+  }
+
   updateColor(index: number, rgba: number): void {
     this.store.updateColor(index, rgba);
     this.markDirty(Dirty.STYLE);
@@ -294,7 +319,7 @@ export class Engine {
 
   fit(padding: number): void {
     this.controls.cancelZoom();
-    this.camera.fit(this.store.bounds, padding * this.pixelRatio);
+    this.camera.fit(this.store.drawnBounds(this.frameInputs.nodeScale), padding * this.pixelRatio);
     this.markDirty(Dirty.CAMERA);
   }
 
@@ -380,6 +405,7 @@ export class Engine {
 
     const ring = this.init.ring;
     if (ring) ring.drain(this.inputRec, this.applyInput);
+    const streamedBytes = this.takeStream();
 
     // Advance the zoom glide before deciding whether the frame is idle: while a
     // glide is in flight it keeps the loop awake, and when it settles the frame
@@ -403,8 +429,12 @@ export class Engine {
 
     if (this.dirty === 0) {
       // Idle: skip the frame entirely. Sleep unless input raced in.
-      if (!ring || ring.trySleep()) return;
-      this.wake();
+      if (!ring) return;
+      if (!ring.trySleep()) {
+        this.wake();
+        return;
+      }
+      if (this.stream?.pending && ring.claimWake()) this.wake();
       return;
     }
 
@@ -433,6 +463,9 @@ export class Engine {
     ctx.dirty = this.dirty;
     this.passes.edges.perEdgeStyle = this.store.hasEdgeStyles;
     this.passes.edges.perEdgeColor = this.store.hasEdgeColors;
+    this.passes.cull.shapes = this.store.hasNodeShapes;
+    this.passes.nodes.shapes = this.store.hasNodeShapes;
+    this.passes.edges.shapes = this.store.hasNodeShapes;
 
     const device = this.gpu.device;
     const encoder = device.createCommandEncoder();
@@ -467,14 +500,14 @@ export class Engine {
       const solves = this.labels.solves;
       const solveMs = solves !== this.labelSolves ? this.passes.labels.lastSolveMs : NaN;
       this.labelSolves = solves;
-      probe.end(this.frameIndex, t0, cpuMs, frameDirty, uploaded ? this.graph.lastUploadBytes : 0, this.labels.live.shownCount, solveMs);
+      probe.end(this.frameIndex, t0, cpuMs, frameDirty, (uploaded ? this.graph.lastUploadBytes : 0) + streamedBytes, this.labels.live.shownCount, solveMs);
     }
     this.dirty = (this.passes.labels.busy ? Dirty.LABELS : 0) | (this.passes.labels.marked ? Dirty.LABELLED : 0);
     this.passes.labels.marked = false;
     this.frameIndex++;
     this.renderedFrames++;
     this.cpuMsAvg = this.renderedFrames === 1 ? cpuMs : this.cpuMsAvg + (cpuMs - this.cpuMsAvg) * CPU_EMA;
-    this.publishState(cpuMs, uploaded ? this.graph.lastUploadBytes : 0);
+    this.publishState(cpuMs, (uploaded ? this.graph.lastUploadBytes : 0) + streamedBytes);
     if (bench && !bench.driving) this.scheduleBenchCheck();
 
     // One more tick to pick up input that arrived during this frame; it sleeps if there is none.

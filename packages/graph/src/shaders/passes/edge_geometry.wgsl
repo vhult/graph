@@ -8,6 +8,7 @@
 // short to see collapse to a point and rasterize nothing.
 #include "common/nodes.wgsl"
 #include "common/edges.wgsl"
+#include "common/sdf.wgsl"
 
 @group(2) @binding(0) var<storage, read> edgeScratch : array<u32>;
 @group(2) @binding(1) var<storage, read> edgeList : array<u32>;
@@ -19,6 +20,7 @@
 override EDGE_ARROWS : bool = false;
 override EDGE_PER_EDGE_STYLE : bool = false;
 override EDGE_PER_EDGE_COLOR : bool = false;
+override NODE_SHAPES : bool = false;
 
 struct VOut {
   @builtin(position) pos : vec4<f32>,
@@ -66,7 +68,12 @@ fn vs(@builtin(vertex_index) vi : u32, @builtin(instance_index) ii : u32) -> VOu
   if (EDGE_ARROWS && (style & EDGE_FLAG_DIRECTED) != 0u) {
     arrowLen = arrowLenPx(w);
     // Stop at the target's silhouette so the arrowhead touches the node.
-    b = b - full / fullLen * min(nodeRadiusPx(ij.y), fullLen * 0.5);
+    let dirAB = full / fullLen;
+    var reach = nodeRadiusPx(ij.y);
+    if (NODE_SHAPES) {
+      reach *= shapeReach(dirAB, nodeShape(ij.y));
+    }
+    b = b - dirAB * min(reach, fullLen * 0.5);
   }
 
   let d = b - a;

@@ -53,6 +53,10 @@ const STYLE_FLAG_RING : u32 = 0x10000000u;
 const STYLE_FLAG_LABEL : u32 = 0x20000000u;
 const STYLE_FLAG_PINNED : u32 = 0x40000000u;
 const NO_ICON : u32 = 0xFFFFu;
+const SHAPE_CIRCLE : u32 = 0u;
+const SHAPE_SQUARE : u32 = 1u;
+const SHAPE_HEXAGON : u32 = 2u;
+const INSTANCE_SHAPE_BITS : u32 = 15u;
 const EDGE_WIDTH_MASK : u32 = 0xFFu;
 const EDGE_CURVE_SHIFT : u32 = 8u;
 const EDGE_CURVE_MASK : u32 = 0xFu;
@@ -80,7 +84,7 @@ override USER_WORDS : u32 = 0u;
 // size 16, align 8
 struct NodeInstance {
   screenPos : vec2<f32>,          // @0  device px
-  radiusPx : f32,                 // @8  projected radius, device px
+  radiusPx : f32,                 // @8  projected radius, device px; low INSTANCE_SHAPE_BITS mantissa bits hold the shape
   color : u32,                    // @12  rgba8unorm
 }
 

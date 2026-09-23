@@ -2,7 +2,7 @@
 
 @group(2) @binding(1) var<uniform> label : LabelParams;
 
-const LABEL_GROUP_AREAS : f32 = 4.0;
+const LABEL_GROUP_SLOTS : f32 = 4.0;
 const LABEL_SLACK : f32 = 1.5;
 const LABEL_EDGE_SLACK : f32 = 0.5;
 const LABEL_FOREGROUND_RANK : f32 = 3.0e38;

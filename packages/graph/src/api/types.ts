@@ -7,6 +7,7 @@ export interface GraphOptions {
   pixelRatio?: number;
   /** Clear colour, straight alpha, 0..1. */
   background?: RGBA;
+  transparent?: boolean;
   /** Track the canvas CSS size with a ResizeObserver. Default: true. */
   autoResize?: boolean;
   /** Built-in pan/zoom controls. Default: true. */
@@ -80,7 +81,17 @@ export interface NodeData {
   colors?: Uint32Array | Uint8Array;
   /** World-unit diameters, one per node. */
   sizes?: Float32Array;
+  /** Shape per node, one of `NodeShape`. */
+  shapes?: Uint8Array;
 }
+
+export interface NodePositionStream {
+  readonly positions: Float32Array;
+  commit(): void;
+}
+
+export const NodeShape = { circle: 0, square: 1, hexagon: 2 } as const;
+export type NodeShape = (typeof NodeShape)[keyof typeof NodeShape];
 
 export interface EdgeData {
   count: number;

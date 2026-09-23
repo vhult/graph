@@ -12,6 +12,7 @@ export type MessageTotals = Record<string, [count: number, totalMs: number, maxM
 
 export interface InitOptions {
   background: RGBA;
+  transparent: boolean;
   controls: boolean;
   nodeScale: number;
   /** Device-px spacing below which nodes merge into LOD clusters; 0 disables. */
@@ -51,11 +52,12 @@ export type ToWorker =
   | { t: "wake" }
   /** Fallback input path (no SharedArrayBuffer): numbers only, same fields as a ring record. */
   | { t: "input"; r: [type: number, time: number, x: number, y: number, dx: number, dy: number, buttons: number, mods: number] }
-  | { t: "nodes"; count: number; positions?: Float32Array; colors?: Uint32Array; sizes?: Float32Array }
+  | { t: "nodes"; count: number; positions?: Float32Array; colors?: Uint32Array; sizes?: Float32Array; shapes?: Uint8Array }
   | { t: "edges"; count: number; indices?: Uint32Array; styles?: Uint32Array; colors?: Uint32Array }
   | { t: "nodeLabels"; labels: string[] }
   | { t: "edgeLabels"; labels: string[] }
   | { t: "updatePositions"; start: number; data: Float32Array }
+  | { t: "positionStream"; buffer: SharedArrayBuffer; count: number }
   | { t: "updateColor"; index: number; rgba: number }
   | { t: "view"; view: Partial<CameraView> }
   | { t: "fit"; padding: number }

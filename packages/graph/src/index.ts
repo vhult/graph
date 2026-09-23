@@ -17,6 +17,8 @@ export type {
   EdgeData,
   EdgeDebugMode,
   NodeData,
+  NodePositionStream,
   RGBA,
 } from "./api/types";
+export { NodeShape } from "./api/types";
 export { packRgba } from "./data/Pack";

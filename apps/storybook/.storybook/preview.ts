@@ -25,7 +25,9 @@ const preview: Preview = {
       storySort: {
         order: [
           "Demos",
-          ["Small graph"],
+          ["Small graph", "Galaxy", "Black hole"],
+          "Nodes",
+          ["Shapes"],
           "Graphs",
           ["Grid", "Communities", "Hierarchy", "Mesh", "Live layout"],
           "Stress",

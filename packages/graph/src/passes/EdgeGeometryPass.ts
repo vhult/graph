@@ -9,8 +9,9 @@ import { Stage, type FrameContext, type RenderNode } from "../gpu/FrameGraph";
 import { createShaderModule } from "../gpu/ShaderModules";
 import type { EdgeCullOptions, EdgeCullOutputs } from "./EdgeCullPass";
 
-/** Pipeline variant index: bit 0 = per-edge style, bit 1 = per-edge colour. */
+/** Pipeline variant index: bit 0 = per-edge style, bit 1 = per-edge colour, bit 2 = node shapes. */
 const VARIANTS = 4;
+const SHAPE_VARIANTS = 8;
 
 export class EdgeGeometryPass implements RenderNode {
   readonly stage = Stage.EDGE_GEOMETRY;
@@ -19,6 +20,7 @@ export class EdgeGeometryPass implements RenderNode {
   /** Set by the engine from what the store holds. */
   perEdgeStyle = false;
   perEdgeColor = false;
+  shapes = false;
 
   private bound: EdgeCullOutputs | null = null;
   private bindGroup: GPUBindGroup | null = null;
@@ -27,6 +29,7 @@ export class EdgeGeometryPass implements RenderNode {
     private readonly device: GPUDevice,
     private readonly layout: GPUBindGroupLayout,
     private readonly pipelines: readonly GPURenderPipeline[],
+    private readonly directed: boolean,
   ) {}
 
   static async create(device: GPUDevice, format: GPUTextureFormat, layouts: ContractLayouts, opts: EdgeCullOptions): Promise<EdgeGeometryPass> {
@@ -47,6 +50,7 @@ export class EdgeGeometryPass implements RenderNode {
         EDGE_DEBUG: opts.debug,
         EDGE_PER_EDGE_STYLE: v & 1,
         EDGE_PER_EDGE_COLOR: (v >> 1) & 1,
+        NODE_SHAPES: (v >> 2) & 1,
       };
       return device.createRenderPipelineAsync({
         label: `edges#${v}`,
@@ -56,8 +60,8 @@ export class EdgeGeometryPass implements RenderNode {
         primitive: { topology: "triangle-strip" },
       });
     };
-    const pipelines = await Promise.all(Array.from({ length: VARIANTS }, (_, v) => make(v)));
-    return new EdgeGeometryPass(device, layout, pipelines);
+    const pipelines = await Promise.all(Array.from({ length: opts.directed ? SHAPE_VARIANTS : VARIANTS }, (_, v) => make(v)));
+    return new EdgeGeometryPass(device, layout, pipelines, opts.directed);
   }
 
   /** (Re)bind the cull outputs; a no-op when unchanged. */
@@ -76,7 +80,7 @@ export class EdgeGeometryPass implements RenderNode {
 
   encode(pass: GPURenderPassEncoder, ctx: FrameContext): void {
     if (ctx.edgeCount === 0 || ctx.nodeCount === 0 || !this.bindGroup || !this.bound) return;
-    pass.setPipeline(this.pipelines[(this.perEdgeStyle ? 1 : 0) | (this.perEdgeColor ? 2 : 0)]!);
+    pass.setPipeline(this.pipelines[(this.perEdgeStyle ? 1 : 0) | (this.perEdgeColor ? 2 : 0) | (this.shapes && this.directed ? 4 : 0)]!);
     pass.setBindGroup(0, ctx.frameBindGroup);
     pass.setBindGroup(1, ctx.graphBindGroup);
     pass.setBindGroup(2, this.bindGroup);

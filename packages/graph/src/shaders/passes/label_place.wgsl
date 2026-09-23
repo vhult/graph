@@ -91,15 +91,18 @@ fn screenBox(b : vec4<f32>) -> vec4<f32> {
   return vec4<f32>(min(min(p0, p1), min(p2, p3)), max(max(p0, p1), max(p2, p3)));
 }
 
+fn labelSlots(b : vec4<f32>) -> f32 {
+  return (floor((b.z - b.x) / label.cellW) + 1.0) * (floor((b.w - b.y) / label.labelH) + 1.0);
+}
+
 struct Pick {
   level : u32,
-  area : f32,
+  slots : f32,
   box : vec4<f32>,
   ok : bool,
 }
 
 fn pickGroup(c : u32, levels : u32, edges : bool) -> Pick {
-  let limit = LABEL_GROUP_AREAS * label.labelArea;
   var p = Pick(0u, 0.0, vec4<f32>(0.0), false);
   for (var g = 0u; g <= levels; g++) {
     var b : vec4<f32>;
@@ -112,12 +115,12 @@ fn pickGroup(c : u32, levels : u32, edges : bool) -> Pick {
       return p;
     }
     let s = screenBox(b);
-    let a = (s.z - s.x) * (s.w - s.y);
-    if (g > 0u && a > limit) {
+    let n = labelSlots(s);
+    if (g > 0u && n > LABEL_GROUP_SLOTS) {
       break;
     }
-    p = Pick(g, a, s, true);
-    if (a > limit) {
+    p = Pick(g, n, s, true);
+    if (n > LABEL_GROUP_SLOTS) {
       break;
     }
   }
@@ -134,8 +137,8 @@ fn pushJob(counter : u32, base : u32, start : u32, count : u32) {
   atomicStore(&work[base + 2u * j + 1u], count);
 }
 
-fn wanted(area : f32, slack : f32) -> u32 {
-  return u32(max(1.0, ceil(area / label.labelArea * slack)));
+fn wanted(slots : f32, slack : f32) -> u32 {
+  return u32(max(1.0, floor(slots * slack)));
 }
 
 @compute @workgroup_size(64)
@@ -148,7 +151,7 @@ fn label_traverse(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_w
   if (!p.ok) {
     return;
   }
-  let k = wanted(p.area, LABEL_SLACK);
+  let k = wanted(p.slots, LABEL_SLACK);
   if (p.level == 0u && k > LABEL_TREE_TOP) {
     let start = c * CHUNK_SIZE;
     pushJob(WORK_JOBS, WORK_JOB_LIST, start, min(min(k, CHUNK_SIZE), label.nodeCount - start));
@@ -167,7 +170,7 @@ fn label_traverse_edges(@builtin(global_invocation_id) gid : vec3<u32>, @builtin
   if (!p.ok || edgeTreeLen[edgeTreeOffset(p.level) + (c >> p.level)] * frame.zoom * LABEL_EDGE_FIT < label.minEdgeW) {
     return;
   }
-  let k = wanted(p.area, LABEL_EDGE_SLACK);
+  let k = wanted(p.slots, LABEL_EDGE_SLACK);
   let base = WORK_JOB_LIST + 2u * label.chunks;
   if (p.level == 0u && k > LABEL_TREE_TOP) {
     let start = c * EDGE_CHUNK_SIZE;

@@ -24,6 +24,8 @@
 @group(2) @binding(2) var<storage, read_write> dispatchArgs : array<u32>; // scan_blocks
 @group(2) @binding(3) var<storage, read_write> instances : array<NodeInstance>; // cull_scatter
 
+override NODE_SHAPES : bool = false;
+
 var<workgroup> wgFlag : u32;
 var<workgroup> wgCells : array<atomic<u32>, CELLS_PER_CHUNK>;
 var<workgroup> wgTotal : atomic<u32>;
@@ -371,7 +373,11 @@ fn cull_scatter(
       } else {
         slot = scratch[offsetsAt(chunks) + chunkCell(b, c, chunks)] + wgRun[b] + field16(s.exclusive, b);
       }
-      instances[slot] = NodeInstance(worldToScreen(nodePos[i]), nodeRadiusPx(i) * scale, select(lodFade(nodeColor[i], count, t), nodeColor[i], labelled));
+      var r = nodeRadiusPx(i) * scale;
+      if (NODE_SHAPES) {
+        r = packInstanceShape(r, nodeShape(i));
+      }
+      instances[slot] = NodeInstance(worldToScreen(nodePos[i]), r, select(lodFade(nodeColor[i], count, t), nodeColor[i], labelled));
     }
     workgroupBarrier(); // every lane has read wgRun and scanVec2
     if (lid < NUM_BUCKETS) {

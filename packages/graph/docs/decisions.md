@@ -8,6 +8,31 @@ bandwidth), Edge 153, 1M nodes / 3M edges at fit unless stated.
 
 ---
 
+## 0042 — Streamed positions upload straight from shared memory
+
+`streamNodePositions()` hands the caller a triple-buffered shared slot; the
+render worker takes the latest one at frame start and writes it to the scatter
+staging buffer directly, skipping the store mirror, which is synced only when
+`setNodes` comes without positions. Copying the slot into the mirror first was
+slower than the old message path. Galaxy story, 1M nodes, every position every
+frame, AMD Radeon 890M, Edge 145 headless, one run each after a warm-up:
+render worker CPU mean / p95 — message 0.78 / 1.76 ms, stream via mirror
+1.25 / 1.51 ms, direct 0.74 / 0.94 ms. All three held 60 fps; main thread
+0.22–0.24 ms mean in each.
+
+## 0041 — Node shapes are SDFs, and the shape rides in the instance radius
+
+Square and hexagon (flat top and bottom) join the circle. Every shape fits the
+circle's `[-1,1]²` box, so the quad, the cull margin, chunk bounds and LOD are
+unchanged. Both SDFs are exact distances, so the analytic AA of 0005 still
+holds. The shape travels in the low 4 mantissa bits of `NodeInstance.radiusPx`
+(radius error ≤ 2⁻¹⁹), keeping the instance at 16 B. A `NODE_SHAPES` override
+compiles the `nodeStyle` read and the shape `switch` out when no node has a
+shape, so circle-only graphs run the same code as before. Arrowheads stop at
+the target's real boundary. Circle-only, communities 1M, AMD Radeon 890M,
+Edge 145 headless: frame 5.16 -> 5.04 ms, p95 10.19 -> 9.88 ms; cull.count
+0.054 -> 0.054 ms, cull.scatter 0.080 -> 0.086 ms. Mixed shapes not measured.
+
 ## 0040 — Chunk draw positions come from a table, not a multiply
 
 The NORMAL bucket scrambled chunks with `(chunk * stride) % chunks` in u32,
