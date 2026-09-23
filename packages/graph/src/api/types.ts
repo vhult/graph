@@ -7,6 +7,7 @@ export interface GraphOptions {
   pixelRatio?: number;
   /** Clear colour, straight alpha, 0..1. */
   background?: RGBA;
+  transparent?: boolean;
   /** Track the canvas CSS size with a ResizeObserver. Default: true. */
   autoResize?: boolean;
   /** Built-in pan/zoom controls. Default: true. */

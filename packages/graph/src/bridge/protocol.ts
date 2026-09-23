@@ -12,6 +12,7 @@ export type MessageTotals = Record<string, [count: number, totalMs: number, maxM
 
 export interface InitOptions {
   background: RGBA;
+  transparent: boolean;
   controls: boolean;
   nodeScale: number;
   /** Device-px spacing below which nodes merge into LOD clusters; 0 disables. */

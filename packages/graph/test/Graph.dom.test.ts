@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ToWorker } from "../src/bridge/protocol";
 import { Graph } from "../src/api/Graph";
-import type { GraphCaps } from "../src/api/types";
+import type { GraphCaps, GraphOptions } from "../src/api/types";
 
 const CAPS: GraphCaps = {
   timestampQuery: false,
@@ -39,11 +39,11 @@ class FakeWorker {
   }
 }
 
-async function createGraph(): Promise<Graph> {
+async function createGraph(options: GraphOptions = {}): Promise<Graph> {
   const canvas = document.createElement("canvas");
   Object.assign(canvas, { transferControlToOffscreen: () => ({}) });
   document.body.append(canvas);
-  return Graph.create(canvas, { autoResize: false });
+  return Graph.create(canvas, { autoResize: false, ...options });
 }
 
 describe("Graph.destroy", () => {
@@ -70,5 +70,13 @@ describe("Graph.destroy", () => {
 
     vi.advanceTimersByTime(1000);
     expect(worker.terminated).toBe(true);
+  });
+
+  it("sends the transparent option to the worker, off by default", async () => {
+    const init = (w: FakeWorker) => w.sent.find((m) => m.t === "init") as Extract<ToWorker, { t: "init" }>;
+    await createGraph();
+    expect(init(FakeWorker.last).options.transparent).toBe(false);
+    await createGraph({ transparent: true });
+    expect(init(FakeWorker.last).options.transparent).toBe(true);
   });
 });

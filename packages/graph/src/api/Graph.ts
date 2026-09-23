@@ -73,6 +73,7 @@ export class Graph {
       state: shared ? (state.buffer as SharedArrayBuffer) : null,
       options: {
         background: options.background ?? DEFAULT_BACKGROUND,
+        transparent: options.transparent ?? false,
         controls: options.controls ?? true,
         nodeScale: options.nodeScale ?? 1,
         edgeWidth: options.edgeWidth ?? 1,

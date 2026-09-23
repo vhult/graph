@@ -127,7 +127,7 @@ export class Engine {
     this.caps = readCaps(gpu.adapter, device, init.ring !== null, profiler.slotNames);
 
     this.context = init.canvas.getContext("webgpu") as GPUCanvasContext;
-    this.context.configure({ device, format, alphaMode: "opaque" });
+    this.context.configure({ device, format, alphaMode: init.options.transparent ? "premultiplied" : "opaque" });
 
     this.frameUniform = new FrameUniform(device, layouts.frame);
     graph.flush(); // create the (empty) graph buffers + bind group
