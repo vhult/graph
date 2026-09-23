@@ -351,13 +351,13 @@ export class Graph {
   /** Release the worker, the GPU device and all listeners. Idempotent. */
   destroy(): void {
     if (this.destroyed) return;
+    this.debugOverlay?.destroy();
     this.send({ t: "destroy" });
     this.destroyed = true;
     this.benchPending?.reject(new GraphError("destroyed", "Graph destroyed during benchmark"));
     this.benchPending = null;
     for (const p of this.snapshotPending.values()) p.reject(new GraphError("destroyed", "Graph destroyed"));
     this.snapshotPending.clear();
-    this.debugOverlay?.destroy();
     this.pointer.dispose();
     this.resizeObserver?.disconnect();
     // The worker closes itself after releasing the device; terminate as a backstop.
