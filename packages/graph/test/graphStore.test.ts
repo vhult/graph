@@ -42,4 +42,20 @@ describe("GraphStore", () => {
     s.setNodes(3, { shapes: new Uint8Array(3) });
     expect(s.hasNodeShapes).toBe(false);
   });
+
+  it("drawn bounds grow the node centres by the largest radius", () => {
+    const s = new GraphStore();
+    s.setNodes(3, { positions: new Float32Array([-40, 0, 0, 0, 40, 0]), sizes: new Float32Array([20, 10, 20]) });
+    expect(s.maxNodeSize).toBe(20);
+    expect(s.drawnBounds(1)).toEqual({ minX: -50, minY: -10, maxX: 50, maxY: 10 });
+    expect(s.drawnBounds(2)).toEqual({ minX: -60, minY: -20, maxX: 60, maxY: 20 });
+  });
+
+  it("new nodes without sizes count at the default size", () => {
+    const s = new GraphStore();
+    s.setNodes(2, { sizes: new Float32Array([1, 2]) });
+    expect(s.maxNodeSize).toBe(2);
+    s.setNodes(3, {});
+    expect(s.maxNodeSize).toBe(4);
+  });
 });

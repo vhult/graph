@@ -51,6 +51,7 @@ export class GraphStore {
   /** Per-edge colours were supplied; otherwise every edge uses the global tint. */
   hasEdgeColors = false;
   hasNodeShapes = false;
+  maxNodeSize = 0;
   /** Label text per node / edge, in the user's order; null when none were set. */
   nodeLabels: readonly string[] | null = null;
   edgeLabels: readonly string[] | null = null;
@@ -85,6 +86,7 @@ export class GraphStore {
    */
   setNodes(count: number, arrays: NodeArrays): void {
     const resized = count !== this.nodeCount;
+    const grown = count > this.nodeCount;
     this.nodeCount = count;
     const ch = this.channels;
 
@@ -94,8 +96,13 @@ export class GraphStore {
     if (arrays.colors) this.replace(ch.nodeColor, arrays.colors);
     else if (resized) this.replace(ch.nodeColor, resizeU32(ch.nodeColor.data as Uint32Array, count, DEFAULT_NODE_COLOR));
 
-    if (arrays.sizes) this.replace(ch.nodeSize, packNodeSizes(arrays.sizes, new Uint32Array(count)));
-    else if (resized) this.replace(ch.nodeSize, resizeU32(ch.nodeSize.data as Uint32Array, count, toHalfBits(DEFAULT_NODE_SIZE)));
+    if (arrays.sizes) {
+      this.replace(ch.nodeSize, packNodeSizes(arrays.sizes, new Uint32Array(count)));
+      this.maxNodeSize = arrays.sizes.reduce((m, s) => Math.max(m, s), 0);
+    } else if (resized) {
+      this.replace(ch.nodeSize, resizeU32(ch.nodeSize.data as Uint32Array, count, toHalfBits(DEFAULT_NODE_SIZE)));
+      if (grown) this.maxNodeSize = Math.max(this.maxNodeSize, DEFAULT_NODE_SIZE);
+    }
 
     if (arrays.shapes) {
       this.replace(ch.nodeStyle, packNodeShapes(arrays.shapes, new Uint32Array(count)));
@@ -105,6 +112,12 @@ export class GraphStore {
     if (resized) this.replace(ch.nodeState, resizeU32(ch.nodeState.data as Uint32Array, count, 0));
 
     if (arrays.positions || resized) this.computeBounds();
+  }
+
+  drawnBounds(nodeScale: number): Bounds {
+    const r = this.maxNodeSize * nodeScale * 0.5;
+    const b = this.bounds;
+    return { minX: b.minX - r, minY: b.minY - r, maxX: b.maxX + r, maxY: b.maxY + r };
   }
 
   /**

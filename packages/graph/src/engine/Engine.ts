@@ -294,7 +294,7 @@ export class Engine {
 
   fit(padding: number): void {
     this.controls.cancelZoom();
-    this.camera.fit(this.store.bounds, padding * this.pixelRatio);
+    this.camera.fit(this.store.drawnBounds(this.frameInputs.nodeScale), padding * this.pixelRatio);
     this.markDirty(Dirty.CAMERA);
   }
 
