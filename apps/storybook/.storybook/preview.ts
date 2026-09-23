@@ -26,6 +26,8 @@ const preview: Preview = {
         order: [
           "Demos",
           ["Small graph"],
+          "Nodes",
+          ["Shapes"],
           "Graphs",
           ["Grid", "Communities", "Hierarchy", "Mesh", "Live layout"],
           "Stress",
