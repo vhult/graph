@@ -58,6 +58,7 @@ export interface GraphStory<A extends GraphArgs> {
   edgeStyle?: (a: A) => number | undefined;
   /** After every upload, e.g. to (re)start an animation. */
   onLoad?: (graph: Graph, g: GraphDataset, a: A) => void;
+  backdrop?: string;
   /** Args handled live, without reloading anything. */
   onUpdate?: (graph: Graph, a: A, prev: A) => void;
   /** Label text for the loaded data; default: every node numbered, no edge labels. */
@@ -141,6 +142,7 @@ export function renderGraph<A extends GraphArgs>(spec: GraphStory<A>) {
       }),
       setup: (graph, a, hud, r) => {
         root = r;
+        if (spec.backdrop) r.style.background = spec.backdrop;
         graph.setNodeScale(a.nodeScale);
         reload(graph, a, hud);
       },

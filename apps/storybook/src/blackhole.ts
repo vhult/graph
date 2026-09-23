@@ -1,24 +1,29 @@
 import { rng, type GraphDataset } from "@vhult/graph-bench";
-import { kelvin, word } from "./galaxy";
 
 export const HOLE = {
-  inner: 6,
-  outer: 22,
-  starRadius: 200,
-  starCone: 0.22,
-  viewX: 36,
-  viewY: 22,
+  inner: 3.4,
+  outer: 24,
+  body: 11,
+  wispShare: 0.1,
+  frame: 22,
   rows: 240,
   samples: 512,
   scale: 30,
-  orbit: 23,
-  starShare: 0.12,
+  orbit: 12,
   ringShare: 0.25,
+  clumpShare: 0.7,
+  clumpWidth: 0.25,
+  clumpLength: 0.06,
+  shearTime: 30,
   falloff: 30,
 } as const;
 
 const CRITICAL = 3 * Math.sqrt(3);
 const TAU = Math.PI * 2;
+
+const HOT: [number, number, number] = [255, 248, 244];
+const WARM: [number, number, number] = [246, 196, 184];
+const COOL: [number, number, number] = [196, 120, 108];
 
 export interface BlackHole {
   graph: GraphDataset;
@@ -66,9 +71,8 @@ function row(r: number, out: Float32Array, at: number): void {
 
 export function lensTable(): Float32Array {
   const h = HOLE;
-  const t = new Float32Array((h.rows + 1) * h.samples * 2);
+  const t = new Float32Array(h.rows * h.samples * 2);
   for (let k = 0; k < h.rows; k++) row(h.inner * Math.pow(h.outer / h.inner, k / (h.rows - 1)), t, k * h.samples * 2);
-  row(h.starRadius, t, h.rows * h.samples * 2);
   return t;
 }
 
@@ -104,27 +108,17 @@ fn rowB(r : u32, psi : f32) -> f32 {
 }
 
 fn nodePosition(i : u32, t : f32) -> vec2<f32> {
-  let a = data[i * 4u];
-  let angle = data[i * 4u + 1u];
-  let k = u32(data[i * 4u + 2u]);
-  let star = data[i * 4u + 3u] > 0.5;
+  let a = data[i * 3u];
+  let phi = data[i * 3u + 1u] + t * param(1u) * pow(a, -1.5);
+  let k = u32(data[i * 3u + 2u]);
   let tilt = param(0u);
   let o = vec3<f32>(sin(tilt), 0.0, cos(tilt));
-  let e1 = vec3<f32>(0.0, 1.0, 0.0);
   let e2 = vec3<f32>(-cos(tilt), 0.0, sin(tilt));
+  let p = vec3<f32>(cos(phi), sin(phi), 0.0);
   let rows = u32(param(4u));
-  var p : vec3<f32>;
-  var rowF : f32;
-  if (star) {
-    p = -o * cos(a) + sin(a) * (cos(angle) * e1 + sin(angle) * e2);
-    rowF = f32(rows);
-  } else {
-    let phi = angle + t * param(1u) * pow(a, -1.5);
-    p = vec3<f32>(cos(phi), sin(phi), 0.0);
-    rowF = log(a / param(5u)) / log(param(6u) / param(5u)) * f32(rows - 1u);
-  }
+  let rowF = log(a / param(5u)) / log(param(6u) / param(5u)) * f32(rows - 1u);
   let gamma = acos(clamp(dot(o, p), -1.0, 1.0));
-  var d = vec2<f32>(dot(p, e1), dot(p, e2));
+  var d = vec2<f32>(p.y, dot(p, e2));
   let dl = length(d);
   d = select(vec2<f32>(1.0, 0.0), d / dl, dl > 1e-6);
   var psi = gamma;
@@ -134,8 +128,8 @@ fn nodePosition(i : u32, t : f32) -> vec2<f32> {
   } else if (k == 2u) {
     psi = TAU + gamma;
   }
-  let r0 = u32(clamp(floor(rowF), 0.0, f32(rows)));
-  let r1 = min(r0 + 1u, select(rows - 1u, rows, star));
+  let r0 = u32(clamp(floor(rowF), 0.0, f32(rows - 1u)));
+  let r1 = min(r0 + 1u, rows - 1u);
   let b = mix(rowB(r0, psi), rowB(r1, psi), fract(rowF));
   return d * b * param(7u);
 }
@@ -159,23 +153,13 @@ function rowB(table: Float32Array, r: number, psi: number): number {
   return table[base + lo * 2 + 1]! + (table[base + hi * 2 + 1]! - table[base + lo * 2 + 1]!) * f;
 }
 
-export function place(table: Float32Array, a: number, angle: number, k: number, star: boolean, tilt: number): [number, number] {
+export function place(table: Float32Array, a: number, phi: number, k: number, tilt: number): [number, number] {
   const h = HOLE;
-  const o = [Math.sin(tilt), 0, Math.cos(tilt)];
-  const e2 = [-Math.cos(tilt), 0, Math.sin(tilt)];
-  let p: number[];
-  let rowF: number;
-  if (star) {
-    const s = Math.sin(a);
-    p = [-o[0]! * Math.cos(a) + s * Math.sin(angle) * e2[0]!, s * Math.cos(angle), -o[2]! * Math.cos(a) + s * Math.sin(angle) * e2[2]!];
-    rowF = h.rows;
-  } else {
-    p = [Math.cos(angle), Math.sin(angle), 0];
-    rowF = (Math.log(a / h.inner) / Math.log(h.outer / h.inner)) * (h.rows - 1);
-  }
-  const gamma = Math.acos(Math.max(-1, Math.min(1, o[0]! * p[0]! + o[2]! * p[2]!)));
-  let dx = p[1]!;
-  let dy = p[0]! * e2[0]! + p[2]! * e2[2]!;
+  const px = Math.cos(phi);
+  const py = Math.sin(phi);
+  const gamma = Math.acos(Math.max(-1, Math.min(1, Math.sin(tilt) * px)));
+  let dx = py;
+  let dy = -Math.cos(tilt) * px;
   const dl = Math.hypot(dx, dy);
   if (dl > 1e-6) {
     dx /= dl;
@@ -190,8 +174,9 @@ export function place(table: Float32Array, a: number, angle: number, k: number, 
     dx = -dx;
     dy = -dy;
   } else if (k === 2) psi = TAU + gamma;
-  const r0 = Math.max(0, Math.min(h.rows, Math.floor(rowF)));
-  const r1 = Math.min(r0 + 1, star ? h.rows : h.rows - 1);
+  const rowF = (Math.log(a / h.inner) / Math.log(h.outer / h.inner)) * (h.rows - 1);
+  const r0 = Math.max(0, Math.min(h.rows - 1, Math.floor(rowF)));
+  const r1 = Math.min(r0 + 1, h.rows - 1);
   const w = rowF - Math.floor(rowF);
   const b = rowB(table, r0, psi) * (1 - w) + rowB(table, r1, psi) * w;
   return [dx * b * h.scale, dy * b * h.scale];
@@ -202,75 +187,77 @@ export function holeParams(tiltDeg: number, tableOffset: number): number[] {
   return [(tiltDeg * Math.PI) / 180, h.orbit, tableOffset, h.samples, h.rows, h.inner, h.outer, h.scale];
 }
 
-function diskRadius(r: () => number): number {
-  const h = HOLE;
-  for (;;) {
-    const x = h.inner + (h.outer - h.inner) * Math.pow(r(), 1.4);
-    const streak = 0.55 + 0.45 * Math.sin(x * 7.3) * Math.sin(x * 2.1 + 1.3);
-    if (r() < streak) return x;
-  }
+function mix(a: [number, number, number], b: [number, number, number], f: number): [number, number, number] {
+  return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f];
+}
+
+function word(rgb: [number, number, number], alpha: number): number {
+  const c = (v: number) => Math.max(0, Math.min(255, Math.round(v)));
+  return (c(rgb[0]) | (c(rgb[1]) << 8) | (c(rgb[2]) << 16) | (c(alpha * 255) << 24)) >>> 0;
+}
+
+function gauss(r: () => number): number {
+  return Math.sqrt(-2 * Math.log(Math.max(r(), 1e-12))) * Math.cos(TAU * r());
 }
 
 export function blackHole(total: number, tiltDeg: number, seed = 1): BlackHole {
   const h = HOLE;
   const r = rng(seed);
-  const starImages = Math.round(total * h.starShare);
-  const disk = Math.floor((total - starImages) / (2 + h.ringShare));
+  const disk = Math.floor(total / (2 + h.ringShare));
   const rings = Math.floor(disk * h.ringShare);
-  const count = starImages + disk * 2 + rings;
+  const count = disk * 2 + rings;
   const table = lensTable();
-  const tableOffset = count * 4;
+  const tableOffset = count * 3;
   const data = new Float32Array(tableOffset + table.length);
   data.set(table, tableOffset);
   const positions = new Float32Array(count * 2);
   const colors = new Uint32Array(count);
   const sizes = new Float32Array(count);
   const tilt = (tiltDeg * Math.PI) / 180;
-  const peak = Math.pow(h.inner * 1.36, -0.75) * Math.pow(1 - Math.sqrt(6 / (h.inner * 1.36)), 0.25);
+  const span = h.outer - h.inner;
   let n = 0;
-  const inView = (x: number, y: number) => Math.abs(x) <= h.viewX * h.scale && Math.abs(y) <= h.viewY * h.scale;
-  const add = (a: number, angle: number, k: number, star: boolean, color: number, size: number) => {
-    const [x, y] = place(table, a, angle, k, star, tilt);
-    if (star && !inView(x, y)) return;
-    data[n * 4] = a;
-    data[n * 4 + 1] = angle;
-    data[n * 4 + 2] = k;
-    data[n * 4 + 3] = star ? 1 : 0;
+  const add = (a: number, phi: number, k: number, color: number, size: number) => {
+    data[n * 3] = a;
+    data[n * 3 + 1] = phi;
+    data[n * 3 + 2] = k;
+    const [x, y] = place(table, a, phi, k, tilt);
     positions[n * 2] = x;
     positions[n * 2 + 1] = y;
     colors[n] = color;
     sizes[n] = size;
     n++;
   };
+  const radius = () =>
+    r() < h.wispShare ? h.body + (h.outer - h.body) * Math.pow(r(), 1.5) : h.inner + (h.body - h.inner) * Math.pow(r(), 1.6);
+  let clumpR = 0;
+  let clumpPhi = 0;
+  let clumpLeft = 0;
   for (let i = 0; i < disk; i++) {
-    const a = diskRadius(r);
-    const phi = r() * TAU;
-    const heat = Math.min(1, (Math.pow(a, -0.75) * Math.pow(1 - Math.sqrt(6 / a), 0.25)) / peak);
-    const rgb = kelvin(1700 + 4300 * heat * (0.8 + 0.2 * r()));
-    const alpha = 0.1 + 0.28 * heat;
-    const size = 1 + 1.2 * r();
-    add(a, phi, 0, false, word(rgb, alpha), size);
-    add(a, phi, 1, false, word(rgb, alpha * 0.8), size * 0.9);
-    if (i < rings) add(a, phi, 2, false, word(rgb, alpha * 0.7), 0.8);
-  }
-  const star = (eps: number, k: number) => {
-    const beta = r() * TAU;
-    const rgb = kelvin(4000 + 9000 * r());
-    const alpha = (0.35 + 0.55 * Math.pow(r(), 2)) * (k === 1 ? 0.75 : 1);
-    add(eps, beta, k, true, word(rgb, alpha), 1 + 2.2 * Math.pow(r(), 4));
-  };
-  const first = n;
-  while (n - first < starImages - 1) {
-    const eps = Math.acos(1 - 2 * r());
-    if (r() * (1 + (eps / h.starCone) ** 2) > 1) continue;
-    star(eps, 0);
-    star(eps, 1);
+    let a: number;
+    let phi: number;
+    if (r() < h.clumpShare) {
+      if (clumpLeft-- <= 0) {
+        clumpR = radius();
+        clumpPhi = r() * TAU;
+        clumpLeft = 20 + Math.floor(r() * 200);
+      }
+      a = Math.min(h.outer, Math.max(h.inner, clumpR + gauss(r) * h.clumpWidth));
+      phi = clumpPhi + gauss(r) * h.clumpLength + h.shearTime * h.orbit * Math.pow(a, -1.5);
+    } else {
+      a = radius();
+      phi = r() * TAU;
+    }
+    const f = (a - h.inner) / span;
+    const heat = Math.pow(Math.max(0, 1 - (a - h.inner) / (h.body - h.inner)), 1.6) * 0.9 + 0.1 * (1 - f);
+    const rgb = f < 0.25 ? mix(HOT, WARM, f / 0.25) : mix(WARM, COOL, Math.min(1, (f - 0.25) / 0.75));
+    const alpha = 0.015 + 0.2 * heat;
+    const size = 2.5 + 2 * r();
+    add(a, phi, 0, word(rgb, alpha), size);
+    add(a, phi, 1, word(rgb, alpha * 0.9), size);
+    if (i < rings) add(a, phi, 2, word(HOT, 0.12), 1.2);
   }
   return {
-    graph: {
-      nodes: { count: n, positions: positions.slice(0, n * 2), colors: colors.slice(0, n), sizes: sizes.slice(0, n) },
-      edges: { count: 0, indices: new Uint32Array(0) },
-    },
+    graph: { nodes: { count: n, positions, colors, sizes }, edges: { count: 0, indices: new Uint32Array(0) } },
     data,
     tableOffset,
   };
