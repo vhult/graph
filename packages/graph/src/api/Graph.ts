@@ -182,8 +182,9 @@ export class Graph {
     const positions = data.positions && take(data.positions, n * 2, "positions", opts, transfer);
     const colors = data.colors && take(asWords(data.colors), n, "colors", opts, transfer);
     const sizes = data.sizes && take(data.sizes, n, "sizes", opts, transfer);
+    const shapes = data.shapes && take(data.shapes, n, "shapes", opts, transfer);
     this.nodeCount = n;
-    this.send({ t: "nodes", count: n, positions, colors, sizes }, transfer);
+    this.send({ t: "nodes", count: n, positions, colors, sizes, shapes }, transfer);
     if (t0) this.apiEnd("setNodes", t0);
   }
 
@@ -244,6 +245,10 @@ export class Graph {
 
   setNodeSizes(sizes: Float32Array, opts?: CopyOption): void {
     this.setNodes({ count: this.nodeCount, sizes }, opts);
+  }
+
+  setNodeShapes(shapes: Uint8Array, opts?: CopyOption): void {
+    this.setNodes({ count: this.nodeCount, shapes }, opts);
   }
 
   /** Partial update of positions for nodes `start .. start + data.length / 2`. Dirty-range tracked. */
@@ -475,7 +480,7 @@ function isDetached(buf: ArrayBufferLike): boolean {
  * Validate length, then either copy or mark the backing buffer for transfer.
  * Transfer detaches the WHOLE backing buffer, including other views over it.
  */
-function take<T extends Float32Array | Uint32Array>(arr: T, expected: number, name: string, opts: CopyOption | undefined, transfer: Transferable[]): T {
+function take<T extends Float32Array | Uint32Array | Uint8Array>(arr: T, expected: number, name: string, opts: CopyOption | undefined, transfer: Transferable[]): T {
   if (isDetached(arr.buffer)) {
     throw new GraphError("detached-array", `${name}: array is detached (it was transferred earlier). Pass { copy: true } to keep using it.`);
   }

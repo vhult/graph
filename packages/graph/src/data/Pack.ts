@@ -1,4 +1,5 @@
 /** CPU-side packing helpers matching the GPU layouts in `Layouts.ts`. */
+import { DEFAULT_NODE_STYLE } from "./Layouts";
 
 const f32 = new Float32Array(1);
 const u32 = new Uint32Array(f32.buffer);
@@ -40,6 +41,11 @@ export function packNodeSizes(sizes: Float32Array, out: Uint32Array): Uint32Arra
   } else {
     for (let i = 0; i < n; i++) out[i] = toHalfBits(sizes[i]!);
   }
+  return out;
+}
+
+export function packNodeShapes(shapes: Uint8Array, out: Uint32Array): Uint32Array {
+  for (let i = 0; i < out.length; i++) out[i] = (DEFAULT_NODE_STYLE | shapes[i]!) >>> 0;
   return out;
 }
 

@@ -433,6 +433,9 @@ export class Engine {
     ctx.dirty = this.dirty;
     this.passes.edges.perEdgeStyle = this.store.hasEdgeStyles;
     this.passes.edges.perEdgeColor = this.store.hasEdgeColors;
+    this.passes.cull.shapes = this.store.hasNodeShapes;
+    this.passes.nodes.shapes = this.store.hasNodeShapes;
+    this.passes.edges.shapes = this.store.hasNodeShapes;
 
     const device = this.gpu.device;
     const encoder = device.createCommandEncoder();

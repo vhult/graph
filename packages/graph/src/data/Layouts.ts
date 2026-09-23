@@ -162,6 +162,10 @@ export const CONSTANTS = {
   STYLE_FLAG_LABEL: 1 << 29,
   STYLE_FLAG_PINNED: 1 << 30,
   NO_ICON: 0xffff,
+  SHAPE_CIRCLE: 0,
+  SHAPE_SQUARE: 1,
+  SHAPE_HEXAGON: 2,
+  INSTANCE_SHAPE_BITS: 0xf,
   // edgeStyle fields
   EDGE_WIDTH_MASK: 0xff,
   EDGE_CURVE_SHIFT: 8,
@@ -189,7 +193,7 @@ export const DEFAULT_NODE_STYLE = CONSTANTS.NO_ICON << CONSTANTS.STYLE_ICON_SHIF
  */
 export const NODE_INSTANCE = defineStruct("NodeInstance", [
   { name: "screenPos", type: "vec2<f32>", doc: "device px" },
-  { name: "radiusPx", type: "f32", doc: "projected radius, device px" },
+  { name: "radiusPx", type: "f32", doc: "projected radius, device px; low INSTANCE_SHAPE_BITS mantissa bits hold the shape" },
   { name: "color", type: "u32", doc: "rgba8unorm" },
 ] as const);
 

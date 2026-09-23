@@ -19,4 +19,5 @@ export type {
   NodeData,
   RGBA,
 } from "./api/types";
+export { NodeShape } from "./api/types";
 export { packRgba } from "./data/Pack";

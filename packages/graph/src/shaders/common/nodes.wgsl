@@ -18,3 +18,15 @@ fn sizeRadiusPx(size : f32) -> f32 {
 fn nodeRadiusPx(i : u32) -> f32 {
   return sizeRadiusPx(unpack2x16float(nodeSize[i]).x);
 }
+
+fn nodeShape(i : u32) -> u32 {
+  return nodeStyle[i] & STYLE_SHAPE_MASK;
+}
+
+fn packInstanceShape(radiusPx : f32, shape : u32) -> f32 {
+  return bitcast<f32>((bitcast<u32>(radiusPx) & ~INSTANCE_SHAPE_BITS) | (shape & INSTANCE_SHAPE_BITS));
+}
+
+fn instanceShape(radiusPx : f32) -> u32 {
+  return bitcast<u32>(radiusPx) & INSTANCE_SHAPE_BITS;
+}

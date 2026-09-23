@@ -7,7 +7,7 @@
  */
 import { DirtyRanges } from "./DirtyRanges";
 import { DEFAULT_NODE_STYLE, GRAPH_BINDINGS, GRAPH_BUFFER_WORDS, type GraphBufferName } from "./Layouts";
-import { packNodeSizes, toHalfBits } from "./Pack";
+import { packNodeShapes, packNodeSizes, toHalfBits } from "./Pack";
 
 export interface Channel {
   /** CPU mirror, `elementCount * words` 32-bit words. */
@@ -31,6 +31,7 @@ export interface NodeArrays {
   positions?: Float32Array;
   colors?: Uint32Array;
   sizes?: Float32Array;
+  shapes?: Uint8Array;
 }
 
 export interface EdgeArrays {
@@ -49,6 +50,7 @@ export class GraphStore {
   hasEdgeStyles = false;
   /** Per-edge colours were supplied; otherwise every edge uses the global tint. */
   hasEdgeColors = false;
+  hasNodeShapes = false;
   /** Label text per node / edge, in the user's order; null when none were set. */
   nodeLabels: readonly string[] | null = null;
   edgeLabels: readonly string[] | null = null;
@@ -95,10 +97,12 @@ export class GraphStore {
     if (arrays.sizes) this.replace(ch.nodeSize, packNodeSizes(arrays.sizes, new Uint32Array(count)));
     else if (resized) this.replace(ch.nodeSize, resizeU32(ch.nodeSize.data as Uint32Array, count, toHalfBits(DEFAULT_NODE_SIZE)));
 
-    if (resized) {
-      this.replace(ch.nodeStyle, resizeU32(ch.nodeStyle.data as Uint32Array, count, DEFAULT_NODE_STYLE));
-      this.replace(ch.nodeState, resizeU32(ch.nodeState.data as Uint32Array, count, 0));
-    }
+    if (arrays.shapes) {
+      this.replace(ch.nodeStyle, packNodeShapes(arrays.shapes, new Uint32Array(count)));
+      this.hasNodeShapes = arrays.shapes.some((s) => s !== 0);
+    } else if (resized) this.replace(ch.nodeStyle, resizeU32(ch.nodeStyle.data as Uint32Array, count, DEFAULT_NODE_STYLE));
+
+    if (resized) this.replace(ch.nodeState, resizeU32(ch.nodeState.data as Uint32Array, count, 0));
 
     if (arrays.positions || resized) this.computeBounds();
   }

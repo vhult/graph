@@ -51,7 +51,7 @@ export type ToWorker =
   | { t: "wake" }
   /** Fallback input path (no SharedArrayBuffer): numbers only, same fields as a ring record. */
   | { t: "input"; r: [type: number, time: number, x: number, y: number, dx: number, dy: number, buttons: number, mods: number] }
-  | { t: "nodes"; count: number; positions?: Float32Array; colors?: Uint32Array; sizes?: Float32Array }
+  | { t: "nodes"; count: number; positions?: Float32Array; colors?: Uint32Array; sizes?: Float32Array; shapes?: Uint8Array }
   | { t: "edges"; count: number; indices?: Uint32Array; styles?: Uint32Array; colors?: Uint32Array }
   | { t: "nodeLabels"; labels: string[] }
   | { t: "edgeLabels"; labels: string[] }

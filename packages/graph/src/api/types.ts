@@ -80,7 +80,12 @@ export interface NodeData {
   colors?: Uint32Array | Uint8Array;
   /** World-unit diameters, one per node. */
   sizes?: Float32Array;
+  /** Shape per node, one of `NodeShape`. */
+  shapes?: Uint8Array;
 }
+
+export const NodeShape = { circle: 0, square: 1, hexagon: 2 } as const;
+export type NodeShape = (typeof NodeShape)[keyof typeof NodeShape];
 
 export interface EdgeData {
   count: number;

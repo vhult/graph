@@ -8,6 +8,18 @@ bandwidth), Edge 153, 1M nodes / 3M edges at fit unless stated.
 
 ---
 
+## 0041 — Node shapes are SDFs, and the shape rides in the instance radius
+
+Square and hexagon (flat top and bottom) join the circle. Every shape fits the
+circle's `[-1,1]²` box, so the quad, the cull margin, chunk bounds and LOD are
+unchanged. Both SDFs are exact distances, so the analytic AA of 0005 still
+holds. The shape travels in the low 4 mantissa bits of `NodeInstance.radiusPx`
+(radius error ≤ 2⁻¹⁹), keeping the instance at 16 B. A `NODE_SHAPES` override
+compiles the `nodeStyle` read and the shape `switch` out when no node has a
+shape, so circle-only graphs run the same code as before. Arrowheads stop at
+the target's real boundary. Not measured yet: frame and p95, circle-only
+against 0040 and mixed shapes, still to be added.
+
 ## 0040 — Chunk draw positions come from a table, not a multiply
 
 The NORMAL bucket scrambled chunks with `(chunk * stride) % chunks` in u32,
