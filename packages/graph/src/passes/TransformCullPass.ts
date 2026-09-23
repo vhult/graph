@@ -14,7 +14,7 @@
  */
 import { GraphError } from "../api/errors";
 import {
-  chunkCount, cullCellCount, cullScratchWords, drawStride, ENGINE_CONSTANTS, NODE_INSTANCE } from "../data/Layouts";
+  chunkCount, cullCellCount, cullScratchWords, drawPositions, drawTableWordOffset, ENGINE_CONSTANTS, NODE_INSTANCE } from "../data/Layouts";
 import { Dirty } from "../engine/Dirty";
 import type { ContractLayouts } from "../gpu/BindLayouts";
 import { Stage, type ComputeNode, type FrameContext } from "../gpu/FrameGraph";
@@ -56,8 +56,7 @@ export class TransformCullPass implements ComputeNode {
   private sx = 0;
   private sy = 0;
   /** Chunk count the draw stride in the state buffer was written for (-1: stale). */
-  private strideChunks = -1;
-  private readonly strideWord = new Uint32Array(1);
+  private tableChunks = -1;
   private readonly maxGroupsX: number;
 
   private constructor(
@@ -133,7 +132,7 @@ export class TransformCullPass implements ComputeNode {
     this.capacity = cap;
     this.groups = null; // rebuilt in prepare()
     this.boundsStale = true;
-    this.strideChunks = -1;
+    this.tableChunks = -1;
 
   }
 
@@ -153,10 +152,9 @@ export class TransformCullPass implements ComputeNode {
       };
     }
     const chunks = chunkCount(ctx.nodeCount);
-    if (chunks !== this.strideChunks) {
-      this.strideWord[0] = drawStride(chunks);
-      this.device.queue.writeBuffer(out.scratch, ENGINE_CONSTANTS.SCRATCH_DRAW_STRIDE * 4, this.strideWord);
-      this.strideChunks = chunks;
+    if (chunks !== this.tableChunks) {
+      this.device.queue.writeBuffer(out.scratch, drawTableWordOffset(ctx.nodeCount) * 4, drawPositions(chunks));
+      this.tableChunks = chunks;
     }
     this.gx = Math.min(chunks, this.maxGroupsX);
     this.gy = Math.ceil(chunks / this.gx);

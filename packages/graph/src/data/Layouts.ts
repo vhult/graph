@@ -338,7 +338,6 @@ export function edgeScratchWords(edgeCount: number): number {
  *   [SCRATCH_DRAW_ARGS]   NUM_BUCKETS × drawIndirect args (4 words each)
  *   [SCRATCH_BUCKET_BASE] NUM_BUCKETS × first instance slot of each bucket
  *   [SCRATCH_LIST_COUNT]  number of chunks with ≥ 1 visible node
- *   [SCRATCH_DRAW_STRIDE] chunk scramble multiplier (written by the CPU)
  *   [SCRATCH_CHUNKS]      (S + NUM_BUCKETS − 1)·C cell counts, in draw order (see cull_state.wgsl),
  *                         the same number of cell offsets (= draw slots),
  *                         ceil(cells / CHUNK_SIZE) scan block sums,
@@ -365,7 +364,6 @@ export const ENGINE_CONSTANTS = {
   SCRATCH_DRAW_ARGS: 0,
   SCRATCH_BUCKET_BASE: 16,
   SCRATCH_LIST_COUNT: 20,
-  SCRATCH_DRAW_STRIDE: 21,
   SCRATCH_CHUNKS: 32,
   /** Radix sort digit width and bin count. */
   RADIX_BITS: 4,
@@ -387,11 +385,15 @@ export function cullScratchWords(nodeCount: number): number {
   return labelledWordOffset(nodeCount) + Math.ceil(nodeCount / 32);
 }
 
-export function labelledWordOffset(nodeCount: number): number {
+export function drawTableWordOffset(nodeCount: number): number {
   const k = ENGINE_CONSTANTS;
   const c = chunkCount(nodeCount);
   const cells = cullCellCount(nodeCount);
   return k.SCRATCH_CHUNKS + 2 * cells + Math.ceil(cells / k.CHUNK_SIZE) + 2 * c + k.CHUNK_BOUNDS_WORDS * c;
+}
+
+export function labelledWordOffset(nodeCount: number): number {
+  return drawTableWordOffset(nodeCount) + chunkCount(nodeCount);
 }
 
 /** Scan cells: DRAW segments per chunk for BUCKET_NORMAL + one per other bucket. */
@@ -418,6 +420,13 @@ export function drawStride(chunks: number): number {
     [s0, s1] = [s1, s0 - q * s1];
   }
   return ((s0 % chunks) + chunks) % chunks;
+}
+
+export function drawPositions(chunks: number): Uint32Array {
+  const stride = drawStride(chunks);
+  const out = new Uint32Array(chunks);
+  for (let c = 0; c < chunks; c++) out[c] = (c * stride) % chunks;
+  return out;
 }
 
 /**

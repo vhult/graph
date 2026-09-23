@@ -198,7 +198,6 @@ const CHUNK_BOUNDS_WORDS : u32 = 6u;
 const SCRATCH_DRAW_ARGS : u32 = 0u;
 const SCRATCH_BUCKET_BASE : u32 = 16u;
 const SCRATCH_LIST_COUNT : u32 = 20u;
-const SCRATCH_DRAW_STRIDE : u32 = 21u;
 const SCRATCH_CHUNKS : u32 = 32u;
 const RADIX_BITS : u32 = 4u;
 const RADIX_BINS : u32 = 16u;

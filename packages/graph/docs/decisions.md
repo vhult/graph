@@ -8,6 +8,20 @@ bandwidth), Edge 153, 1M nodes / 3M edges at fit unless stated.
 
 ---
 
+## 0040 — Chunk draw positions come from a table, not a multiply
+
+The NORMAL bucket scrambled chunks with `(chunk * stride) % chunks` in u32,
+which wraps above 65,536 chunks (67.1M nodes). Two chunks then share a draw
+position: at 90M, 15,580 chunks collided and 74,046,080 of 90,000,000 nodes were
+drawn; cells no chunk wrote kept stale words, so reusing a buffer (90M then
+102M) gave a 2.2B instance count and a GPU hang. The CPU now builds the same
+positions once per chunk count (exact in f64) and writes them into the cull
+state after the chunk bounds; `drawIndex` reads `table[chunk]`. Draw order below
+67.1M is unchanged; the table is 4 bytes per chunk. Measured on an AMD Radeon
+890M, Edge 145, Linux, runs alternated: 90M draws 90,000,000; 1M (5 runs each)
+frame 5.32 → 5.41 ms, p95 10.78 → 10.67 ms; 10M standard (2 runs each) frame
+12.62 → 12.72 ms, p95 20.32 → 19.98 ms. All inside run-to-run spread.
+
 ## 0039 — Pinch zoom is direct, paired on the main thread
 
 Two fingers used to fight: each finger's down re-anchored the drag and the
