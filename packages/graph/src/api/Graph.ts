@@ -328,6 +328,7 @@ export class Graph {
     out.viewportHeight = s[STATE_SLOT.VIEWPORT_H]!;
     out.uploadBytes = s[STATE_SLOT.UPLOAD_BYTES]!;
     out.gpuBytes = s[STATE_SLOT.GPU_BYTES]!;
+    out.peakGpuBytes = s[STATE_SLOT.PEAK_GPU_BYTES]!;
     out.pixelRatio = this.pixelRatio;
     out.gpuMs = s[STATE_SLOT.GPU_MS_AVG]!;
     out.visibleNodes = s[STATE_SLOT.VISIBLE_NODES]!;

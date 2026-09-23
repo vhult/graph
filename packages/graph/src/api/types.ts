@@ -131,6 +131,7 @@ export interface GraphStats {
    * total GPU memory, so this is what the engine itself uses.
    */
   gpuBytes: number;
+  peakGpuBytes: number;
   /** Device pixels per CSS pixel of the canvas. */
   pixelRatio: number;
   /** GPU time per frame, rolling mean over 30 frames, ms. NaN without `timestamp-query`. */
