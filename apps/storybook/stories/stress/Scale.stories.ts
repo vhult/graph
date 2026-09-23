@@ -8,26 +8,32 @@
  */
 import type { Meta, StoryObj } from "@storybook/html-vite";
 import { communities } from "@vhult/graph-bench";
+import { DangerZone, type DangerArgs } from "../../src/danger";
 import { cached } from "../../src/data";
-import { GRAPH_ARGS, graphArgTypes, renderGraph, type GraphArgs } from "../../src/graphStory";
+import { countControl, GRAPH_ARGS, graphArgTypes, renderGraph } from "../../src/graphStory";
 
-interface Args extends GraphArgs {
-  neighbours: number;
-}
+type Args = DangerArgs;
 
 const SIZES = [5_000_000, 10_000_000, 25_000_000] as const;
+
+const danger = new DangerZone();
 
 const meta: Meta<Args> = {
   title: "Stress/Scale",
   render: renderGraph<Args>({
-    describe: (a) => `Scale · communities, ${a.neighbours} nearest neighbours`,
+    describe: (a) => `Scale · communities, ${a.neighbours} nearest neighbours${a.dangerZone ? " · danger zone" : ""}`,
     load: (a) => cached(`communities:${a.nodes}:${a.neighbours}:${a.seed}`, () => communities(a.nodes, a.neighbours, a.seed)),
-    dataArgs: ["neighbours"],
+    dataArgs: ["neighbours", "dangerZone", "vramGB"],
+    gate: (graph, a, root) => danger.gate(graph, a, root),
+    onLoad: (graph, g, a) => danger.loaded(graph, g, a),
   }),
   argTypes: graphArgTypes<Args>(SIZES, {
+    nodes: { ...countControl(SIZES), if: { arg: "dangerZone", truthy: false } },
     neighbours: { control: { type: "range", min: 1, max: 4, step: 1 } },
+    dangerZone: { control: "boolean" },
+    vramGB: { control: { type: "range", min: 2, max: 32, step: 1 }, if: { arg: "dangerZone" } },
   }),
-  args: { nodes: 10_000_000, neighbours: 2, ...GRAPH_ARGS, edgeAlpha: 0.25 },
+  args: { nodes: 10_000_000, neighbours: 2, dangerZone: false, vramGB: 8, ...GRAPH_ARGS, edgeAlpha: 0.25 },
 };
 
 export default meta;
