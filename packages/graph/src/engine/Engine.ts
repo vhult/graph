@@ -572,6 +572,7 @@ export class Engine {
     s[STATE_SLOT.CAMERA_ROTATION] = c.rotation;
     s[STATE_SLOT.UPLOAD_BYTES] = uploadBytes;
     s[STATE_SLOT.GPU_BYTES] = this.gpu.memory.bytes;
+    s[STATE_SLOT.PEAK_GPU_BYTES] = this.gpu.memory.peak;
     s[STATE_SLOT.LABELS_SHOWN] = this.labels.live.shownCount;
     s[STATE_SLOT.LABEL_SOLVES] = this.labels.solves;
     s[STATE_SLOT.LABELS_ADDED] = this.labels.live.added;

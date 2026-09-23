@@ -34,6 +34,7 @@ export const STATE_SLOT = {
   LABELS_ADDED: 52,
   LABELS_REMOVED: 53,
   PROFILER_ZERO: 54,
+  PEAK_GPU_BYTES: 55,
   /** Rolling mean per profiler slot, ms; slot names are in `GraphCaps.profilerSlots`. */
   SLOT_MS_BASE: 16,
 } as const;

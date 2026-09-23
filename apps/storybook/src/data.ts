@@ -33,6 +33,10 @@ export function cached<T>(key: string, build: () => T): Loaded<T> {
   return { data, genMs };
 }
 
+export function clearCache(): void {
+  cache.clear();
+}
+
 export function loadDataset(name: GeneratorName, count: number, seed = 1): Loaded<NodeDataset> {
   return cached(`nodes:${name}:${count}:${seed}`, () => generate(name, count, seed));
 }

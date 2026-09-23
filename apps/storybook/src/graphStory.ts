@@ -62,6 +62,7 @@ export interface GraphStory<A extends GraphArgs> {
   onUpdate?: (graph: Graph, a: A, prev: A) => void;
   /** Label text for the loaded data; default: every node numbered, no edge labels. */
   labels?: (g: GraphDataset) => GraphLabels;
+  gate?: (graph: Graph, a: A, root: HTMLElement) => Promise<A | null>;
   dispose?: () => void;
 }
 
@@ -116,6 +117,17 @@ export function graphArgTypes<A extends GraphArgs>(sizes: readonly number[], own
 }
 
 export function renderGraph<A extends GraphArgs>(spec: GraphStory<A>) {
+  let root: HTMLElement | null = null;
+  let nodes = 0;
+  const loaded = (a: A): A => ({ ...a, nodes });
+  const reload = (graph: Graph, a: A, hud: Hud): void => {
+    const load = (b: A) => {
+      nodes = b.nodes;
+      upload(graph, b, hud, spec, true);
+    };
+    if (!spec.gate) return load(a);
+    void spec.gate(graph, a, root!).then((b) => b && load(b));
+  };
   return (args: A, ctx: StoryContext): HTMLElement =>
     stage(args, ctx, {
       options: (a) => ({
@@ -127,15 +139,16 @@ export function renderGraph<A extends GraphArgs>(spec: GraphStory<A>) {
         lodTargetPx: a.lodTargetPx,
         ...spec.options?.(a),
       }),
-      setup: (graph, a, hud) => {
+      setup: (graph, a, hud, r) => {
+        root = r;
         graph.setNodeScale(a.nodeScale);
-        upload(graph, a, hud, spec, true);
+        reload(graph, a, hud);
       },
       update: (graph, a, prev, hud) => {
         const data = a.nodes !== prev.nodes || a.seed !== prev.seed || (spec.dataArgs ?? []).some((k) => a[k] !== prev[k]);
-        if (data) upload(graph, a, hud, spec, true);
-        else if (a.edges !== prev.edges || a.edgeColor !== prev.edgeColor) upload(graph, a, hud, spec, false);
-        else if (a.labels !== prev.labels) setLabels(graph, spec.load(a).data, a, spec);
+        if (data) reload(graph, a, hud);
+        else if (a.edges !== prev.edges || a.edgeColor !== prev.edgeColor) upload(graph, loaded(a), hud, spec, false);
+        else if (a.labels !== prev.labels) setLabels(graph, spec.load(loaded(a)).data, a, spec);
         if (a.nodeScale !== prev.nodeScale) graph.setNodeScale(a.nodeScale);
         spec.onUpdate?.(graph, a, prev);
       },

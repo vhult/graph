@@ -27,7 +27,7 @@ export interface Gpu {
   /** Swap-chain format preferred by this platform. */
   format: GPUTextureFormat;
   /** Bytes in the GPU buffers this device currently holds (canvas textures excluded). */
-  memory: { bytes: number };
+  memory: { bytes: number; peak: number };
 }
 
 export async function createGpu(gpu: GPU | undefined): Promise<Gpu> {
@@ -78,13 +78,14 @@ export async function createGpu(gpu: GPU | undefined): Promise<Gpu> {
  * free or used GPU memory, so this is the one exact number available: what the
  * engine itself holds. Wraps `createBuffer` once, so no call site has to care.
  */
-function trackBufferBytes(device: GPUDevice): { bytes: number } {
-  const memory = { bytes: 0 };
+function trackBufferBytes(device: GPUDevice): { bytes: number; peak: number } {
+  const memory = { bytes: 0, peak: 0 };
   const create = device.createBuffer.bind(device);
   device.createBuffer = (descriptor: GPUBufferDescriptor): GPUBuffer => {
     const buffer = create(descriptor);
     const size = buffer.size;
     memory.bytes += size;
+    memory.peak = Math.max(memory.peak, memory.bytes);
     const destroy = buffer.destroy.bind(buffer);
     let live = true;
     buffer.destroy = () => {
