@@ -63,4 +63,5 @@ One logical change per commit.
 ## Branches
 
 - Work happens on feature branches. Every PR targets `dev`, never `main`. Use the `open-pr` skill.
+- A branch name is plain kebab-case, with no `/` and no type prefix: `overlay-destroy-order`, not `fix/overlay-destroy-order`.
 - `dev` merges into `main` only through a release. Each release is tagged. Use the `release` skill.
