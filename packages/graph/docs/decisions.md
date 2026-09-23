@@ -29,8 +29,9 @@ holds. The shape travels in the low 4 mantissa bits of `NodeInstance.radiusPx`
 (radius error ≤ 2⁻¹⁹), keeping the instance at 16 B. A `NODE_SHAPES` override
 compiles the `nodeStyle` read and the shape `switch` out when no node has a
 shape, so circle-only graphs run the same code as before. Arrowheads stop at
-the target's real boundary. Not measured yet: frame and p95, circle-only
-against 0040 and mixed shapes, still to be added.
+the target's real boundary. Circle-only, communities 1M, AMD Radeon 890M,
+Edge 145 headless: frame 5.16 -> 5.04 ms, p95 10.19 -> 9.88 ms; cull.count
+0.054 -> 0.054 ms, cull.scatter 0.080 -> 0.086 ms. Mixed shapes not measured.
 
 ## 0040 — Chunk draw positions come from a table, not a multiply
 
