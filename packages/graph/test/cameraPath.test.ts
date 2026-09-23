@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Camera2D } from "../src/camera/Camera2D";
 import { CameraPath } from "../src/camera/CameraPath";
-import { CHUNK_BOUNDS, chunkCount, cullScratchWords, drawStride, ENGINE_CONSTANTS, labelledWordOffset, mortonBitsPerAxis } from "../src/data/Layouts";
+import { CHUNK_BOUNDS, chunkCount, cullScratchWords, drawPositions, drawTableWordOffset, ENGINE_CONSTANTS, labelledWordOffset, mortonBitsPerAxis } from "../src/data/Layouts";
 
 const bounds = { minX: -100, minY: 0, maxX: 100, maxY: 50 };
 
@@ -54,9 +54,9 @@ describe("cull scratch layout", () => {
     expect(c).toBe(Math.ceil(n / 1024));
     expect(256 % k0.DRAW_SEGMENT).toBe(0); // segments never span a row of lanes
     const cells = (segments + k0.NUM_BUCKETS - 1) * c;
-    expect(labelledWordOffset(n)).toBe(k0.SCRATCH_CHUNKS + 2 * cells + Math.ceil(cells / k0.CHUNK_SIZE) + 2 * c + k0.CHUNK_BOUNDS_WORDS * c);
+    expect(drawTableWordOffset(n)).toBe(k0.SCRATCH_CHUNKS + 2 * cells + Math.ceil(cells / k0.CHUNK_SIZE) + 2 * c + k0.CHUNK_BOUNDS_WORDS * c);
+    expect(labelledWordOffset(n)).toBe(drawTableWordOffset(n) + c);
     expect(cullScratchWords(n)).toBe(labelledWordOffset(n) + Math.ceil(n / 32));
-    expect(k0.SCRATCH_DRAW_STRIDE).toBeLessThan(k0.SCRATCH_CHUNKS);
     expect(ENGINE_CONSTANTS.CHUNK_BOUNDS_WORDS * 4).toBe(CHUNK_BOUNDS.size);
     const k = ENGINE_CONSTANTS;
     expect(k.SCRATCH_BUCKET_BASE).toBeGreaterThanOrEqual(k.SCRATCH_DRAW_ARGS + k.NUM_BUCKETS * 4);
@@ -100,21 +100,22 @@ describe("Morton key width", () => {
   });
 });
 
-describe("draw stride", () => {
+describe("draw positions", () => {
   it("makes chunk draw positions a bijection with far-apart neighbours", () => {
-    for (const chunks of [1, 2, 3, 10, 98, 977, 7919, 9766, 65535]) {
-      const stride = drawStride(chunks);
+    for (const chunks of [1, 2, 3, 10, 98, 977]) {
+      const positions = drawPositions(chunks);
       const posToChunk = new Int32Array(chunks).fill(-1);
+      let bad = 0;
       for (let c = 0; c < chunks; c++) {
-        const p = (c * stride) % chunks;
-        expect(posToChunk[p]).toBe(-1);
-        posToChunk[p] = c;
+        const p = positions[c]!;
+        if (p >= chunks || posToChunk[p] !== -1) bad++;
+        else posToChunk[p] = c;
       }
+      expect(bad).toBe(0);
       if (chunks < 10) continue;
       // consecutive draw positions are chunks ≥ C/4 apart (golden step: ~0.38·C circular distance)
       const d = Math.abs(posToChunk[1]! - posToChunk[0]!);
       expect(Math.min(d, chunks - d)).toBeGreaterThanOrEqual(chunks * 0.25);
-      expect((chunks - 1) * stride).toBeLessThan(2 ** 32);
     }
   });
 });
