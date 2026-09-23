@@ -227,16 +227,6 @@ fn scan_reduce(
   }
 }
 
-// Exclusive prefix of all cells before `cell` (block sums already scanned).
-fn prefixBefore(cell : u32, chunks : u32) -> u32 {
-  let blk = cell / SCAN_BLOCK;
-  var p = scratch[blockSumsAt(chunks) + blk];
-  for (var j = blk * SCAN_BLOCK; j < cell; j++) {
-    p += scratch[countsAt(chunks) + j];
-  }
-  return p;
-}
-
 @compute @workgroup_size(WORKGROUP_SIZE)
 fn scan_blocks(@builtin(local_invocation_index) lid : u32) {
   let chunks = numChunks();
@@ -260,10 +250,22 @@ fn scan_blocks(@builtin(local_invocation_index) lid : u32) {
   storageBarrier(); // scanned block sums visible to every lane
 
   // 2. Bucket bases and draw args (buckets are contiguous cell ranges).
+  var bases : array<u32, NUM_BUCKETS + 1u>;
+  for (var b = 1u; b < NUM_BUCKETS; b++) {
+    let first = bucketFirstCell(b, chunks);
+    let blk = first / SCAN_BLOCK;
+    var part = 0u;
+    for (var j = blk * SCAN_BLOCK + lid; j < first; j += WORKGROUP_SIZE) {
+      part += scratch[countsAt(chunks) + j];
+    }
+    let r = wgScanU32(part, lid);
+    bases[b] = scratch[blockSumsAt(chunks) + blk] + r.total;
+  }
+  bases[0] = 0u;
+  bases[NUM_BUCKETS] = sb.total;
   if (lid < NUM_BUCKETS) {
-    let first = bucketFirstCell(lid, chunks);
-    let base = prefixBefore(first, chunks);
-    let next = select(prefixBefore(bucketFirstCell(lid + 1u, chunks), chunks), sb.total, lid + 1u == NUM_BUCKETS);
+    let base = bases[lid];
+    let next = bases[lid + 1u];
     let a = SCRATCH_DRAW_ARGS + lid * 4u;
     scratch[a] = 4u; // vertexCount: one triangle-strip quad
     scratch[a + 1u] = next - base; // instanceCount
