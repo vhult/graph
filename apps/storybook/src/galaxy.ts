@@ -46,7 +46,7 @@ function truncatedExp(u: number, scale: number, max: number): number {
   return -scale * Math.log(1 - u * (1 - Math.exp(-max / scale)));
 }
 
-function kelvin(t: number): [number, number, number] {
+export function kelvin(t: number): [number, number, number] {
   const k = t / 100;
   const r = k <= 66 ? 255 : 329.698727446 * Math.pow(k - 60, -0.1332047592);
   const g = k <= 66 ? 99.4708025861 * Math.log(k) - 161.1195681661 : 288.1221695283 * Math.pow(k - 60, -0.0755148492);
@@ -55,7 +55,7 @@ function kelvin(t: number): [number, number, number] {
   return [c(r), c(g), c(b)];
 }
 
-function word(rgb: [number, number, number], alpha: number): number {
+export function word(rgb: [number, number, number], alpha: number): number {
   return (rgb[0] | (rgb[1] << 8) | (rgb[2] << 16) | (Math.round(alpha * 255) << 24)) >>> 0;
 }
 

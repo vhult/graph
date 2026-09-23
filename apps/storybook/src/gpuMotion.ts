@@ -103,6 +103,11 @@ export class GpuMotion {
     return motion;
   }
 
+  setParam(k: number, value: number): void {
+    new Float32Array(this.uniform, 16, PARAMS)[k] = value;
+    this.sentTime = -1;
+  }
+
   stop(): void {
     if (this.stopped) return;
     this.stopped = true;
