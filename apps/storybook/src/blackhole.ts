@@ -22,9 +22,9 @@ export const HOLE = {
 const CRITICAL = 3 * Math.sqrt(3);
 const TAU = Math.PI * 2;
 
-const HOT: [number, number, number] = [255, 248, 244];
-const WARM: [number, number, number] = [246, 196, 184];
-const COOL: [number, number, number] = [196, 120, 108];
+const HOT: [number, number, number] = [255, 255, 255];
+const WARM: [number, number, number] = [255, 232, 226];
+const COOL: [number, number, number] = [238, 176, 164];
 
 export interface BlackHole {
   graph: GraphDataset;
@@ -251,7 +251,7 @@ export function blackHole(total: number, tiltDeg: number, seed = 1): BlackHole {
     const f = (a - h.inner) / span;
     const heat = Math.pow(Math.max(0, 1 - (a - h.inner) / (h.body - h.inner)), 1.6) * 0.9 + 0.1 * (1 - f);
     const rgb = f < 0.25 ? mix(HOT, WARM, f / 0.25) : mix(WARM, COOL, Math.min(1, (f - 0.25) / 0.75));
-    const alpha = 0.012 + 0.16 * heat;
+    const alpha = 0.015 + 0.2 * heat;
     const size = 3 + 2.5 * r();
     add(a, phi, 0, word(rgb, alpha), size);
     add(a, phi, 1, word(rgb, alpha * 0.9), size);

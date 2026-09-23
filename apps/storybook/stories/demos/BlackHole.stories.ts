@@ -8,7 +8,7 @@ interface Args extends GraphArgs {
   speed: number;
 }
 
-const SIZES = [250_000, 1_000_000] as const;
+const SIZES = [250_000, 1_000_000, 2_000_000, 5_000_000] as const;
 let motion: GpuMotion | null = null;
 let run = 0;
 let frame: (() => void) | null = null;
@@ -59,7 +59,7 @@ const meta: Meta<Args> = {
     nodeScale: { control: { type: "range", min: 0.1, max: 4, step: 0.1 } },
     lodTargetPx: { control: { type: "range", min: 0, max: 8, step: 0.5 } },
   },
-  args: { ...GRAPH_ARGS, nodes: 1_000_000, speed: 1, edges: false, lodTargetPx: 0 },
+  args: { ...GRAPH_ARGS, nodes: 1_000_000, speed: 0.1, edges: false, lodTargetPx: 0 },
   parameters: { controls: { include: ["nodes", "speed", "seed", "nodeScale", "lodTargetPx"] } },
 };
 
