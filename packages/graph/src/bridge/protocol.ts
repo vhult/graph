@@ -56,6 +56,7 @@ export type ToWorker =
   | { t: "nodeLabels"; labels: string[] }
   | { t: "edgeLabels"; labels: string[] }
   | { t: "updatePositions"; start: number; data: Float32Array }
+  | { t: "positionStream"; buffer: SharedArrayBuffer; count: number }
   | { t: "updateColor"; index: number; rgba: number }
   | { t: "view"; view: Partial<CameraView> }
   | { t: "fit"; padding: number }

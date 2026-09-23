@@ -230,22 +230,44 @@ export class GraphBuffers {
 
   // ---- internals ----------------------------------------------------------------
 
+  canStream(count: number): boolean {
+    return this.nodeCount === count && !this.store.channels.nodePos.realloc;
+  }
+
+  streamPositions(data: Float32Array): number {
+    const total = data.length >> 1;
+    const upload = this.uploadBuffer("nodePos", data.byteLength);
+    const queue = this.device.queue;
+    queue.writeBuffer(upload, 0, data);
+    this.rangeTable[0] = 0;
+    this.rangeTable[1] = 0;
+    queue.writeBuffer(this.slots.nodePos.ranges, 0, this.rangeTable, 0, 2);
+    this.scatters.push({ name: "nodePos", total, ranges: 1 });
+    return data.byteLength + 8;
+  }
+
+  private uploadBuffer(name: NodeChannel, bytes: number): GPUBuffer {
+    const slot = this.slots[name];
+    if (!slot.upload || slot.upload.size < bytes) {
+      if (slot.upload) this.retire(slot.upload);
+      slot.upload = this.device.createBuffer({ label: `${name}/upload`, size: Math.max(MIN_BUFFER_BYTES, Math.ceil(bytes * 1.5 / 16) * 16), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+    }
+    return slot.upload;
+  }
+
   /** Copy dirty user-order ranges into the channel's staging buffer; returns bytes. */
   private stageScatter(name: NodeChannel, data: Uint32Array | Float32Array, words: number, d: DirtyRanges): number {
     const slot = this.slots[name];
     let total = 0;
     for (let r = 0; r < d.count; r++) total += d.end(r) - d.start(r);
     const bytes = total * words * 4;
-    if (!slot.upload || slot.upload.size < bytes) {
-      if (slot.upload) this.retire(slot.upload);
-      slot.upload = this.device.createBuffer({ label: `${name}/upload`, size: Math.max(MIN_BUFFER_BYTES, Math.ceil(bytes * 1.5 / 16) * 16), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
-    }
+    this.uploadBuffer(name, bytes);
     const queue = this.device.queue;
     let prefix = 0;
     for (let r = 0; r < d.count; r++) {
       const start = d.start(r);
       const count = d.end(r) - start;
-      queue.writeBuffer(slot.upload, prefix * words * 4, data, start * words, count * words);
+      queue.writeBuffer(slot.upload!, prefix * words * 4, data, start * words, count * words);
       this.rangeTable[r * 2] = start;
       this.rangeTable[r * 2 + 1] = prefix;
       prefix += count;

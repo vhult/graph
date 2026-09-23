@@ -3,6 +3,7 @@
  * the render worker and returns. The main thread never touches the GPU.
  */
 import { InputRing } from "../bridge/InputRing";
+import { PositionStream } from "../bridge/PositionStream";
 import type { FromWorker, ToWorker } from "../bridge/protocol";
 import { createStateBuffer, STATE_SLOT } from "../bridge/SharedState";
 import { DebugOverlay } from "./DebugOverlay";
@@ -21,6 +22,7 @@ import type {
   LabelSnapshot,
   EdgeData,
   NodeData,
+  NodePositionStream,
   RGBA,
 } from "./types";
 
@@ -145,7 +147,7 @@ export class Graph {
     private readonly canvas: HTMLCanvasElement,
     private readonly worker: Worker,
     readonly caps: GraphCaps,
-    ring: InputRing | null,
+    private readonly ring: InputRing | null,
     private readonly state: Float64Array,
     private pixelRatio: number,
     autoResize: boolean,
@@ -249,6 +251,26 @@ export class Graph {
 
   setNodeShapes(shapes: Uint8Array, opts?: CopyOption): void {
     this.setNodes({ count: this.nodeCount, shapes }, opts);
+  }
+
+  streamNodePositions(): NodePositionStream {
+    const count = this.nodeCount;
+    const ring = this.ring;
+    if (!ring) {
+      const positions = new Float32Array(count * 2);
+      return { positions, commit: () => this.updateNodePositions(0, positions, { copy: true }) };
+    }
+    const stream = PositionStream.create(count);
+    this.send({ t: "positionStream", buffer: stream.buffer, count });
+    return {
+      get positions() {
+        return stream.positions;
+      },
+      commit: () => {
+        stream.commit();
+        if (ring.claimWake()) this.worker.postMessage({ t: "wake" } satisfies ToWorker);
+      },
+    };
   }
 
   /** Partial update of positions for nodes `start .. start + data.length / 2`. Dirty-range tracked. */

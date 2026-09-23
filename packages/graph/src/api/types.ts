@@ -84,6 +84,11 @@ export interface NodeData {
   shapes?: Uint8Array;
 }
 
+export interface NodePositionStream {
+  readonly positions: Float32Array;
+  commit(): void;
+}
+
 export const NodeShape = { circle: 0, square: 1, hexagon: 2 } as const;
 export type NodeShape = (typeof NodeShape)[keyof typeof NodeShape];
 

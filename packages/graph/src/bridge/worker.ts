@@ -4,6 +4,7 @@
 import { GraphError } from "../api/errors";
 import { Engine } from "../engine/Engine";
 import { InputRing, type InputRecord } from "./InputRing";
+import { PositionStream } from "./PositionStream";
 import type { FromWorker, ToWorker } from "./protocol";
 import { createStateBuffer } from "./SharedState";
 
@@ -96,6 +97,8 @@ function dispatch(msg: ToWorker): void {
     }
     case "nodes":
       return e.setNodes(msg.count, msg);
+    case "positionStream":
+      return e.setPositionStream(new PositionStream(msg.buffer, msg.count));
     case "edges":
       return e.setEdges(msg.count, msg);
     case "nodeLabels":

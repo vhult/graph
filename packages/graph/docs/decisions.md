@@ -8,6 +8,18 @@ bandwidth), Edge 153, 1M nodes / 3M edges at fit unless stated.
 
 ---
 
+## 0042 — Streamed positions upload straight from shared memory
+
+`streamNodePositions()` hands the caller a triple-buffered shared slot; the
+render worker takes the latest one at frame start and writes it to the scatter
+staging buffer directly, skipping the store mirror, which is synced only when
+`setNodes` comes without positions. Copying the slot into the mirror first was
+slower than the old message path. Galaxy story, 1M nodes, every position every
+frame, AMD Radeon 890M, Edge 145 headless, one run each after a warm-up:
+render worker CPU mean / p95 — message 0.78 / 1.76 ms, stream via mirror
+1.25 / 1.51 ms, direct 0.74 / 0.94 ms. All three held 60 fps; main thread
+0.22–0.24 ms mean in each.
+
 ## 0041 — Node shapes are SDFs, and the shape rides in the instance radius
 
 Square and hexagon (flat top and bottom) join the circle. Every shape fits the
