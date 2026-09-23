@@ -42,7 +42,7 @@ export class TransformCullPass implements ComputeNode {
   readonly stage = Stage.TRANSFORM_CULL;
   readonly phases = ["cull.bounds", "cull.count", "cull.scan.reduce", "cull.scan.blocks", "cull.scan.down", "cull.scatter"] as const;
   // Everything that moves, resizes, recolours or restyles nodes on screen. Not CLEAR_COLOR.
-  readonly runsOn = Dirty.TOPOLOGY | Dirty.POSITIONS | Dirty.CAMERA | Dirty.STYLE | Dirty.STATE | Dirty.RESIZE;
+  readonly runsOn = Dirty.TOPOLOGY | Dirty.POSITIONS | Dirty.CAMERA | Dirty.STYLE | Dirty.STATE | Dirty.RESIZE | Dirty.LABELLED;
 
   outputs: CullOutputs | null = null;
   private dispatchArgs: GPUBuffer;

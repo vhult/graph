@@ -80,6 +80,14 @@ fn chunkBoundsAt(chunk : u32, chunks : u32) -> u32 {
   return listAt(chunks) + chunks + chunk * CHUNK_BOUNDS_WORDS;
 }
 
+fn labelledAt(chunks : u32) -> u32 {
+  return chunkBoundsAt(chunks, chunks);
+}
+
+fn isLabelled(i : u32, chunks : u32) -> bool {
+  return ((scratch[labelledAt(chunks) + (i >> 5u)] >> (i & 31u)) & 1u) != 0u;
+}
+
 fn loadChunkBounds(chunk : u32, chunks : u32) -> ChunkBounds {
   let o = chunkBoundsAt(chunk, chunks);
   return ChunkBounds(

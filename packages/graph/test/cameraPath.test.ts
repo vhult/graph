@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Camera2D } from "../src/camera/Camera2D";
 import { CameraPath } from "../src/camera/CameraPath";
-import { CHUNK_BOUNDS, chunkCount, cullScratchWords, drawStride, ENGINE_CONSTANTS, mortonBitsPerAxis } from "../src/data/Layouts";
+import { CHUNK_BOUNDS, chunkCount, cullScratchWords, drawStride, ENGINE_CONSTANTS, labelledWordOffset, mortonBitsPerAxis } from "../src/data/Layouts";
 
 const bounds = { minX: -100, minY: 0, maxX: 100, maxY: 50 };
 
@@ -54,7 +54,8 @@ describe("cull scratch layout", () => {
     expect(c).toBe(Math.ceil(n / 1024));
     expect(256 % k0.DRAW_SEGMENT).toBe(0); // segments never span a row of lanes
     const cells = (segments + k0.NUM_BUCKETS - 1) * c;
-    expect(cullScratchWords(n)).toBe(k0.SCRATCH_CHUNKS + 2 * cells + Math.ceil(cells / k0.CHUNK_SIZE) + 2 * c + k0.CHUNK_BOUNDS_WORDS * c);
+    expect(labelledWordOffset(n)).toBe(k0.SCRATCH_CHUNKS + 2 * cells + Math.ceil(cells / k0.CHUNK_SIZE) + 2 * c + k0.CHUNK_BOUNDS_WORDS * c);
+    expect(cullScratchWords(n)).toBe(labelledWordOffset(n) + Math.ceil(n / 32));
     expect(k0.SCRATCH_DRAW_STRIDE).toBeLessThan(k0.SCRATCH_CHUNKS);
     expect(ENGINE_CONSTANTS.CHUNK_BOUNDS_WORDS * 4).toBe(CHUNK_BOUNDS.size);
     const k = ENGINE_CONSTANTS;

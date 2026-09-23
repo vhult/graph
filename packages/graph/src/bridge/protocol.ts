@@ -4,7 +4,7 @@
  * and never produce a message in steady state.
  */
 import type { GraphErrorCode } from "../api/errors";
-import type { BenchmarkOptions, BenchmarkResult, CameraView, EdgeDebugMode, GraphCaps, RGBA } from "../api/types";
+import type { BenchmarkOptions, BenchmarkResult, CameraView, EdgeDebugMode, GraphCaps, LabelSnapshot, RGBA } from "../api/types";
 
 export interface InitOptions {
   background: RGBA;
@@ -25,8 +25,8 @@ export interface InitOptions {
   edgeDebug: EdgeDebugMode;
   /** Node label size, CSS px; edge labels are a little smaller. */
   labelSize: number;
-  /** Labels on screen at most. */
-  labelMax: number;
+  labelPadding: number;
+  labelFont: string;
 }
 
 export type ToWorker =
@@ -58,6 +58,7 @@ export type ToWorker =
   | { t: "nodeScale"; value: number }
   | { t: "render" }
   | { t: "benchmark"; id: number; options: BenchmarkOptions }
+  | { t: "labelSnapshot"; id: number }
   | { t: "destroy" };
 
 export type FromWorker =
@@ -66,4 +67,5 @@ export type FromWorker =
   /** Fallback state snapshot when the state block is not shared. */
   | { t: "state"; data: Float64Array }
   | { t: "benchmark"; id: number; result: BenchmarkResult }
+  | { t: "labelSnapshot"; id: number; snapshot: LabelSnapshot }
   | { t: "destroyed" };

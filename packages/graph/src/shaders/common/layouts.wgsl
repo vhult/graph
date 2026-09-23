@@ -92,7 +92,7 @@ struct ChunkBounds {
   flags : u32,                    // @20  CHUNK_FLAG_* bits
 }
 
-// size 32, align 8
+// size 48, align 8
 struct EdgeChunk {
   lo : vec2<f32>,                 // @0  min endpoint, world
   hi : vec2<f32>,                 // @8  max endpoint, world
@@ -100,42 +100,89 @@ struct EdgeChunk {
   maxWidthPx : f32,               // @20  widest per-edge style width, device px; 0 = none
   density : f32,                  // @24  edge length per area where this length level lies, 1/world
   _pad : f32,                     // @28
+  midLo : vec2<f32>,              // @32
+  midHi : vec2<f32>,              // @40
 }
 
 const EDGE_CHUNK_SIZE : u32 = 1024u;
 const EDGE_CHUNK_SHIFT : u32 = 10u;
-const EDGE_CHUNK_WORDS : u32 = 8u;
+const EDGE_CHUNK_WORDS : u32 = 12u;
 const EDGE_LEVEL_BITS : u32 = 4u;
 const EDGE_SCRATCH_DRAW_ARGS : u32 = 0u;
 const EDGE_SCRATCH_DISPATCH : u32 = 4u;
 const EDGE_SCRATCH_LIST_COUNT : u32 = 7u;
-const EDGE_SCRATCH_LABEL_DISPATCH : u32 = 8u;
-const EDGE_SCRATCH_LIST : u32 = 12u;
+const EDGE_SCRATCH_LIST : u32 = 8u;
+
+// size 92, align 4
+struct LabelParams {
+  textH : f32,                    // @0
+  labelH : f32,                   // @4
+  gap : f32,                      // @8
+  padding : f32,                  // @12
+  maxHalfW : f32,                 // @16
+  maxHalfH : f32,                 // @20
+  minEdgeW : f32,                 // @24
+  labelArea : f32,                // @28
+  cellW : f32,                    // @32
+  bonus : f32,                    // @36
+  fadeS : f32,                    // @40
+  glyphTable : u32,               // @44
+  gridW : u32,                    // @48
+  gridH : u32,                    // @52
+  capacity : u32,                 // @56
+  chunks : u32,                   // @60
+  levels : u32,                   // @64
+  nodeCount : u32,                // @68
+  edgeChunks : u32,               // @72
+  edgeLevels : u32,               // @76
+  edgeCount : u32,                // @80
+  bitsOffset : u32,               // @84
+  liveCount : u32,                // @88
+}
 
 // size 32, align 8
-struct LabelRecord {
-  index : u32,                    // @0  engine node / sorted edge
-  user : u32,                     // @4  the user's node / edge index, filled by label_map
-  priority : f32,                 // @8  node size, world / edge length, device px
-  radius : f32,                   // @12  drawn node radius, device px; 0 for edges
-  a : vec2<f32>,                  // @16  node centre / edge source, device px
-  b : vec2<f32>,                  // @24  edge target, device px
+struct LabelCandidate {
+  center : vec2<f32>,             // @0
+  halfW : f32,                    // @8
+  halfH : f32,                    // @12
+  rank : f32,                     // @16
+  index : u32,                    // @20
+  size : f32,                     // @24
 }
 
-// size 24, align 8
-struct LabelInstance {
-  anchor : u32,                   // @0  engine node / sorted edge
-  kind : u32,                     // @4  LABEL_KIND_*
-  rect : vec2<u32>,               // @8  atlas (x | y << 16, w | h << 16), device px
-  alpha : f32,                    // @16
-  _pad : f32,                     // @20
+// size 20, align 4
+struct LiveLabel {
+  index : u32,                    // @0
+  slot : u32,                     // @4
+  run : u32,                      // @8
+  start : f32,                    // @12
+  fadeOut : u32,                  // @16
 }
 
-const LABEL_KIND_NODE : u32 = 0u;
-const LABEL_KIND_EDGE : u32 = 1u;
-const LABEL_NODE_CAPACITY : u32 = 2048u;
-const LABEL_EDGE_CAPACITY : u32 = 1024u;
-const LABEL_HEADER_WORDS : u32 = 4u;
+const LABEL_NONE : u32 = 0xFFFFFFFFu;
+const LABEL_EDGE_BIT : u32 = 0x80000000u;
+const LABEL_GLYPHS : u32 = 32u;
+const LABEL_TREE_TOP : u32 = 16u;
+const LABEL_ROUNDS : u32 = 8u;
+const LABEL_NEIGHBOURS : u32 = 48u;
+const LABEL_LANES : u32 = 8u;
+const LABEL_SHOWN_MAX : u32 = 4096u;
+const LABEL_SLOTS : u32 = 8192u;
+const LABEL_GLYPH_MAX : u32 = 8192u;
+const WORK_CANDIDATES : u32 = 0u;
+const WORK_JOBS : u32 = 1u;
+const WORK_SHOWN : u32 = 2u;
+const WORK_ROUND : u32 = 3u;
+const WORK_EDGE_JOBS : u32 = 12u;
+const WORK_MAX_HALF_W : u32 = 13u;
+const WORK_MAX_HALF_H : u32 = 14u;
+const WORK_JOB_LIST : u32 = 16u;
+const LABEL_EDGE_PARTS : u32 = 2u;
+const LABEL_LIST_PARTS : u32 = 4u;
+const ARGS_JOBS : u32 = 0u;
+const ARGS_EDGE_JOBS : u32 = 1u;
+const ARGS_LISTS : u32 = 3u;
+const ARGS_ROUND : u32 = 7u;
 
 const BUCKET_NORMAL : u32 = 0u;
 const BUCKET_FOREGROUND : u32 = 1u;

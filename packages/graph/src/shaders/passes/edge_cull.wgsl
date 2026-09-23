@@ -28,6 +28,8 @@ fn loadEdgeChunk(c : u32, chunks : u32) -> EdgeChunk {
     bitcast<f32>(edgeScratch[o + 5u]),
     bitcast<f32>(edgeScratch[o + 6u]),
     0.0,
+    vec2<f32>(bitcast<f32>(edgeScratch[o + 8u]), bitcast<f32>(edgeScratch[o + 9u])),
+    vec2<f32>(bitcast<f32>(edgeScratch[o + 10u]), bitcast<f32>(edgeScratch[o + 11u])),
   );
 }
 
@@ -40,6 +42,10 @@ fn storeEdgeChunk(c : u32, chunks : u32, v : EdgeChunk) {
   edgeScratch[o + 4u] = bitcast<u32>(v.maxLen);
   edgeScratch[o + 5u] = bitcast<u32>(v.maxWidthPx);
   edgeScratch[o + 6u] = bitcast<u32>(v.density);
+  edgeScratch[o + 8u] = bitcast<u32>(v.midLo.x);
+  edgeScratch[o + 9u] = bitcast<u32>(v.midLo.y);
+  edgeScratch[o + 10u] = bitcast<u32>(v.midHi.x);
+  edgeScratch[o + 11u] = bitcast<u32>(v.midHi.y);
 }
 
 // ---- bounds -----------------------------------------------------------------
@@ -107,7 +113,7 @@ fn edge_bounds(
     let span = wgMid[0].zw - wgMid[0].xy;
     let pad = max(span.x, span.y) / sqrt(f32(edgeChunkLen(c)));
     let area = max((span.x + pad) * (span.y + pad), 1e-30);
-    storeEdgeChunk(c, chunks, EdgeChunk(wgBox[0].xy, wgBox[0].zw, wgLen[0].x, wgLen[0].y, wgLen[0].z / area, 0.0));
+    storeEdgeChunk(c, chunks, EdgeChunk(wgBox[0].xy, wgBox[0].zw, wgLen[0].x, wgLen[0].y, wgLen[0].z / area, 0.0, wgMid[0].xy, wgMid[0].zw));
   }
 }
 
@@ -182,12 +188,6 @@ fn edge_cull(@builtin(local_invocation_index) lid : u32) {
     edgeScratch[d] = min(sl.total, 65535u);
     edgeScratch[d + 1u] = max(1u, (sl.total + 65534u) / 65535u);
     edgeScratch[d + 2u] = 1u;
-    // Edge label candidates: one thread per drawn edge (label_edges.wgsl).
-    let groups = (sd.total + WORKGROUP_SIZE - 1u) / WORKGROUP_SIZE;
-    let l = EDGE_SCRATCH_LABEL_DISPATCH;
-    edgeScratch[l] = min(groups, 65535u);
-    edgeScratch[l + 1u] = max(1u, (groups + 65534u) / 65535u);
-    edgeScratch[l + 2u] = 1u;
     edgeScratch[EDGE_SCRATCH_LIST_COUNT] = sl.total;
   }
 }

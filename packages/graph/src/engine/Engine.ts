@@ -8,7 +8,7 @@
  *     or via any API message.
  */
 import { GraphError } from "../api/errors";
-import type { BenchmarkOptions, BenchmarkResult, CameraView, GraphCaps, RGBA } from "../api/types";
+import type { BenchmarkOptions, BenchmarkResult, CameraView, GraphCaps, LabelSnapshot, RGBA } from "../api/types";
 import { INPUT, type InputRing, type InputRecord } from "../bridge/InputRing";
 import type { InitOptions } from "../bridge/protocol";
 import { STATE_SLOT } from "../bridge/SharedState";
@@ -24,9 +24,7 @@ import { FrameUniform, type FrameInputs } from "../gpu/FrameUniform";
 import { GraphBuffers } from "../gpu/GraphBuffers";
 import { PermuteKernels } from "../gpu/PermuteKernels";
 import { Profiler, type ProfileSample } from "../gpu/Profiler";
-import { LABEL_CONSTANTS } from "../data/Layouts";
-import { LabelAtlas } from "../labels/LabelAtlas";
-import { LabelLayout } from "../labels/LabelLayout";
+import { Labels } from "../labels/Labels";
 import { EDGE_DEBUG_MODES, EdgeCullPass } from "../passes/EdgeCullPass";
 import { LabelDrawPass } from "../passes/LabelDrawPass";
 import { LabelPass } from "../passes/LabelPass";
@@ -52,6 +50,7 @@ export interface EngineInit {
   requestFrame: (cb: (t: number) => void) => void;
   onError: (e: GraphError, fatal: boolean) => void;
   onBenchmark: (id: number, result: BenchmarkResult, transfer: ArrayBuffer[]) => void;
+  onLabelSnapshot: (id: number, snapshot: LabelSnapshot, transfer: ArrayBuffer[]) => void;
 }
 
 interface Passes {
@@ -112,8 +111,7 @@ export class Engine {
     private readonly passes: Passes,
     layouts: ReturnType<typeof createContractLayouts>,
     private readonly init: EngineInit,
-    private readonly labelAtlas: LabelAtlas,
-    private readonly labelLayout: LabelLayout,
+    private readonly labels: Labels,
   ) {
     const { device, format } = gpu;
     this.frameGraph = frameGraph;
@@ -151,13 +149,13 @@ export class Engine {
       flags: 0,
     };
 
-    // Labels: the GPU finds candidates, placement runs here when they arrive.
-    passes.labels.onResult = (nodes, edges) => {
-      const c = this.camera;
-      if (this.labelLayout.place(nodes, edges, this.store, c.viewportW, c.viewportH, this.pixelRatio)) this.dirty |= Dirty.LABEL_QUERY;
-      this.markDirty(Dirty.LABELS);
+    passes.labels.onShown = (shown, count) => {
+      this.labels.applyShown(shown, count, this.clock());
+      this.markDirty(Dirty.LABELS | Dirty.LABELLED);
     };
-    passes.labels.requestQuery = () => this.markDirty(Dirty.LABEL_QUERY);
+    passes.labels.requestSolve = () => this.markDirty(Dirty.LABEL_QUERY);
+    passes.labels.onSnapshot = (id, snapshot) =>
+      init.onLabelSnapshot(id, snapshot, [snapshot.center.buffer, snapshot.halfWidth.buffer, snapshot.halfHeight.buffer, snapshot.rank.buffer, snapshot.size.buffer, snapshot.index.buffer, snapshot.decision.buffer] as ArrayBuffer[]);
 
     this.setBackground(init.options.background);
     this.resize(init.width, init.height, init.pixelRatio);
@@ -200,20 +198,16 @@ export class Engine {
     frameGraph.addCompute(edgeSort);
     frameGraph.addCompute(cull);
     frameGraph.addCompute(edgeCull);
-    const labelAtlas = new LabelAtlas(device);
-    const labelLayout = new LabelLayout(device, labelAtlas, { sizeCssPx: init.options.labelSize, max: init.options.labelMax });
+    const labelState = new Labels(device, { sizeCssPx: init.options.labelSize, paddingCssPx: init.options.labelPadding, font: init.options.labelFont });
     const [labels, labelDraw] = await Promise.all([
-      LabelPass.create(device, layouts, store, graph, cull, edgeCull, {
-        lodTargetPx: init.options.lodTargetPx,
-        labelSizeCssPx: init.options.labelSize,
-      }),
-      LabelDrawPass.create(device, format, layouts, labelLayout, labelAtlas),
+      LabelPass.create(device, layouts, graph, cull, edgeCull, labelState),
+      LabelDrawPass.create(device, format, layouts, graph, labelState),
     ]);
     frameGraph.addCompute(labels);
     frameGraph.addRender(edges);
     frameGraph.addRender(nodes);
     frameGraph.addRender(labelDraw);
-    return new Engine(gpu, store, graph, profiler, frameGraph, { cull, nodes, edges, edgeCull, labels }, layouts, init, labelAtlas, labelLayout);
+    return new Engine(gpu, store, graph, profiler, frameGraph, { cull, nodes, edges, edgeCull, labels }, layouts, init, labelState);
   }
 
   // ---- API (called from worker message dispatch) ----------------------------
@@ -226,27 +220,28 @@ export class Engine {
     this.init.canvas.height = h;
     this.camera.setViewport(w, h);
     this.pixelRatio = pixelRatio;
-    this.passes.labels.pixelRatio = pixelRatio;
+    this.labels.setPixelRatio(pixelRatio);
+    this.passes.labels.setViewport(w, h);
     this.markDirty(Dirty.RESIZE);
   }
 
   setNodes(count: number, arrays: NodeArrays): void {
     this.store.setNodes(count, arrays);
-    this.labelLayout.clear(); // nodes are renumbered, and edges with them
+    this.labels.setNodeCount(count);
     this.markDirty(Dirty.TOPOLOGY);
   }
 
   setEdges(count: number, arrays: EdgeArrays): void {
     this.store.setEdges(count, arrays);
-    this.labelLayout.clear(LABEL_CONSTANTS.LABEL_KIND_EDGE); // edges are re-sorted
+    this.labels.setEdgeCount(count);
     this.markDirty(Dirty.EDGES);
   }
 
   /** Label text per node, in the user's order; empty clears. */
   setNodeLabels(labels: string[]): void {
     this.store.nodeLabels = labels.length > 0 ? labels : null;
-    this.labelLayout.clear(LABEL_CONSTANTS.LABEL_KIND_NODE);
-    this.markDirty(Dirty.LABEL_QUERY | Dirty.LABELS);
+    this.labels.setNodeText(labels);
+    this.markDirty(Dirty.LABEL_QUERY | Dirty.LABELS | Dirty.LABELLED);
   }
 
   /** Label text per edge, in the user's order; empty clears. */
@@ -258,7 +253,7 @@ export class Engine {
     if (!keep) this.graph.setEdgeOrder(null);
     // Labels need sorted edge -> user edge, kept only by a sort that knew: sort again.
     else if (!this.graph.edgeOrder && store.edgeCount > 0) store.reloadEdges();
-    this.labelLayout.clear(LABEL_CONSTANTS.LABEL_KIND_EDGE);
+    this.labels.setEdgeText(labels);
     this.markDirty(Dirty.EDGES | Dirty.LABEL_QUERY | Dirty.LABELS);
   }
 
@@ -292,6 +287,11 @@ export class Engine {
   setNodeScale(v: number): void {
     this.frameInputs.nodeScale = v;
     this.markDirty(Dirty.STYLE);
+  }
+
+  labelSnapshot(id: number): void {
+    this.passes.labels.requestSnapshot(id);
+    this.markDirty(Dirty.LABEL_QUERY);
   }
 
   requestRender(): void {
@@ -329,8 +329,7 @@ export class Engine {
     this.passes.cull.destroy();
     this.passes.edgeCull.destroy();
     this.passes.labels.destroy();
-    this.labelLayout.destroy();
-    this.labelAtlas.destroy();
+    this.labels.destroy();
     this.profiler.destroy();
     this.graph.destroy();
     this.frameUniform.destroy();
@@ -339,6 +338,10 @@ export class Engine {
   }
 
   // ---- frame loop -------------------------------------------------------------
+
+  private clock(): number {
+    return (performance.now() - this.startTime) / 1000;
+  }
 
   private markDirty(flags: number): void {
     this.dirty |= flags;
@@ -359,7 +362,10 @@ export class Engine {
     const dt = this.lastTickMs === 0 ? 0 : (t0 - this.lastTickMs) / 1000;
     this.lastTickMs = t0;
     if (dt > 0 && this.controls.advance(dt, this.camera)) this.dirty |= Dirty.CAMERA;
-    if (this.labelLayout.animate(t0)) this.dirty |= Dirty.LABELS;
+    const now = this.clock();
+    if (this.labels.stepWidths()) this.dirty |= Dirty.LABEL_QUERY;
+    if (this.labels.settle(now)) this.dirty |= Dirty.LABELS | Dirty.LABELLED;
+    if (this.labels.animating(now)) this.dirty |= Dirty.LABELS;
 
     const bench = this.bench;
     const benchFrame = bench !== null && bench.driving;
@@ -398,8 +404,8 @@ export class Engine {
     const device = this.gpu.device;
     const encoder = device.createCommandEncoder();
     this.profiler.beginFrame();
-    this.labelLayout.upload();
     this.frameGraph.execute(encoder, this.context.getCurrentTexture().createView(), ctx);
+    this.passes.labels.recordFrame(this.frameIndex);
     this.passes.labels.recordReadback(encoder);
     this.profiler.endFrame(
       encoder,
@@ -415,7 +421,8 @@ export class Engine {
 
     const cpuMs = performance.now() - t0;
     if (benchFrame) bench.afterFrame(this.frameIndex, t0, cpuMs);
-    this.dirty = 0;
+    this.dirty = (this.passes.labels.busy ? Dirty.LABELS : 0) | (this.passes.labels.marked ? Dirty.LABELLED : 0);
+    this.passes.labels.marked = false;
     this.frameIndex++;
     this.renderedFrames++;
     this.cpuMsAvg = this.renderedFrames === 1 ? cpuMs : this.cpuMsAvg + (cpuMs - this.cpuMsAvg) * CPU_EMA;
@@ -461,6 +468,7 @@ export class Engine {
   }
 
   private readonly onProfileSample = (s: ProfileSample): void => {
+    this.passes.labels.onProfile(s.frameIndex, s.slotMs, this.profiler.slotNames);
     this.telemetry.onSample(s, this.profiler.droppedFrames);
     if (this.bench) {
       this.bench.onSample(s);
@@ -504,5 +512,9 @@ export class Engine {
     s[STATE_SLOT.CAMERA_ROTATION] = c.rotation;
     s[STATE_SLOT.UPLOAD_BYTES] = uploadBytes;
     s[STATE_SLOT.GPU_BYTES] = this.gpu.memory.bytes;
+    s[STATE_SLOT.LABELS_SHOWN] = this.labels.live.shownCount;
+    s[STATE_SLOT.LABEL_SOLVES] = this.labels.solves;
+    s[STATE_SLOT.LABELS_ADDED] = this.labels.live.added;
+    s[STATE_SLOT.LABELS_REMOVED] = this.labels.live.faded;
   }
 }

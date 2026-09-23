@@ -48,15 +48,12 @@ export interface GraphOptions {
    * colour per chunk of 1024 edges. Default: "off".
    */
   edgeDebug?: EdgeDebugMode;
-  /** Node label size, CSS px; edge labels are drawn a little smaller. Default: 12. */
+  /** Label text size, CSS px. Default: 12. */
   labelSize?: number;
-  /**
-   * Labels on screen at most, nodes and edges together. Node labels sit
-   * centred under their node, edge labels along their edge. Which ones: bigger
-   * nodes first, then longer edges, each only where it overlaps no label
-   * already placed. Default: 300.
-   */
-  labelMax?: number;
+  /** Minimum gap between two labels, CSS px. Default: 2. */
+  labelPadding?: number;
+  /** CSS font family of labels, available to the render worker. Default: system-ui. */
+  labelFont?: string;
   /**
    * Level of detail: once a chunk's nodes would sit closer together than this
    * many device px, they are drawn as merged clusters instead. Larger merges
@@ -148,6 +145,36 @@ export interface GraphStats {
    * them are still dropped by the vertex shader, so this is an upper bound.
    */
   visibleEdges: number;
+  /** Labels on screen, not counting labels fading out. */
+  labelsShown: number;
+  /** Label placements completed since start. */
+  labelSolves: number;
+  /** Labels that started fading in since start. */
+  labelsAdded: number;
+  /** Labels that started fading out since start. */
+  labelsRemoved: number;
+}
+
+/** The candidates of one label placement and what the placement decided for each. */
+export interface LabelSnapshot {
+  /** Candidates found, including any beyond `capacity`. */
+  found: number;
+  /** Candidates the placement can hold. */
+  capacity: number;
+  /** Label box centres, device px, x y interleaved. */
+  center: Float32Array;
+  /** Label box half widths, device px, padding included. */
+  halfWidth: Float32Array;
+  /** Label box half heights, device px, padding included. */
+  halfHeight: Float32Array;
+  /** Priority: higher wins. */
+  rank: Float32Array;
+  /** Node size, world units, or edge length on screen, device px. */
+  size: Float32Array;
+  /** Engine node index, or sorted edge index with the top bit set. */
+  index: Uint32Array;
+  /** 0 undecided, 1 shown, 2 hidden. */
+  decision: Uint8Array;
 }
 
 export interface GraphCaps {

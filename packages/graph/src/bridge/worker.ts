@@ -54,6 +54,7 @@ async function init(msg: Extract<ToWorker, { t: "init" }>): Promise<void> {
       requestFrame,
       onError: fail,
       onBenchmark: (id, result, transfer) => post({ t: "benchmark", id, result }, transfer),
+      onLabelSnapshot: (id, snapshot, transfer) => post({ t: "labelSnapshot", id, snapshot }, transfer),
     });
   } catch (e) {
     fail(e, true);
@@ -110,6 +111,8 @@ function dispatch(msg: ToWorker): void {
       return e.requestRender();
     case "benchmark":
       return e.benchmark(msg.id, msg.options);
+    case "labelSnapshot":
+      return e.labelSnapshot(msg.id);
     case "destroy":
       clearInterval(stateTimer);
       e.destroy();

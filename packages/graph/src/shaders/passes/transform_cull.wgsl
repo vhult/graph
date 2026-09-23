@@ -20,12 +20,9 @@
 #include "common/nodes.wgsl"
 #include "common/scan.wgsl"
 #include "common/cull_state.wgsl"
-#include "common/labels.wgsl"
 
 @group(2) @binding(2) var<storage, read_write> dispatchArgs : array<u32>; // scan_blocks
 @group(2) @binding(3) var<storage, read_write> instances : array<NodeInstance>; // cull_scatter
-@group(2) @binding(4) var<storage, read_write> labelNodes : LabelCandidates; // label_nodes
-@group(2) @binding(5) var<uniform> labelParams : LabelParams; // label_nodes
 
 var<workgroup> wgFlag : u32;
 var<workgroup> wgCells : array<atomic<u32>, CELLS_PER_CHUNK>;
@@ -182,8 +179,9 @@ fn cull_count(
     for (var k = 0u; k < ITEMS_PER_THREAD; k++) {
       let t = k * WORKGROUP_SIZE + lid;
       var b = BUCKET_CULLED;
-      if (t < items) {
-        b = classify(nodeIndex(c, k, lid), scale);
+      let i = nodeIndex(c, k, lid);
+      if (t < items || isLabelled(i, chunks)) {
+        b = classify(i, scale);
       }
       if (b != BUCKET_CULLED) {
         // local cell: NORMAL → its segment, other buckets → SEGMENTS + b - 1
@@ -356,7 +354,8 @@ fn cull_scatter(
     let t = k * WORKGROUP_SIZE + lid;
     let i = nodeIndex(c, k, lid);
     var b = BUCKET_CULLED;
-    if (t < items) {
+    let labelled = isLabelled(i, chunks);
+    if (t < items || labelled) {
       b = classify(i, scale);
     }
     let one = select(vec2<u32>(0u), oneHot16(b), b != BUCKET_CULLED);
@@ -370,56 +369,12 @@ fn cull_scatter(
       } else {
         slot = scratch[offsetsAt(chunks) + chunkCell(b, c, chunks)] + wgRun[b] + field16(s.exclusive, b);
       }
-      instances[slot] = NodeInstance(worldToScreen(nodePos[i]), nodeRadiusPx(i) * scale, lodFade(nodeColor[i], count, t));
+      instances[slot] = NodeInstance(worldToScreen(nodePos[i]), nodeRadiusPx(i) * scale, select(lodFade(nodeColor[i], count, t), nodeColor[i], labelled));
     }
     workgroupBarrier(); // every lane has read wgRun and scanVec2
     if (lid < NUM_BUCKETS) {
       wgRun[lid] += field16(s.total, lid);
     }
     workgroupBarrier();
-  }
-}
-
-// ---- label candidates ---------------------------------------------------------
-// Same chunk list, same LOD prefix and same classification as cull_scatter, so
-// only nodes that are actually drawn can get a label. Of those, the ones at
-// least labelParams.nodeMinSize big are appended; the worker keeps that
-// threshold where the biggest few thousand pass, and places from there.
-
-@compute @workgroup_size(WORKGROUP_SIZE)
-fn label_nodes(
-  @builtin(workgroup_id) wid : vec3<u32>,
-  @builtin(num_workgroups) nwg : vec3<u32>,
-  @builtin(local_invocation_index) lid : u32,
-) {
-  let chunks = numChunks();
-  let li = wid.x + wid.y * nwg.x;
-  if (lid == 0u) {
-    wgFlag = scratch[SCRATCH_LIST_COUNT];
-  }
-  if (li >= workgroupUniformLoad(&wgFlag)) {
-    return; // padding workgroup of a 2D indirect grid
-  }
-  let c = scratch[listAt(chunks) + li];
-  if (lid == 0u) {
-    wgLevel = bitcast<u32>(lodCount(loadChunkBounds(c, chunks)));
-  }
-  let count = bitcast<f32>(workgroupUniformLoad(&wgLevel));
-  let items = u32(ceil(count));
-  let scale = lodScale(count);
-  for (var k = 0u; k < ITEMS_PER_THREAD; k++) {
-    let t = k * WORKGROUP_SIZE + lid;
-    let i = nodeIndex(c, k, lid);
-    if (t < items && classify(i, scale) != BUCKET_CULLED) {
-      let size = unpack2x16float(nodeSize[i]).x;
-      let r = max(nodeRadiusPx(i) * scale, NODE_MIN_DRAW_RADIUS_PX);
-      if (size >= labelParams.nodeMinSize && r >= labelParams.nodeMinRadiusPx) {
-        let slot = atomicAdd(&labelNodes.count, 1u);
-        if (slot < LABEL_NODE_CAPACITY) {
-          let sp = worldToScreen(nodePos[i]);
-          labelNodes.records[slot] = LabelRecord(i, 0u, size, r, sp, sp);
-        }
-      }
-    }
   }
 }

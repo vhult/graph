@@ -29,6 +29,10 @@ export const STATE_SLOT = {
   VISIBLE_EDGES: 48,
   /** Bytes in the GPU buffers the engine holds. */
   GPU_BYTES: 49,
+  LABELS_SHOWN: 50,
+  LABEL_SOLVES: 51,
+  LABELS_ADDED: 52,
+  LABELS_REMOVED: 53,
   /** Rolling mean per profiler slot, ms; slot names are in `GraphCaps.profilerSlots`. */
   SLOT_MS_BASE: 16,
 } as const;

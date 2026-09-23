@@ -147,6 +147,7 @@ export class Hud {
       `worker   ${ms(s.cpuMsAvg)} ms cpu/frame`,
       `visible  ${Number.isNaN(s.visibleNodes) ? "—" : fmt(s.visibleNodes)} / ${fmt(s.nodeCount)} nodes`,
       `         ${s.edgeCount === 0 ? "no edges" : `${Number.isNaN(s.visibleEdges) ? "—" : fmt(s.visibleEdges)} / ${fmt(s.edgeCount)} edges`}`,
+      `labels   ${s.labelSolves > 0 ? `${fmt(s.labelsShown)} shown · ${fmt(s.labelSolves)} solves · +${fmt(s.labelsAdded)} −${fmt(s.labelsRemoved)}` : "—"}`,
       `viewport ${s.viewportWidth}×${s.viewportHeight} px @${s.pixelRatio}x`,
       `memory   gpu ${bytes(s.gpuBytes)} (engine) · page ${bytes(this.pageBytes)}${deviceMemory ? ` · device ${deviceMemory >= 8 ? "≥8" : deviceMemory} GB` : ""}`,
       `load     ${this.loadMs === null ? "—" : `${this.loadMs.toFixed(0)} ms upload→frame`}${this.genMs ? ` (gen ${this.genMs.toFixed(0)} ms)` : ""}`,

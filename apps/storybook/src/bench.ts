@@ -4,27 +4,29 @@
  * runs, summarizes the per-frame series and renders/downloads the report.
  */
 import type { BenchmarkResult, Graph } from "@vhult/graph";
-import { PATHS, summarize, type GeneratorName, type PathName, type Summary } from "@vhult/graph-bench";
-import { loadDataset } from "./data";
+import { PATHS, summarize, type PathName, type Summary } from "@vhult/graph-bench";
+import { setGraph, type GraphName } from "./data";
 
 export interface BenchCase {
   name: string;
-  dataset: GeneratorName;
+  dataset: GraphName;
   count: number;
   path: PathName;
-  /** Target for p99 frame time, ms (node-only until edges land in M5). */
+  nodeLabels: boolean;
+  edgeLabels: boolean;
   targetP99Ms?: number;
 }
 
-/** Benchmark datasets (nodes only for now — edge counts join in M5). */
 export const SUITE: readonly BenchCase[] = [
-  { name: "small", dataset: "clustered", count: 10_000, path: "standard", targetP99Ms: 1.0 },
-  { name: "medium", dataset: "clustered", count: 250_000, path: "standard", targetP99Ms: 2.5 },
-  { name: "large", dataset: "clustered", count: 1_000_000, path: "standard", targetP99Ms: 6.0 },
-  { name: "xlarge", dataset: "clustered", count: 10_000_000, path: "standard", targetP99Ms: 16.0 },
-  { name: "deep-zoom", dataset: "clustered", count: 10_000_000, path: "deepZoom", targetP99Ms: 8.0 },
-  { name: "xlarge-zoom", dataset: "clustered", count: 10_000_000, path: "zoomSweep", targetP99Ms: 16.0 },
-  { name: "large-zoom", dataset: "clustered", count: 1_000_000, path: "zoomSweep", targetP99Ms: 6.0 },
+  { name: "small", dataset: "communities", count: 10_000, path: "standard", nodeLabels: true, edgeLabels: true, targetP99Ms: 1.0 },
+  { name: "medium", dataset: "communities", count: 250_000, path: "standard", nodeLabels: true, edgeLabels: true, targetP99Ms: 2.5 },
+  { name: "large", dataset: "communities", count: 1_000_000, path: "standard", nodeLabels: true, edgeLabels: true, targetP99Ms: 6.0 },
+  { name: "xlarge", dataset: "communities", count: 10_000_000, path: "standard", nodeLabels: true, edgeLabels: true, targetP99Ms: 16.0 },
+  { name: "deep-zoom", dataset: "communities", count: 10_000_000, path: "deepZoom", nodeLabels: true, edgeLabels: true, targetP99Ms: 8.0 },
+  { name: "xlarge-zoom", dataset: "communities", count: 10_000_000, path: "zoomSweep", nodeLabels: true, edgeLabels: true, targetP99Ms: 16.0 },
+  { name: "large-zoom", dataset: "communities", count: 1_000_000, path: "zoomSweep", nodeLabels: true, edgeLabels: true, targetP99Ms: 6.0 },
+  { name: "mesh", dataset: "mesh", count: 1_000_000, path: "standard", nodeLabels: true, edgeLabels: true, targetP99Ms: 6.0 },
+  { name: "hierarchy", dataset: "hierarchy", count: 1_000_000, path: "standard", nodeLabels: true, edgeLabels: true, targetP99Ms: 6.0 },
 ];
 
 export interface CaseRun {
@@ -33,8 +35,7 @@ export interface CaseRun {
 }
 
 export async function runCase(graph: Graph, c: BenchCase): Promise<CaseRun> {
-  const { data } = loadDataset(c.dataset, c.count);
-  graph.setNodes(data, { copy: true });
+  setGraph(graph, c.dataset, c.count, { nodes: c.nodeLabels, edges: c.edgeLabels });
   graph.camera.fit();
   const path = PATHS[c.path];
   const result = await graph.benchmark({ path: path.keys, frames: path.frames });
@@ -55,6 +56,7 @@ function rows(r: BenchmarkResult): Row[] {
   for (const [name, series] of Object.entries(r.passMs)) out.push({ label: `  gpu · ${name}`, summary: summarize(series), unit: "ms" });
   out.push({ label: "worker cpu", summary: summarize(r.cpuMs), unit: "ms" });
   out.push({ label: "visible nodes", summary: summarize(r.visibleNodes), unit: "count" });
+  out.push({ label: "visible edges", summary: summarize(r.visibleEdges), unit: "count" });
   return out;
 }
 
@@ -111,6 +113,7 @@ export function report(graph: Graph, runs: readonly CaseRun[]): object {
         gpuMs: Array.from(r.gpuMs),
         cpuMs: Array.from(r.cpuMs),
         visibleNodes: Array.from(r.visibleNodes),
+        visibleEdges: Array.from(r.visibleEdges),
         passMs: Object.fromEntries(Object.entries(r.passMs).map(([k, v]) => [k, Array.from(v)])),
       },
     })),

@@ -10,6 +10,7 @@ export type {
   GraphEvents,
   GraphOptions,
   GraphStats,
+  LabelSnapshot,
   EdgeData,
   EdgeDebugMode,
   NodeData,

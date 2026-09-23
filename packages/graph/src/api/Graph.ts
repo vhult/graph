@@ -16,6 +16,7 @@ import type {
   GraphEvents,
   GraphOptions,
   GraphStats,
+  LabelSnapshot,
   EdgeData,
   NodeData,
   RGBA,
@@ -31,8 +32,8 @@ const DEFAULT_EDGE_MAX_OVERDRAW = 6;
 /** CSS px: shorter edges do not read as lines. */
 const DEFAULT_EDGE_MIN_LENGTH_PX = 6;
 const DEFAULT_LABEL_SIZE = 12;
-/** Enough to name what matters on screen without covering it. */
-const DEFAULT_LABEL_MAX = 300;
+const DEFAULT_LABEL_PADDING = 2;
+const DEFAULT_LABEL_FONT = "system-ui, -apple-system, 'Segoe UI', sans-serif";
 const DEFAULT_FIT_PADDING = 24;
 
 type Listener<K extends keyof GraphEvents> = (payload: GraphEvents[K]) => void;
@@ -77,7 +78,8 @@ export class Graph {
         edgeMinLengthPx: Math.max(0, options.edgeMinLengthPx ?? DEFAULT_EDGE_MIN_LENGTH_PX),
         edgeDebug: options.edgeDebug ?? "off",
         labelSize: Math.max(1, options.labelSize ?? DEFAULT_LABEL_SIZE),
-        labelMax: Math.max(0, Math.floor(options.labelMax ?? DEFAULT_LABEL_MAX)),
+        labelPadding: Math.max(0, options.labelPadding ?? DEFAULT_LABEL_PADDING),
+        labelFont: options.labelFont ?? DEFAULT_LABEL_FONT,
         lodTargetPx: Math.max(0, options.lodTargetPx ?? DEFAULT_LOD_TARGET_PX),
       },
     };
@@ -119,6 +121,7 @@ export class Graph {
   private destroyed = false;
   private benchSeq = 0;
   private benchPending: { id: number; resolve: (r: BenchmarkResult) => void; reject: (e: Error) => void } | null = null;
+  private readonly snapshotPending = new Map<number, { resolve: (s: LabelSnapshot) => void; reject: (e: Error) => void }>();
   private readonly listeners: { [K in keyof GraphEvents]: Set<Listener<K>> } = { error: new Set() };
   private readonly pointer: PointerInput;
   private readonly resizeObserver: ResizeObserver | null = null;
@@ -275,6 +278,16 @@ export class Graph {
     });
   }
 
+  /** Candidates and decisions of the next label placement. */
+  readLabelSnapshot(): Promise<LabelSnapshot> {
+    if (this.destroyed) return Promise.reject(new GraphError("destroyed", "Graph destroyed"));
+    const id = ++this.benchSeq;
+    return new Promise<LabelSnapshot>((resolve, reject) => {
+      this.snapshotPending.set(id, { resolve, reject });
+      this.send({ t: "labelSnapshot", id });
+    });
+  }
+
   /** Copy the latest frame stats into `out` (allocation-free when `out` is reused). */
   readStats(out: GraphStats = {} as GraphStats): GraphStats {
     const s = this.state;
@@ -292,6 +305,10 @@ export class Graph {
     out.gpuMs = s[STATE_SLOT.GPU_MS_AVG]!;
     out.visibleNodes = s[STATE_SLOT.VISIBLE_NODES]!;
     out.visibleEdges = s[STATE_SLOT.VISIBLE_EDGES]!;
+    out.labelsShown = s[STATE_SLOT.LABELS_SHOWN]!;
+    out.labelSolves = s[STATE_SLOT.LABEL_SOLVES]!;
+    out.labelsAdded = s[STATE_SLOT.LABELS_ADDED]!;
+    out.labelsRemoved = s[STATE_SLOT.LABELS_REMOVED]!;
     out.passMs ??= {};
     const slots = this.caps.profilerSlots;
     for (let k = 0; k < slots.length; k++) out.passMs[slots[k]!] = s[STATE_SLOT.SLOT_MS_BASE + k]!;
@@ -310,6 +327,8 @@ export class Graph {
     this.destroyed = true;
     this.benchPending?.reject(new GraphError("destroyed", "Graph destroyed during benchmark"));
     this.benchPending = null;
+    for (const p of this.snapshotPending.values()) p.reject(new GraphError("destroyed", "Graph destroyed"));
+    this.snapshotPending.clear();
     this.pointer.dispose();
     this.resizeObserver?.disconnect();
     // The worker closes itself after releasing the device; terminate as a backstop.
@@ -338,6 +357,12 @@ export class Graph {
           this.benchPending = null;
           p.resolve(m.result);
         }
+        return;
+      }
+      case "labelSnapshot": {
+        const p = this.snapshotPending.get(m.id);
+        this.snapshotPending.delete(m.id);
+        p?.resolve(m.snapshot);
         return;
       }
       case "destroyed":
