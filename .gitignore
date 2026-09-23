@@ -3,3 +3,5 @@ dist/
 storybook-static/
 *.log
 .DS_Store
+TODO.md
+CLAUDE.local.md
