@@ -1,16 +1,17 @@
 import { rng, type GraphDataset } from "@vhult/graph-bench";
 
 export const HOLE = {
-  inner: 3.4,
+  inner: 5,
   outer: 24,
   body: 11,
   wispShare: 0.1,
-  frame: 22,
+  frame: 28,
+  tilt: 89,
   rows: 240,
   samples: 512,
   scale: 30,
   orbit: 12,
-  ringShare: 0.25,
+  ringShare: 0.1,
   clumpShare: 0.7,
   clumpWidth: 0.25,
   clumpLength: 0.06,
@@ -250,11 +251,11 @@ export function blackHole(total: number, tiltDeg: number, seed = 1): BlackHole {
     const f = (a - h.inner) / span;
     const heat = Math.pow(Math.max(0, 1 - (a - h.inner) / (h.body - h.inner)), 1.6) * 0.9 + 0.1 * (1 - f);
     const rgb = f < 0.25 ? mix(HOT, WARM, f / 0.25) : mix(WARM, COOL, Math.min(1, (f - 0.25) / 0.75));
-    const alpha = 0.015 + 0.2 * heat;
-    const size = 2.5 + 2 * r();
+    const alpha = 0.012 + 0.16 * heat;
+    const size = 3 + 2.5 * r();
     add(a, phi, 0, word(rgb, alpha), size);
     add(a, phi, 1, word(rgb, alpha * 0.9), size);
-    if (i < rings) add(a, phi, 2, word(HOT, 0.12), 1.2);
+    if (i < rings) add(a, phi, 2, word(HOT, 0.2), 1.4);
   }
   return {
     graph: { nodes: { count: n, positions, colors, sizes }, edges: { count: 0, indices: new Uint32Array(0) } },

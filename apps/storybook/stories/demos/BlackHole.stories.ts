@@ -6,19 +6,21 @@ import { countControl, GRAPH_ARGS, renderGraph, type GraphArgs } from "../../src
 
 interface Args extends GraphArgs {
   speed: number;
-  tilt: number;
 }
 
 const SIZES = [250_000, 1_000_000] as const;
 let motion: GpuMotion | null = null;
 let run = 0;
+let frame: (() => void) | null = null;
 
-const hole = (a: Args) => cached(`blackhole:${a.nodes}:${a.seed}`, () => blackHole(a.nodes, a.tilt, a.seed));
+const hole = (a: Args) => cached(`blackhole:${a.nodes}:${a.seed}`, () => blackHole(a.nodes, HOLE.tilt, a.seed));
 
 function stop(): void {
   run++;
   motion?.stop();
   motion = null;
+  if (frame) removeEventListener("resize", frame);
+  frame = null;
 }
 
 const meta: Meta<Args> = {
@@ -35,31 +37,30 @@ const meta: Meta<Args> = {
       stop();
       const id = run;
       graph.setBackground([0, 0, 0, 0]);
-      graph.camera.setView({ x: 0, y: 0, rotation: 0, zoom: (innerWidth * devicePixelRatio) / (2 * HOLE.frame * HOLE.scale) });
+      frame = () => graph.camera.setView({ x: 0, y: 0, rotation: 0, zoom: (innerWidth * devicePixelRatio) / (2 * HOLE.frame * HOLE.scale) });
+      frame();
+      addEventListener("resize", frame);
       const h = hole(a).data;
-      void GpuMotion.start(graph, { count: g.nodes.count, data: h.data, params: holeParams(a.tilt, h.tableOffset), wgsl: HOLE_WGSL }).then((m) => {
+      void GpuMotion.start(graph, { count: g.nodes.count, data: h.data, params: holeParams(HOLE.tilt, h.tableOffset), wgsl: HOLE_WGSL }).then((m) => {
         if (id !== run) return m.stop();
         m.speed = a.speed;
         motion = m;
       });
     },
-    onUpdate: (_graph, a, prev) => {
-      if (!motion) return;
-      motion.speed = a.speed;
-      if (a.tilt !== prev.tilt) motion.setParam(0, (a.tilt * Math.PI) / 180);
+    onUpdate: (_graph, a) => {
+      if (motion) motion.speed = a.speed;
     },
     dispose: stop,
   }),
   argTypes: {
     nodes: countControl(SIZES),
     speed: { control: { type: "range", min: 0, max: 4, step: 0.1 } },
-    tilt: { control: { type: "range", min: 80, max: 90, step: 0.25 } },
     seed: { control: { type: "number", min: 1, step: 1 } },
     nodeScale: { control: { type: "range", min: 0.1, max: 4, step: 0.1 } },
     lodTargetPx: { control: { type: "range", min: 0, max: 8, step: 0.5 } },
   },
-  args: { ...GRAPH_ARGS, nodes: 1_000_000, speed: 1, tilt: 89, edges: false, lodTargetPx: 0 },
-  parameters: { controls: { include: ["nodes", "speed", "tilt", "seed", "nodeScale", "lodTargetPx"] } },
+  args: { ...GRAPH_ARGS, nodes: 1_000_000, speed: 1, edges: false, lodTargetPx: 0 },
+  parameters: { controls: { include: ["nodes", "speed", "seed", "nodeScale", "lodTargetPx"] } },
 };
 
 export default meta;
