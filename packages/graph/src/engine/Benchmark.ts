@@ -24,6 +24,9 @@ export class Benchmark {
   private lastT0 = NaN;
   private pendingSamples = 0;
   private deadline = Infinity;
+  private wallMs = NaN;
+  private gpuFinished = false;
+  firstT0 = NaN;
 
   constructor(
     readonly id: number,
@@ -54,7 +57,10 @@ export class Benchmark {
     const k = this.step - this.warmup;
     this.step++;
     if (k < 0) return;
-    if (k === 0) this.firstFrameIndex = frameIndex;
+    if (k === 0) {
+      this.firstFrameIndex = frameIndex;
+      this.firstT0 = t0;
+    }
     this.cpuMs[k] = cpuMs;
     if (k > 0) this.intervalMs[k] = t0 - this.lastT0;
     this.lastT0 = t0;
@@ -75,15 +81,22 @@ export class Benchmark {
     this.visibleEdges[k] = s.edgeCount;
   }
 
+  gpuDone(wallMs: number): void {
+    this.wallMs = wallMs;
+    this.gpuFinished = true;
+  }
+
   /** Recording finished and samples are in (or the deadline passed). */
   get complete(): boolean {
-    return !this.driving && (this.pendingSamples <= 0 || performance.now() >= this.deadline);
+    if (this.driving) return false;
+    if (performance.now() >= this.deadline) return true;
+    return this.pendingSamples <= 0 && this.gpuFinished;
   }
 
   result(
     meta: Omit<
       BenchmarkResult,
-      "frames" | "warmup" | "cpuMs" | "intervalMs" | "gpuMs" | "passMs" | "visibleNodes" | "visibleEdges"
+      "frames" | "warmup" | "wallMs" | "cpuMs" | "intervalMs" | "gpuMs" | "passMs" | "visibleNodes" | "visibleEdges"
     >,
   ): BenchmarkResult {
     const passMs: Record<string, Float64Array> = {};
@@ -92,6 +105,7 @@ export class Benchmark {
       ...meta,
       frames: this.path.frames,
       warmup: this.warmup,
+      wallMs: this.wallMs,
       cpuMs: this.cpuMs,
       intervalMs: this.intervalMs,
       gpuMs: this.gpuMs,

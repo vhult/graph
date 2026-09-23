@@ -42,6 +42,7 @@ export interface FrameContext {
 
 export interface ComputeNode {
   readonly stage: StageId;
+  readonly name: string;
   /** Profiler slot names, one per phase, encoded in order. */
   readonly phases: readonly string[];
   /** Dirty flags that require this pass to run; otherwise its last output is reused. */
@@ -57,6 +58,7 @@ export interface ComputeNode {
 
 export interface RenderNode {
   readonly stage: StageId;
+  readonly name: string;
   encode(pass: GPURenderPassEncoder, ctx: FrameContext): void;
 }
 
@@ -66,16 +68,33 @@ interface TimedCompute {
   descs: GPUComputePassDescriptor[];
 }
 
+interface TimedRender {
+  node: RenderNode;
+  slot: number;
+  desc: GPURenderPassDescriptor;
+}
+
+export interface EncodeTimes {
+  row: Float64Array;
+  base: number;
+}
+
 export class FrameGraph {
   private readonly computeNodes: TimedCompute[] = [];
-  private readonly renderNodes: RenderNode[] = [];
+  private readonly renderNodes: TimedRender[] = [];
   private readonly renderSlot: number;
+  split = false;
   // Reused descriptors: no allocation per frame.
   private readonly attachment: GPURenderPassColorAttachment = {
     view: undefined as unknown as GPUTextureView,
     loadOp: "clear",
     storeOp: "store",
     clearValue: { r: 0, g: 0, b: 0, a: 1 },
+  };
+  private readonly loadAttachment: GPURenderPassColorAttachment = {
+    view: undefined as unknown as GPUTextureView,
+    loadOp: "load",
+    storeOp: "store",
   };
   private readonly passDesc: GPURenderPassDescriptor;
 
@@ -91,8 +110,24 @@ export class FrameGraph {
   }
 
   addRender(node: RenderNode): void {
-    this.renderNodes.push(node);
-    this.renderNodes.sort((a, b) => a.stage - b.stage);
+    const slot = this.profiler.register(`render.${node.name}`);
+    this.renderNodes.push({ node, slot, desc: { label: `render.${node.name}`, colorAttachments: [this.loadAttachment] } });
+    this.renderNodes.sort((a, b) => a.node.stage - b.node.stage);
+  }
+
+  get computeNames(): string[] {
+    return this.computeNodes.map((c) => c.node.name);
+  }
+
+  slotsOf(node: ComputeNode): readonly number[] {
+    return this.computeNodes.find((c) => c.node === node)?.slots ?? [];
+  }
+
+  slotGroups(count: number): string[] {
+    const out = new Array<string>(count).fill("render");
+    for (const c of this.computeNodes) for (const slot of c.slots) out[slot] = c.node.name;
+    for (const r of this.renderNodes) out[r.slot] = `render.${r.node.name}`;
+    return out;
   }
 
   /** Clear colour, straight alpha (converted to premultiplied). */
@@ -100,7 +135,8 @@ export class FrameGraph {
     this.attachment.clearValue = { r: r * a, g: g * a, b: b * a, a };
   }
 
-  execute(encoder: GPUCommandEncoder, target: GPUTextureView, ctx: FrameContext): void {
+  execute(encoder: GPUCommandEncoder, target: GPUTextureView, ctx: FrameContext, times: EncodeTimes | null = null): void {
+    let t = times ? performance.now() : 0;
     for (let i = 0; i < this.computeNodes.length; i++) {
       const c = this.computeNodes[i]!;
       if ((ctx.dirty & c.node.runsOn) === 0 || ctx.nodeCount === 0) continue;
@@ -114,12 +150,33 @@ export class FrameGraph {
         c.node.encodePhase(p, pass, ctx);
         pass.end();
       }
+      if (times) {
+        const now = performance.now();
+        times.row[times.base + i] = now - t;
+        t = now;
+      }
     }
 
     this.attachment.view = target;
-    this.passDesc.timestampWrites = this.profiler.timestampWrites(this.renderSlot);
-    const pass = encoder.beginRenderPass(this.passDesc);
-    for (let i = 0; i < this.renderNodes.length; i++) this.renderNodes[i]!.encode(pass, ctx);
-    pass.end();
+    if (this.split) this.encodeSplit(encoder, target, ctx);
+    else {
+      this.passDesc.timestampWrites = this.profiler.timestampWrites(this.renderSlot);
+      const pass = encoder.beginRenderPass(this.passDesc);
+      for (let i = 0; i < this.renderNodes.length; i++) this.renderNodes[i]!.node.encode(pass, ctx);
+      pass.end();
+    }
+    if (times) times.row[times.base + this.computeNodes.length] = performance.now() - t;
+  }
+
+  private encodeSplit(encoder: GPUCommandEncoder, target: GPUTextureView, ctx: FrameContext): void {
+    this.loadAttachment.view = target;
+    for (let i = 0; i < this.renderNodes.length; i++) {
+      const r = this.renderNodes[i]!;
+      const desc = i === 0 ? this.passDesc : r.desc;
+      desc.timestampWrites = this.profiler.timestampWrites(r.slot);
+      const pass = encoder.beginRenderPass(desc);
+      r.node.encode(pass, ctx);
+      pass.end();
+    }
   }
 }

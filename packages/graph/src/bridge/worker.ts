@@ -55,6 +55,13 @@ async function init(msg: Extract<ToWorker, { t: "init" }>): Promise<void> {
       onError: fail,
       onBenchmark: (id, result, transfer) => post({ t: "benchmark", id, result }, transfer),
       onLabelSnapshot: (id, snapshot, transfer) => post({ t: "labelSnapshot", id, snapshot }, transfer),
+      probeSink: {
+        ring: (layout, frames, buffer) => post({ t: "debugRing", columns: layout.columns, gpuGroups: layout.gpuGroups, frames, buffer }),
+        rows: (data) => post({ t: "debugRows", data }, [data.buffer as ArrayBuffer]),
+        totals: (messages) => post({ t: "debugTotals", messages }),
+        recording: (layout, data, rows, durationMs, messages) =>
+          post({ t: "debugRecording", columns: layout.columns, gpuGroups: layout.gpuGroups, data, rows, durationMs, messages }, [data.buffer as ArrayBuffer]),
+      },
     });
   } catch (e) {
     fail(e, true);
@@ -113,6 +120,10 @@ function dispatch(msg: ToWorker): void {
       return e.benchmark(msg.id, msg.options);
     case "labelSnapshot":
       return e.labelSnapshot(msg.id);
+    case "debug":
+      return e.probe.setLevel(msg.level);
+    case "debugRecord":
+      return e.probe.record(msg.on);
     case "destroy":
       clearInterval(stateTimer);
       e.destroy();
@@ -136,7 +147,11 @@ scope.onmessage = (ev) => {
     return;
   }
   try {
-    dispatch(msg);
+    if (engine.probe.full) {
+      const t0 = performance.now();
+      dispatch(msg);
+      engine?.probe.message(msg.t, performance.now() - t0);
+    } else dispatch(msg);
   } catch (e) {
     fail(e, false);
   }

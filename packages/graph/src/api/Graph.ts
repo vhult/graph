@@ -5,6 +5,7 @@
 import { InputRing } from "../bridge/InputRing";
 import type { FromWorker, ToWorker } from "../bridge/protocol";
 import { createStateBuffer, STATE_SLOT } from "../bridge/SharedState";
+import { DebugOverlay } from "./DebugOverlay";
 import { errorFromCode, GraphError, UnsupportedError } from "./errors";
 import { PointerInput, type InputSink } from "./PointerInput";
 import type {
@@ -12,6 +13,7 @@ import type {
   BenchmarkResult,
   CameraView,
   CopyOption,
+  DebugRecording,
   GraphCaps,
   GraphEvents,
   GraphOptions,
@@ -81,6 +83,7 @@ export class Graph {
         labelPadding: Math.max(0, options.labelPadding ?? DEFAULT_LABEL_PADDING),
         labelFont: options.labelFont ?? DEFAULT_LABEL_FONT,
         lodTargetPx: Math.max(0, options.lodTargetPx ?? DEFAULT_LOD_TARGET_PX),
+        timeOrigin: performance.timeOrigin,
       },
     };
 
@@ -116,6 +119,18 @@ export class Graph {
     }),
   };
 
+  readonly debug = {
+    open: (): void => this.overlay().show(),
+    close: (): void => this.debugOverlay?.hide(),
+    toggle: (): void => (this.debugOverlay?.open ? this.debugOverlay.hide() : this.overlay().show()),
+    isOpen: (): boolean => this.debugOverlay?.open ?? false,
+    expand: (expanded = true): void => this.overlay().setExpanded(expanded),
+    record: (): Promise<DebugRecording> => (this.destroyed ? Promise.reject(new GraphError("destroyed", "Graph destroyed")) : this.overlay().record()),
+    stop: (): void => this.debugOverlay?.stopRecord(),
+  };
+
+  private debugOverlay: DebugOverlay | null = null;
+  private debugRing: Extract<FromWorker, { t: "debugRing" }> | null = null;
   private nodeCount = 0;
   private edgeCount = 0;
   private destroyed = false;
@@ -160,6 +175,7 @@ export class Graph {
 
   /** Bulk-load nodes. The fastest path: arrays are transferred, uploaded via mappedAtCreation. */
   setNodes(data: NodeData, opts?: CopyOption): void {
+    const t0 = this.apiStart();
     const n = data.count;
     if (!Number.isInteger(n) || n < 0) throw new GraphError("invalid-argument", "setNodes: count must be a non-negative integer");
     const transfer: Transferable[] = [];
@@ -168,6 +184,7 @@ export class Graph {
     const sizes = data.sizes && take(data.sizes, n, "sizes", opts, transfer);
     this.nodeCount = n;
     this.send({ t: "nodes", count: n, positions, colors, sizes }, transfer);
+    if (t0) this.apiEnd("setNodes", t0);
   }
 
   /**
@@ -178,6 +195,7 @@ export class Graph {
    * nodes first, then edges.
    */
   setEdges(data: EdgeData, opts?: CopyOption): void {
+    const t0 = this.apiStart();
     const n = data.count;
     if (!Number.isInteger(n) || n < 0) throw new GraphError("invalid-argument", "setEdges: count must be a non-negative integer");
     const transfer: Transferable[] = [];
@@ -186,6 +204,7 @@ export class Graph {
     const colors = data.colors && take(data.colors, n * 2, "colors", opts, transfer);
     this.edgeCount = n;
     this.send({ t: "edges", count: n, indices, styles, colors }, transfer);
+    if (t0) this.apiEnd("setEdges", t0);
   }
 
   /**
@@ -194,7 +213,9 @@ export class Graph {
    * remove every node label.
    */
   setNodeLabels(labels: readonly (string | null | undefined)[]): void {
+    const t0 = this.apiStart();
     this.send({ t: "nodeLabels", labels: Array.from(labels, (s) => s ?? "") });
+    if (t0) this.apiEnd("setNodeLabels", t0);
   }
 
   /**
@@ -203,7 +224,9 @@ export class Graph {
    * `[]` to remove every edge label.
    */
   setEdgeLabels(labels: readonly (string | null | undefined)[]): void {
+    const t0 = this.apiStart();
     this.send({ t: "edgeLabels", labels: Array.from(labels, (s) => s ?? "") });
+    if (t0) this.apiEnd("setEdgeLabels", t0);
   }
 
   /** Change the node count; existing data is preserved prefix-wise, new nodes get defaults. */
@@ -228,14 +251,18 @@ export class Graph {
     if (start < 0 || start + (data.length >> 1) > this.nodeCount) {
       throw new GraphError("invalid-argument", "updateNodePositions: range exceeds node count");
     }
+    const t0 = this.apiStart();
     const transfer: Transferable[] = [];
     const d = take(data, data.length, "data", opts, transfer);
     this.send({ t: "updatePositions", start, data: d }, transfer);
+    if (t0) this.apiEnd("updateNodePositions", t0);
   }
 
   /** `rgba` is a packed rgba8unorm word (see `packRgba`). */
   updateNodeColor(index: number, rgba: number): void {
+    const t0 = this.apiStart();
     this.send({ t: "updateColor", index, rgba: rgba >>> 0 });
+    if (t0) this.apiEnd("updateNodeColor", t0);
   }
 
   // ---- style ---------------------------------------------------------------------
@@ -274,7 +301,7 @@ export class Graph {
     const id = ++this.benchSeq;
     return new Promise<BenchmarkResult>((resolve, reject) => {
       this.benchPending = { id, resolve, reject };
-      this.send({ t: "benchmark", id, options: { path: options.path.map((k) => ({ ...k })), frames: options.frames, warmup: options.warmup } });
+      this.send({ t: "benchmark", id, options: { path: options.path.map((k) => ({ ...k })), frames: options.frames, warmup: options.warmup, timing: options.timing } });
     });
   }
 
@@ -309,6 +336,7 @@ export class Graph {
     out.labelSolves = s[STATE_SLOT.LABEL_SOLVES]!;
     out.labelsAdded = s[STATE_SLOT.LABELS_ADDED]!;
     out.labelsRemoved = s[STATE_SLOT.LABELS_REMOVED]!;
+    out.droppedSamples = s[STATE_SLOT.PROFILER_DROPPED]!;
     out.passMs ??= {};
     const slots = this.caps.profilerSlots;
     for (let k = 0; k < slots.length; k++) out.passMs[slots[k]!] = s[STATE_SLOT.SLOT_MS_BASE + k]!;
@@ -329,6 +357,7 @@ export class Graph {
     this.benchPending = null;
     for (const p of this.snapshotPending.values()) p.reject(new GraphError("destroyed", "Graph destroyed"));
     this.snapshotPending.clear();
+    this.debugOverlay?.destroy();
     this.pointer.dispose();
     this.resizeObserver?.disconnect();
     // The worker closes itself after releasing the device; terminate as a backstop.
@@ -336,6 +365,29 @@ export class Graph {
   }
 
   // ---- internals -----------------------------------------------------------------
+
+  private overlay(): DebugOverlay {
+    if (this.destroyed) throw new GraphError("destroyed", "Graph has been destroyed");
+    if (!this.debugOverlay) {
+      this.debugOverlay = new DebugOverlay(this.canvas, {
+        caps: this.caps,
+        send: (msg) => this.send(msg),
+        readStats: (out) => this.readStats(out),
+        pixelRatio: () => this.pixelRatio,
+      });
+      const r = this.debugRing;
+      if (r) this.debugOverlay.onRing(r.columns, r.gpuGroups, r.frames, r.buffer);
+    }
+    return this.debugOverlay;
+  }
+
+  private apiStart(): number {
+    return this.debugOverlay?.timingApi ? performance.now() : 0;
+  }
+
+  private apiEnd(name: string, t0: number): void {
+    this.debugOverlay?.apiCall(name, performance.now() - t0);
+  }
 
   private send(msg: ToWorker, transfer?: Transferable[]): void {
     if (this.destroyed) throw new GraphError("destroyed", "Graph has been destroyed");
@@ -359,6 +411,19 @@ export class Graph {
         }
         return;
       }
+      case "debugRing":
+        this.debugRing = m;
+        this.debugOverlay?.onRing(m.columns, m.gpuGroups, m.frames, m.buffer);
+        return;
+      case "debugRows":
+        this.debugOverlay?.onRows(m.data);
+        return;
+      case "debugTotals":
+        this.debugOverlay?.onTotals(m.messages);
+        return;
+      case "debugRecording":
+        this.debugOverlay?.onRecording(m.columns, m.gpuGroups, m.data, m.rows, m.durationMs, m.messages);
+        return;
       case "labelSnapshot": {
         const p = this.snapshotPending.get(m.id);
         this.snapshotPending.delete(m.id);

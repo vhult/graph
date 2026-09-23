@@ -178,6 +178,7 @@ const levelsFor = (chunks: number) => Math.ceil(Math.log2(Math.max(1, chunks)));
 
 export class LabelPass implements ComputeNode {
   readonly stage = Stage.LABEL_PLACE;
+  readonly name = "labels";
   readonly phases = ["label.mark", "label.order", "label.tree", "label.edges", "label.candidates", "label.lists", "label.rounds"] as const;
   readonly runsOn = SOLVE_TRIGGERS | Dirty.LABELS | Dirty.LABELLED;
 
@@ -185,6 +186,8 @@ export class LabelPass implements ComputeNode {
   requestSolve: () => void = () => {};
   onSnapshot: (id: number, snapshot: LabelSnapshot) => void = () => {};
   marked = false;
+  lastSolveMs = NaN;
+  private solveStart = 0;
 
   private readonly args: GPUBuffer;
   private readonly shown: GPUBuffer;
@@ -465,6 +468,7 @@ export class LabelPass implements ComputeNode {
     this.readbacks[free]!.busy = true;
     this.solveReadback = free;
     this.solveId++;
+    this.solveStart = performance.now();
     this.step = 0;
     this.wanted = false;
     this.generation = this.labels.generation;
@@ -584,6 +588,7 @@ export class LabelPass implements ComputeNode {
     const count = Math.min(words[C.WORK_SHOWN]!, C.LABEL_SHOWN_MAX);
     if (solve > this.appliedSolve && generation === this.labels.generation) {
       this.appliedSolve = solve;
+      this.lastSolveMs = performance.now() - this.solveStart;
       this.onShown(words.subarray(READ_WORDS, READ_WORDS + 2 * count), count);
     }
     if (this.wanted) this.requestSolve();

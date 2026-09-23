@@ -6,13 +6,13 @@ const preview: Preview = {
   initialGlobals: { hud: "on" },
   globalTypes: {
     hud: {
-      description: "Stats overlay",
+      description: "Debug overlay",
       toolbar: {
-        title: "Stats",
+        title: "Debug",
         icon: "speed",
         items: [
-          { value: "on", title: "Stats on" },
-          { value: "off", title: "Stats off" },
+          { value: "on", title: "Debug on" },
+          { value: "off", title: "Debug off" },
         ],
         dynamicTitle: true,
       },

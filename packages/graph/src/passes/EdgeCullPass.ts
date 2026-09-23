@@ -44,6 +44,7 @@ export interface EdgeCullOptions {
 
 export class EdgeCullPass implements ComputeNode {
   readonly stage = Stage.EDGE_CULL;
+  readonly name = "edgeCull";
   readonly phases = ["edge.bounds", "edge.cull", "edge.expand"] as const;
   readonly runsOn = Dirty.TOPOLOGY | Dirty.POSITIONS | Dirty.CAMERA | Dirty.STYLE | Dirty.STATE | Dirty.RESIZE | Dirty.EDGES;
 

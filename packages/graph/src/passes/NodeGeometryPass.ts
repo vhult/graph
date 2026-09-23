@@ -14,6 +14,7 @@ const BUCKETS = [ENGINE_CONSTANTS.BUCKET_NORMAL, ENGINE_CONSTANTS.BUCKET_FOREGRO
 
 export class NodeGeometryPass implements RenderNode {
   readonly stage = Stage.NODE_GEOMETRY;
+  readonly name = "nodes";
 
   private bindGroup: GPUBindGroup | null = null;
   private scratch: GPUBuffer | null = null;

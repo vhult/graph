@@ -153,6 +153,7 @@ export interface GraphStats {
   labelsAdded: number;
   /** Labels that started fading out since start. */
   labelsRemoved: number;
+  droppedSamples: number;
 }
 
 /** The candidates of one label placement and what the placement decided for each. */
@@ -211,6 +212,7 @@ export interface BenchmarkOptions {
   frames: number;
   /** Frames rendered at the first key before recording starts. Default 10. */
   warmup?: number;
+  timing?: "off" | "passes" | "full";
 }
 
 /** Per-frame series; NaN where no sample exists. */
@@ -221,6 +223,7 @@ export interface BenchmarkResult {
   viewport: [width: number, height: number];
   adapter: string;
   timestampQuery: boolean;
+  wallMs: number;
   /** Worker CPU time per frame, ms. */
   cpuMs: Float64Array;
   /** Time between consecutive rendered frames, ms (vsync- or GPU-bound). */
@@ -233,6 +236,41 @@ export interface BenchmarkResult {
   visibleNodes: Float64Array;
   /** Edges submitted per frame, after the edge cull (see `GraphStats.visibleEdges`). */
   visibleEdges: Float64Array;
+}
+
+export interface DebugSummary {
+  n: number;
+  ran: number;
+  mean: number;
+  p50: number;
+  p95: number;
+  p99: number;
+  max: number;
+}
+
+export interface DebugTotals {
+  count: number;
+  totalMs: number;
+  maxMs: number;
+}
+
+export interface DebugRecording {
+  schema: 1;
+  date: string;
+  userAgent: string;
+  adapter: string;
+  caps: GraphCaps;
+  nodeCount: number;
+  edgeCount: number;
+  viewport: [width: number, height: number];
+  pixelRatio: number;
+  durationMs: number;
+  frames: number;
+  gpuGroups: Record<string, string>;
+  summary: Record<string, DebugSummary>;
+  series: Record<string, number[]>;
+  workerMessages: Record<string, DebugTotals>;
+  mainThread: Record<string, DebugTotals>;
 }
 
 export interface GraphEvents {

@@ -24,9 +24,9 @@ body,
   cursor: grabbing;
 }
 
-.stage-hud {
+.stage-note {
   position: absolute;
-  top: 8px;
+  bottom: 8px;
   left: 8px;
   padding: 6px 8px;
   border-radius: 4px;
@@ -38,6 +38,10 @@ body,
   /* Isolated: text updates never trigger layout or paint outside the box. */
   contain: layout paint style;
   max-width: calc(100% - 16px);
+}
+
+.stage-note:empty {
+  display: none;
 }
 
 .stage-error {

@@ -6,6 +6,10 @@
 import type { GraphErrorCode } from "../api/errors";
 import type { BenchmarkOptions, BenchmarkResult, CameraView, EdgeDebugMode, GraphCaps, LabelSnapshot, RGBA } from "../api/types";
 
+export type DebugLevel = 0 | 1 | 2;
+
+export type MessageTotals = Record<string, [count: number, totalMs: number, maxMs: number]>;
+
 export interface InitOptions {
   background: RGBA;
   controls: boolean;
@@ -27,6 +31,7 @@ export interface InitOptions {
   labelSize: number;
   labelPadding: number;
   labelFont: string;
+  timeOrigin: number;
 }
 
 export type ToWorker =
@@ -59,6 +64,8 @@ export type ToWorker =
   | { t: "render" }
   | { t: "benchmark"; id: number; options: BenchmarkOptions }
   | { t: "labelSnapshot"; id: number }
+  | { t: "debug"; level: DebugLevel }
+  | { t: "debugRecord"; on: boolean }
   | { t: "destroy" };
 
 export type FromWorker =
@@ -68,4 +75,8 @@ export type FromWorker =
   | { t: "state"; data: Float64Array }
   | { t: "benchmark"; id: number; result: BenchmarkResult }
   | { t: "labelSnapshot"; id: number; snapshot: LabelSnapshot }
+  | { t: "debugRing"; columns: string[]; gpuGroups: string[]; frames: number; buffer: SharedArrayBuffer | null }
+  | { t: "debugRows"; data: Float64Array }
+  | { t: "debugTotals"; messages: MessageTotals }
+  | { t: "debugRecording"; columns: string[]; gpuGroups: string[]; data: Float64Array; rows: number; durationMs: number; messages: MessageTotals }
   | { t: "destroyed" };

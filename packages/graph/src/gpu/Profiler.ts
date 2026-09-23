@@ -24,6 +24,7 @@ const READBACK_BYTES = EDGE_COUNTS_OFFSET + EDGE_COUNTS_BYTES;
 
 export interface ProfileSample {
   frameIndex: number;
+  complete: boolean;
   /** First pass begin → last pass end, ms. NaN without timestamp-query. */
   gpuTotalMs: number;
   /** Per slot duration in ms; NaN when the slot did not run or timing is unavailable. */
@@ -39,6 +40,7 @@ interface RingEntry {
   busy: boolean;
   frameIndex: number;
   ranMask: number;
+  complete: boolean;
   hasCounts: boolean;
   hasEdgeCounts: boolean;
   onMapped: () => void;
@@ -55,9 +57,13 @@ export class Profiler {
   private readonly ring: RingEntry[] = [];
   private readonly writes: (GPURenderPassTimestampWrites | undefined)[] = [];
   private ranMask = 0;
+  private complete = true;
+  private timedAll = true;
+  private alwaysMask = 0;
   private scheduled: RingEntry | null = null;
   private readonly sample: ProfileSample = {
     frameIndex: 0,
+    complete: false,
     gpuTotalMs: NaN,
     slotMs: new Float64Array(MAX_PROFILE_SLOTS),
     bucketCounts: new Uint32Array(ENGINE_CONSTANTS.NUM_BUCKETS),
@@ -65,6 +71,7 @@ export class Profiler {
   };
   /** Frames whose readback was skipped because the ring was full. */
   droppedFrames = 0;
+  zeroSamples = 0;
 
   constructor(
     private readonly device: GPUDevice,
@@ -85,6 +92,7 @@ export class Profiler {
         busy: false,
         frameIndex: 0,
         ranMask: 0,
+        complete: false,
         hasCounts: false,
         hasEdgeCounts: false,
         onMapped: () => this.read(entry),
@@ -104,14 +112,29 @@ export class Profiler {
     return slot;
   }
 
-  /** Timestamp writes for a pass descriptor (undefined without timestamp-query). Marks the slot as run. */
+  timeAlways(slots: readonly number[]): void {
+    for (const slot of slots) this.alwaysMask |= 1 << slot;
+  }
+
+  setTimed(all: boolean): void {
+    this.timedAll = all;
+  }
+
+  /** Timestamp writes for a pass descriptor, or undefined when the slot is not timed. */
   timestampWrites(slot: number): GPURenderPassTimestampWrites | undefined {
-    this.ranMask |= 1 << slot;
-    return this.writes[slot];
+    const bit = 1 << slot;
+    if (!this.timedAll && (this.alwaysMask & bit) === 0) {
+      this.complete = false;
+      return undefined;
+    }
+    const w = this.writes[slot];
+    if (w) this.ranMask |= bit;
+    return w;
   }
 
   beginFrame(): void {
     this.ranMask = 0;
+    this.complete = this.querySet !== null;
     this.scheduled = null;
   }
 
@@ -141,6 +164,7 @@ export class Profiler {
     entry.busy = true;
     entry.frameIndex = frameIndex;
     entry.ranMask = this.ranMask;
+    entry.complete = this.complete;
     entry.hasCounts = drawArgs !== null;
     entry.hasEdgeCounts = edgeDrawArgs !== null;
     this.scheduled = entry;
@@ -166,6 +190,7 @@ export class Profiler {
     const words = new Uint32Array(e.buffer.getMappedRange());
     const s = this.sample;
     s.frameIndex = e.frameIndex;
+    s.complete = e.complete;
     s.slotMs.fill(NaN);
     let first = Infinity;
     let last = -Infinity;
@@ -175,13 +200,14 @@ export class Profiler {
         const w = slot * 4; // two u64 = four u32 words per slot
         const begin = words[w]! + words[w + 1]! * 4294967296;
         const end = words[w + 2]! + words[w + 3]! * 4294967296;
-        if (end <= begin) continue; // quantized to zero or not written
+        if (end < begin || end === 0) continue;
+        if (end === begin) this.zeroSamples++;
         s.slotMs[slot] = (end - begin) / 1e6;
         if (begin < first) first = begin;
         if (end > last) last = end;
       }
     }
-    s.gpuTotalMs = last > first ? (last - first) / 1e6 : NaN;
+    s.gpuTotalMs = e.complete && last >= first ? (last - first) / 1e6 : NaN;
     const c = COUNTS_OFFSET / 4;
     for (let b = 0; b < ENGINE_CONSTANTS.NUM_BUCKETS; b++) s.bucketCounts[b] = e.hasCounts ? words[c + b * 4 + 1]! : 0;
     s.edgeCount = e.hasEdgeCounts ? words[EDGE_COUNTS_OFFSET / 4 + 1]! : 0;

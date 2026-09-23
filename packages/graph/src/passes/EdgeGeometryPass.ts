@@ -14,6 +14,7 @@ const VARIANTS = 4;
 
 export class EdgeGeometryPass implements RenderNode {
   readonly stage = Stage.EDGE_GEOMETRY;
+  readonly name = "edges";
 
   /** Set by the engine from what the store holds. */
   perEdgeStyle = false;

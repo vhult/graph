@@ -42,6 +42,7 @@ interface Run {
 
 export class EdgeSortPass implements ComputeNode {
   readonly stage = Stage.EDGE_SORT;
+  readonly name = "edgeSort";
   readonly phases = ["edge.keys", "edge.radix", "edge.shuffle", "edge.permute"] as const;
   readonly runsOn = Dirty.TOPOLOGY | Dirty.POSITIONS | Dirty.EDGES;
 

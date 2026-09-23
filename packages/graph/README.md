@@ -103,7 +103,10 @@ Everything is typed; the `.d.ts` files document each option and method.
 | `updateNodePositions`, `updateNodeColor` | Partial updates |
 | `setNodeLabels`, `setEdgeLabels` | Label text, placed without overlap |
 | `camera.fit`, `camera.setView`, `camera.getView` | Camera control |
-| `readStats(out?)` | Frame stats: visible counts, CPU/GPU ms, GPU memory held |
+| `readStats(out?)` | Frame stats: visible counts, CPU/GPU ms, GPU memory held. GPU ms are NaN while the debug overlay is closed |
+| `debug.open`, `debug.close`, `debug.toggle`, `debug.isOpen` | Debug overlay drawn over the canvas. Measures nothing while closed |
+| `debug.expand(bool)` | Switch the overlay between the small view and the full per-pass, per-stage view |
+| `debug.record()`, `debug.stop()` | Record up to 10 s of per-frame data; resolves with the JSON recording |
 | `on("error", fn)` | Runtime errors, e.g. device loss |
 | `destroy()` | Release everything |
 

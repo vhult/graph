@@ -38,6 +38,7 @@ interface SortRun {
 
 export class SortPass implements ComputeNode {
   readonly stage = Stage.SORT;
+  readonly name = "sort";
   readonly phases = ["sort.keys", "sort.radix", "sort.shuffle", "sort.permute"] as const;
   readonly runsOn = Dirty.TOPOLOGY | Dirty.POSITIONS;
 

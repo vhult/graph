@@ -19,7 +19,7 @@ import { GraphStore, type EdgeArrays, type NodeArrays } from "../data/GraphStore
 import { createContractLayouts } from "../gpu/BindLayouts";
 import { readCaps } from "../gpu/Caps";
 import { createGpu, type Gpu } from "../gpu/Device";
-import { FrameGraph, type FrameContext } from "../gpu/FrameGraph";
+import { FrameGraph, type EncodeTimes, type FrameContext } from "../gpu/FrameGraph";
 import { FrameUniform, type FrameInputs } from "../gpu/FrameUniform";
 import { GraphBuffers } from "../gpu/GraphBuffers";
 import { PermuteKernels } from "../gpu/PermuteKernels";
@@ -36,6 +36,7 @@ import { TransformCullPass } from "../passes/TransformCullPass";
 import { UploadPass } from "../passes/UploadPass";
 import { Benchmark } from "./Benchmark";
 import { Dirty } from "./Dirty";
+import { CPU, Probe, type ProbeSink } from "./Probe";
 import { Telemetry } from "./Telemetry";
 
 export interface EngineInit {
@@ -51,6 +52,7 @@ export interface EngineInit {
   onError: (e: GraphError, fatal: boolean) => void;
   onBenchmark: (id: number, result: BenchmarkResult, transfer: ArrayBuffer[]) => void;
   onLabelSnapshot: (id: number, snapshot: LabelSnapshot, transfer: ArrayBuffer[]) => void;
+  probeSink: ProbeSink;
 }
 
 interface Passes {
@@ -64,6 +66,7 @@ interface Passes {
 const CPU_EMA = 0.1;
 const DEFAULT_WARMUP_FRAMES = 10;
 const FIT_PADDING_CSS_PX = 24;
+const BENCH_TIMING = { off: 0, passes: 1, full: 2 } as const;
 
 /** Straight-alpha RGBA in 0..1 to an rgba8unorm word (R in the low byte). */
 function packRgbaTuple(c: RGBA): number {
@@ -73,6 +76,7 @@ function packRgbaTuple(c: RGBA): number {
 
 export class Engine {
   readonly caps: GraphCaps;
+  readonly probe: Probe;
   private readonly camera = new Camera2D();
   private readonly controls = new Controls();
   private readonly frameGraph: FrameGraph;
@@ -85,6 +89,7 @@ export class Engine {
   private readonly inputRec: InputRecord = { type: 0, t: 0, x: 0, y: 0, dx: 0, dy: 0, buttons: 0, mods: 0 };
   private readonly applyInput = (rec: InputRecord): void => this.input(rec);
   private readonly startTime = performance.now();
+  private readonly encodeTimes: EncodeTimes;
 
   private dirty = Dirty.RESIZE;
   private framePending = false;
@@ -100,6 +105,7 @@ export class Engine {
   /** Edge count the edge cull buffers are sized for; -1 forces a check. */
   private reservedEdgesFor = -1;
   private bench: Benchmark | null = null;
+  private labelSolves = 0;
   private benchTimer: ReturnType<typeof setTimeout> | undefined;
 
   private constructor(
@@ -124,6 +130,17 @@ export class Engine {
     graph.flush(); // create the (empty) graph buffers + bind group
     this.telemetry = new Telemetry(init.state);
     profiler.onSample = this.onProfileSample;
+    profiler.timeAlways(frameGraph.slotsOf(passes.labels));
+    profiler.setTimed(false);
+    this.probe = new Probe(
+      profiler.slotNames,
+      frameGraph.slotGroups(profiler.slotNames.length),
+      frameGraph.computeNames,
+      init.ring !== null,
+      init.options.timeOrigin,
+      init.probeSink,
+    );
+    this.encodeTimes = { row: this.probe.row, base: this.probe.encodeBase };
 
     this.controls.enabled = init.options.controls;
     this.pixelRatio = init.pixelRatio;
@@ -150,8 +167,10 @@ export class Engine {
     };
 
     passes.labels.onShown = (shown, count) => {
+      const t0 = this.probe.full ? performance.now() : 0;
       this.labels.applyShown(shown, count, this.clock());
       this.markDirty(Dirty.LABELS | Dirty.LABELLED);
+      if (this.probe.full) this.probe.async(CPU.ASYNC_LABELS, performance.now() - t0);
     };
     passes.labels.requestSolve = () => this.markDirty(Dirty.LABEL_QUERY);
     passes.labels.onSnapshot = (id, snapshot) =>
@@ -304,11 +323,13 @@ export class Engine {
     const fitZoom = this.camera.fitZoom(this.store.bounds, FIT_PADDING_CSS_PX * this.pixelRatio);
     const path = new CameraPath(opts.path, opts.frames, this.store.bounds, fitZoom);
     this.bench = new Benchmark(id, path, opts.warmup ?? DEFAULT_WARMUP_FRAMES, this.profiler.slotNames);
+    this.probe.setOverride(BENCH_TIMING[opts.timing ?? "passes"]);
     this.markDirty(Dirty.CAMERA);
   }
 
   /** Apply one input record (from the ring or the postMessage fallback). */
   input(rec: InputRecord): void {
+    if (this.probe.full) this.probe.input(rec.t);
     if (this.controls.apply(rec, this.camera)) this.dirty |= Dirty.CAMERA;
     if (rec.type === INPUT.POINTER_MOVE || rec.type === INPUT.POINTER_LEAVE) {
       // pointerPx only feeds picking/hover shaders (M8); it does not force a frame yet.
@@ -326,6 +347,7 @@ export class Engine {
   destroy(): void {
     this.destroyed = true;
     clearTimeout(this.benchTimer);
+    this.probe.destroy();
     this.passes.cull.destroy();
     this.passes.edgeCull.destroy();
     this.passes.labels.destroy();
@@ -352,6 +374,9 @@ export class Engine {
     this.framePending = false;
     if (this.destroyed) return;
     const t0 = performance.now();
+    const probe = this.probe;
+    const full = probe.full;
+    if (full) probe.begin(t0);
 
     const ring = this.init.ring;
     if (ring) ring.drain(this.inputRec, this.applyInput);
@@ -362,10 +387,12 @@ export class Engine {
     const dt = this.lastTickMs === 0 ? 0 : (t0 - this.lastTickMs) / 1000;
     this.lastTickMs = t0;
     if (dt > 0 && this.controls.advance(dt, this.camera)) this.dirty |= Dirty.CAMERA;
+    if (full) probe.mark(CPU.INPUT);
     const now = this.clock();
     if (this.labels.stepWidths()) this.dirty |= Dirty.LABEL_QUERY;
     if (this.labels.settle(now)) this.dirty |= Dirty.LABELS | Dirty.LABELLED;
     if (this.labels.animating(now)) this.dirty |= Dirty.LABELS;
+    if (full) probe.mark(CPU.LABELS);
 
     const bench = this.bench;
     const benchFrame = bench !== null && bench.driving;
@@ -381,9 +408,15 @@ export class Engine {
       return;
     }
 
+    if (!full && probe.on) probe.begin(t0);
+    const frameDirty = this.dirty;
+    this.profiler.setTimed(probe.on);
+    this.frameGraph.split = full;
     const uploaded = this.graph.flush();
+    if (full) probe.mark(CPU.UPLOAD);
     const nodeCount = this.reserveNodes();
     const edgeCount = this.reserveEdges();
+    if (full) probe.mark(CPU.RESERVE);
 
     const fi = this.frameInputs;
     fi.time = (t0 - this.startTime) / 1000;
@@ -404,7 +437,11 @@ export class Engine {
     const device = this.gpu.device;
     const encoder = device.createCommandEncoder();
     this.profiler.beginFrame();
-    this.frameGraph.execute(encoder, this.context.getCurrentTexture().createView(), ctx);
+    if (full) probe.mark(CPU.UNIFORM);
+    const target = this.context.getCurrentTexture().createView();
+    if (full) probe.mark(CPU.TEXTURE);
+    this.frameGraph.execute(encoder, target, ctx, full ? this.encodeTimes : null);
+    if (full) probe.sync();
     this.passes.labels.recordFrame(this.frameIndex);
     this.passes.labels.recordReadback(encoder);
     this.profiler.endFrame(
@@ -413,14 +450,25 @@ export class Engine {
       nodeCount > 0 ? this.passes.cull.outputs!.scratch : null,
       edgeCount > 0 ? this.passes.edgeCull.outputs!.scratch : null,
     );
+    if (full) probe.mark(CPU.READBACK);
     this.submitList[0] = encoder.finish();
+    if (full) probe.mark(CPU.FINISH);
     device.queue.submit(this.submitList);
+    if (full) probe.mark(CPU.SUBMIT);
     this.profiler.afterSubmit();
     this.passes.labels.afterSubmit();
     this.graph.afterSubmit();
+    if (full) probe.mark(CPU.AFTER);
 
     const cpuMs = performance.now() - t0;
     if (benchFrame) bench.afterFrame(this.frameIndex, t0, cpuMs);
+    if (bench && !bench.driving && benchFrame) this.waitBenchGpu(bench);
+    if (probe.on) {
+      const solves = this.labels.solves;
+      const solveMs = solves !== this.labelSolves ? this.passes.labels.lastSolveMs : NaN;
+      this.labelSolves = solves;
+      probe.end(this.frameIndex, t0, cpuMs, frameDirty, uploaded ? this.graph.lastUploadBytes : 0, this.labels.live.shownCount, solveMs);
+    }
     this.dirty = (this.passes.labels.busy ? Dirty.LABELS : 0) | (this.passes.labels.marked ? Dirty.LABELLED : 0);
     this.passes.labels.marked = false;
     this.frameIndex++;
@@ -468,13 +516,24 @@ export class Engine {
   }
 
   private readonly onProfileSample = (s: ProfileSample): void => {
+    const t0 = this.probe.full ? performance.now() : 0;
     this.passes.labels.onProfile(s.frameIndex, s.slotMs, this.profiler.slotNames);
-    this.telemetry.onSample(s, this.profiler.droppedFrames);
+    this.telemetry.onSample(s, this.profiler.droppedFrames, this.profiler.zeroSamples);
+    if (this.probe.on || this.probe.recording) this.probe.onSample(s);
     if (this.bench) {
       this.bench.onSample(s);
       this.finishBenchIfComplete();
     }
+    if (this.probe.full) this.probe.async(CPU.ASYNC_PROFILE, performance.now() - t0);
   };
+
+  private waitBenchGpu(bench: Benchmark): void {
+    const t0 = bench.firstT0;
+    this.gpu.device.queue.onSubmittedWorkDone().then(() => {
+      bench.gpuDone(performance.now() - t0);
+      this.finishBenchIfComplete();
+    }, () => bench.gpuDone(NaN));
+  }
 
   private scheduleBenchCheck(): void {
     clearTimeout(this.benchTimer);
@@ -486,6 +545,7 @@ export class Engine {
     if (!b || !b.complete) return;
     clearTimeout(this.benchTimer);
     this.bench = null;
+    this.probe.setOverride(null);
     const result = b.result({
       nodeCount: this.store.nodeCount,
       viewport: [this.camera.viewportW, this.camera.viewportH],

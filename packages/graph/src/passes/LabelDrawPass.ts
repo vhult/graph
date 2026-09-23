@@ -7,6 +7,7 @@ import type { Labels } from "../labels/Labels";
 
 export class LabelDrawPass implements RenderNode {
   readonly stage = Stage.LABEL_DRAW;
+  readonly name = "labels";
 
   private bindGroup: GPUBindGroup | null = null;
   private boundGraph: GPUBindGroup | null = null;
