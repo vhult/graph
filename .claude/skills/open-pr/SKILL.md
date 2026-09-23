@@ -38,7 +38,7 @@ Body, in this order, with these exact headings:
 <1-2 lines: the fix, or what was added>
 
 ## Details
-<how it works, why this approach, what was rejected and why>
+<how it works, why this approach>
 
 ## Performance
 <dataset>
