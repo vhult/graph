@@ -28,7 +28,7 @@ import type { PermuteKernels, ScatterSlot } from "./PermuteKernels";
 const MIN_BUFFER_BYTES = 16;
 
 export const NODE_CHANNELS = ["nodePos", "nodeStyle", "nodeSize", "nodeColor", "nodeState"] as const satisfies readonly GraphBufferName[];
-type NodeChannel = (typeof NODE_CHANNELS)[number];
+export type NodeChannel = (typeof NODE_CHANNELS)[number];
 const isNodeChannel = (n: GraphBufferName): n is NodeChannel => (NODE_CHANNELS as readonly string[]).includes(n);
 
 const USAGE = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC;
@@ -230,19 +230,20 @@ export class GraphBuffers {
 
   // ---- internals ----------------------------------------------------------------
 
-  canStream(count: number): boolean {
-    return this.nodeCount === count && !this.store.channels.nodePos.realloc;
+  canStream(name: NodeChannel, count: number): boolean {
+    const ch = this.store.channels[name];
+    return this.nodeCount === count && !ch.realloc && ch.dirty.isEmpty;
   }
 
-  streamPositions(data: Float32Array): number {
-    const total = data.length >> 1;
-    const upload = this.uploadBuffer("nodePos", data.byteLength);
+  streamChannel(name: NodeChannel, data: Float32Array | Uint32Array): number {
+    const total = data.length / GRAPH_BUFFER_WORDS[name];
+    const upload = this.uploadBuffer(name, data.byteLength);
     const queue = this.device.queue;
     queue.writeBuffer(upload, 0, data);
     this.rangeTable[0] = 0;
     this.rangeTable[1] = 0;
-    queue.writeBuffer(this.slots.nodePos.ranges, 0, this.rangeTable, 0, 2);
-    this.scatters.push({ name: "nodePos", total, ranges: 1 });
+    queue.writeBuffer(this.slots[name].ranges, 0, this.rangeTable, 0, 2);
+    this.scatters.push({ name, total, ranges: 1 });
     return data.byteLength + 8;
   }
 

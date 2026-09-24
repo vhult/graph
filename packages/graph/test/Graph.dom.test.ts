@@ -106,6 +106,31 @@ describe("Graph.destroy", () => {
     expect(picks()).toHaveLength(5);
   });
 
+  it("streams through messages without shared memory", async () => {
+    const graph = await createGraph();
+    const worker = FakeWorker.last;
+    graph.setNodes({ count: 3 });
+    const stream = graph.streamNodes({ positions: true, colors: true });
+    stream.positions.set([1, 2, 3, 4, 5, 6]);
+    stream.colors.set([1, 2, 3]);
+    stream.commit();
+    const [positions, colors] = worker.sent.slice(-2) as [Extract<ToWorker, { t: "updatePositions" }>, Extract<ToWorker, { t: "nodes" }>];
+    expect(positions.t).toBe("updatePositions");
+    expect(Array.from(positions.data)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(colors.t).toBe("nodes");
+    expect(Array.from(colors.colors!)).toEqual([1, 2, 3]);
+    expect(colors.colors).not.toBe(stream.colors);
+    expect(worker.sent.some((m) => m.t === "nodeStream")).toBe(false);
+  });
+
+  it("gives empty arrays for channels not asked for", async () => {
+    const graph = await createGraph();
+    graph.setNodes({ count: 3 });
+    const stream = graph.streamNodes({ colors: true });
+    expect(stream.positions.length).toBe(0);
+    expect(stream.colors.length).toBe(3);
+  });
+
   it("delivers click and drag events", async () => {
     const graph = await createGraph();
     const worker = FakeWorker.last;

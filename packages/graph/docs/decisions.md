@@ -8,6 +8,26 @@ bandwidth), Edge 153, 1M nodes / 3M edges at fit unless stated.
 
 ---
 
+## 0047 — One node stream, and each node channel marks only what it changes
+
+`setNodes` builds its dirty flags from a table, one row per channel: a new
+count, positions, sizes or shapes rebuild the nodes; colours only mark the
+style. Only a rebuild counts as new data, so colour updates no longer clear the
+hover or throw away the pick in flight: sending colours every frame had stopped
+hover entirely. `streamNodes({ positions, colors })` replaces
+`streamNodePositions`: one triple-buffered shared slot (0042) holds the channels
+asked for, so they arrive in the same frame, each through the same scatter
+upload as before. A stream is taken only when none of its channels has a
+pending partial update, so the two never share a staging buffer in one frame.
+AMD Radeon 890M, Edge 145 headless, 8 s runs. Hover events with the pointer
+moving over Ripples 100k, one run each: 0 before, 130 after. Galaxy 1M
+positions, median of 3, worker CPU mean / p95 0.65 / 0.87 → 0.67 / 0.94 ms, GPU
+5.11 → 5.11 ms. Ripples 1M colours, median of 3, frame mean / p95 22.02 / 30.23
+ms (`setNodeColors` every frame) → 20.84 / 26.93 ms; that frame is bound by the
+story's own simulation on the main thread.
+
+---
+
 ## 0046 — Arrowheads shrink away on short edges
 
 An arrowhead used to shrink to half the visible edge, so at fit every short

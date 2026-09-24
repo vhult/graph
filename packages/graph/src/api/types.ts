@@ -104,8 +104,14 @@ export interface NodeData {
   shapes?: Uint8Array;
 }
 
-export interface NodePositionStream {
+export interface NodeStreamChannels {
+  positions?: boolean;
+  colors?: boolean;
+}
+
+export interface NodeStream {
   readonly positions: Float32Array;
+  readonly colors: Uint32Array;
   commit(): void;
 }
 

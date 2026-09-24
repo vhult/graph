@@ -27,6 +27,20 @@ describe("GraphStore", () => {
     const s = new GraphStore();
     s.setNodes(4, {});
     expect(() => s.updatePositions(3, new Float32Array(4))).toThrow(RangeError);
+    expect(() => s.updateColors(3, new Uint32Array(2))).toThrow(RangeError);
+  });
+
+  it("colour updates write the mirror and produce a dirty range", () => {
+    const s = new GraphStore();
+    s.setNodes(10, {});
+    for (const ch of Object.values(s.channels)) ch.realloc = false;
+    s.markClean();
+    s.updateColors(4, new Uint32Array([7, 8]));
+    expect(s.dirty).toBe(true);
+    expect(s.channels.nodeColor.realloc).toBe(false);
+    expect(Array.from(s.channels.nodeColor.data.slice(4, 6))).toEqual([7, 8]);
+    expect(s.channels.nodeColor.dirty.start(0)).toBe(4);
+    expect(s.channels.nodeColor.dirty.end(0)).toBe(6);
   });
 
   it("shapes go in the low byte of the node style and flag the store", () => {

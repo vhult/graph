@@ -10,7 +10,7 @@
 import { GraphError } from "../api/errors";
 import type { BenchmarkOptions, BenchmarkResult, CameraView, GraphCaps, LabelSnapshot, RGBA } from "../api/types";
 import { INPUT, type InputRing, type InputRecord } from "../bridge/InputRing";
-import type { PositionStream } from "../bridge/PositionStream";
+import type { StreamSlots } from "../bridge/StreamSlots";
 import type { DragEventName, InitOptions } from "../bridge/protocol";
 import { STATE_SLOT } from "../bridge/SharedState";
 import { Camera2D } from "../camera/Camera2D";
@@ -109,8 +109,9 @@ export class Engine {
 
   private dirty = Dirty.RESIZE;
   private framePending = false;
-  private stream: PositionStream | null = null;
-  private streamed: Float32Array | null = null;
+  private stream: StreamSlots | null = null;
+  private streamedPositions: Float32Array | null = null;
+  private streamedColors: Uint32Array | null = null;
   /** performance.now() of the previous tick, for the zoom glide. */
   private lastTickMs = 0;
   private frameIndex = 0;
@@ -302,8 +303,7 @@ export class Engine {
     for (const [k, flag] of NODE_DIRTY) if (arrays[k]) dirty |= flag;
     const topology = (dirty & Dirty.TOPOLOGY) !== 0;
     if (topology) this.press.cancel();
-    if (!arrays.positions) this.syncStreamed();
-    this.streamed = null;
+    this.syncStreamed(arrays);
     this.store.setNodes(count, arrays);
     if (topology) {
       this.labels.setNodeCount(count);
@@ -500,7 +500,7 @@ export class Engine {
   };
 
   private startDrag(node: number, nodeScale: number): void {
-    const pos = this.streamed ?? (this.store.channels.nodePos.data as Float32Array);
+    const pos = this.streamedPositions ?? (this.store.channels.nodePos.data as Float32Array);
     const x = pos[node * 2]!;
     const y = pos[node * 2 + 1]!;
     this.camera.screenToWorld(this.press.x, this.press.y, this.world);
@@ -585,24 +585,39 @@ export class Engine {
     this.markDirty(Dirty.POSITIONS);
   }
 
-  setPositionStream(stream: PositionStream): void {
+  setStream(stream: StreamSlots): void {
     this.stream = stream;
     this.wake();
   }
 
   private takeStream(): number {
     const s = this.stream;
-    if (!s || !s.pending || s.count !== this.store.nodeCount || !this.graph.canStream(s.count)) return 0;
-    const data = s.take()!;
-    this.streamed = data;
-    this.dirty |= Dirty.POSITIONS;
-    return this.graph.streamPositions(data);
+    const n = this.store.nodeCount;
+    if (!s || !s.pending || s.count !== n) return 0;
+    if ((s.positions && !this.graph.canStream("nodePos", n)) || (s.colors && !this.graph.canStream("nodeColor", n))) return 0;
+    const slot = s.take()!;
+    let bytes = 0;
+    if (s.positions) {
+      this.streamedPositions = slot.positions;
+      this.dirty |= Dirty.POSITIONS;
+      bytes += this.graph.streamChannel("nodePos", slot.positions);
+    }
+    if (s.colors) {
+      this.streamedColors = slot.colors;
+      this.dirty |= Dirty.STYLE;
+      bytes += this.graph.streamChannel("nodeColor", slot.colors);
+    }
+    return bytes;
   }
 
-  private syncStreamed(): void {
-    if (!this.streamed) return;
-    if (this.streamed.length === this.store.nodeCount * 2) this.store.updatePositions(0, this.streamed);
-    this.streamed = null;
+  private syncStreamed(arrays: NodeArrays): void {
+    const n = this.store.nodeCount;
+    const p = this.streamedPositions;
+    if (p && !arrays.positions && p.length === n * 2) this.store.updatePositions(0, p);
+    const c = this.streamedColors;
+    if (c && !arrays.colors && c.length === n) this.store.updateColors(0, c);
+    this.streamedPositions = null;
+    this.streamedColors = null;
   }
 
   updateColor(index: number, rgba: number): void {

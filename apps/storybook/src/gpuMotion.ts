@@ -1,4 +1,4 @@
-import type { Graph, NodePositionStream } from "@vhult/graph";
+import type { Graph, NodeStream } from "@vhult/graph";
 
 export interface GpuMotionSpec {
   count: number;
@@ -51,7 +51,7 @@ export class GpuMotion {
 
   private constructor(
     private readonly device: GPUDevice,
-    private readonly stream: NodePositionStream,
+    private readonly stream: NodeStream,
     private readonly count: number,
     private readonly pipeline: GPUComputePipeline,
     private readonly bindGroup: GPUBindGroup,
@@ -98,7 +98,7 @@ export class GpuMotion {
     });
     const total = Math.ceil(spec.count / WG);
     const gx = Math.min(total, device.limits.maxComputeWorkgroupsPerDimension);
-    const motion = new GpuMotion(device, graph.streamNodePositions(), spec.count, pipeline, bindGroup, params, out, readbacks, [gx, Math.ceil(total / gx)], spec.params);
+    const motion = new GpuMotion(device, graph.streamNodes({ positions: true }), spec.count, pipeline, bindGroup, params, out, readbacks, [gx, Math.ceil(total / gx)], spec.params);
     motion.raf = requestAnimationFrame(motion.tick);
     return motion;
   }

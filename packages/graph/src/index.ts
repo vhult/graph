@@ -19,7 +19,8 @@ export type {
   EdgeDebugMode,
   NodeData,
   NodeDragEvent,
-  NodePositionStream,
+  NodeStream,
+  NodeStreamChannels,
   RGBA,
 } from "./api/types";
 export { NodeShape } from "./api/types";

@@ -164,6 +164,13 @@ export class GraphStore {
     this.markRange(pos, start, start + count);
   }
 
+  updateColors(start: number, data: Uint32Array): void {
+    const ch = this.channels.nodeColor;
+    if (start + data.length > this.nodeCount) throw new RangeError("updateColors: range exceeds node count");
+    (ch.data as Uint32Array).set(data, start);
+    this.markRange(ch, start, start + data.length);
+  }
+
   growBounds(x: number, y: number): void {
     const b = this.bounds;
     if (x < b.minX) b.minX = x;
