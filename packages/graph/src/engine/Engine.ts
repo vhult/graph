@@ -76,6 +76,12 @@ const FIT_PADDING_CSS_PX = 24;
 const BENCH_TIMING = { off: 0, passes: 1, full: 2 } as const;
 const CAMERA_SETTLE_MS = 50;
 const CLICK_SLOP_CSS_PX = 3;
+const NODE_DIRTY = [
+  ["positions", Dirty.TOPOLOGY],
+  ["sizes", Dirty.TOPOLOGY],
+  ["shapes", Dirty.TOPOLOGY],
+  ["colors", Dirty.STYLE],
+] as const satisfies readonly (readonly [keyof NodeArrays, number])[];
 const PICK_DIRTY = Dirty.TOPOLOGY | Dirty.POSITIONS | Dirty.MOVED | Dirty.CAMERA | Dirty.STYLE | Dirty.STATE | Dirty.RESIZE | Dirty.EDGES | Dirty.LABELLED;
 
 /** Straight-alpha RGBA in 0..1 to an rgba8unorm word (R in the low byte). */
@@ -292,13 +298,18 @@ export class Engine {
   }
 
   setNodes(count: number, arrays: NodeArrays): void {
-    this.press.cancel();
+    let dirty = count !== this.store.nodeCount ? Dirty.TOPOLOGY : 0;
+    for (const [k, flag] of NODE_DIRTY) if (arrays[k]) dirty |= flag;
+    const topology = (dirty & Dirty.TOPOLOGY) !== 0;
+    if (topology) this.press.cancel();
     if (!arrays.positions) this.syncStreamed();
     this.streamed = null;
     this.store.setNodes(count, arrays);
-    this.labels.setNodeCount(count);
-    this.newData();
-    this.markDirty(Dirty.TOPOLOGY);
+    if (topology) {
+      this.labels.setNodeCount(count);
+      this.newData();
+    }
+    this.markDirty(dirty);
   }
 
   setEdges(count: number, arrays: EdgeArrays): void {
