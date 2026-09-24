@@ -1,5 +1,5 @@
 /** CPU-side packing helpers matching the GPU layouts in `Layouts.ts`. */
-import { DEFAULT_NODE_STYLE } from "./Layouts";
+import { CONSTANTS, DEFAULT_NODE_STYLE } from "./Layouts";
 
 const f32 = new Float32Array(1);
 const u32 = new Uint32Array(f32.buffer);
@@ -44,8 +44,16 @@ export function packNodeSizes(sizes: Float32Array, out: Uint32Array): Uint32Arra
   return out;
 }
 
-export function packNodeShapes(shapes: Uint8Array, out: Uint32Array): Uint32Array {
-  for (let i = 0; i < out.length; i++) out[i] = (DEFAULT_NODE_STYLE | shapes[i]!) >>> 0;
+export function packNodeStyle(count: number, previous: Uint32Array, shapes?: Uint8Array, layers?: Uint8Array): Uint32Array {
+  const { STYLE_SHAPE_MASK, STYLE_ZLAYER_SHIFT, STYLE_ZLAYER_MASK } = CONSTANTS;
+  const keep = ~(STYLE_SHAPE_MASK | (STYLE_ZLAYER_MASK << STYLE_ZLAYER_SHIFT));
+  const out = new Uint32Array(count);
+  for (let i = 0; i < count; i++) {
+    const old = i < previous.length ? previous[i]! : DEFAULT_NODE_STYLE;
+    const shape = shapes ? shapes[i]! : old & STYLE_SHAPE_MASK;
+    const layer = layers ? Math.min(layers[i]!, STYLE_ZLAYER_MASK) : (old >>> STYLE_ZLAYER_SHIFT) & STYLE_ZLAYER_MASK;
+    out[i] = ((old & keep) | shape | (layer << STYLE_ZLAYER_SHIFT)) >>> 0;
+  }
   return out;
 }
 

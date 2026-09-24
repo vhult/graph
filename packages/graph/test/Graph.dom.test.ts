@@ -123,6 +123,16 @@ describe("Graph.destroy", () => {
     expect(worker.sent.some((m) => m.t === "nodeStream")).toBe(false);
   });
 
+  it("sends z-index with the nodes", async () => {
+    const graph = await createGraph();
+    const worker = FakeWorker.last;
+    graph.setNodes({ count: 2 });
+    graph.setNodeZIndex(new Uint8Array([3, 1]));
+    const last = worker.sent.at(-1) as Extract<ToWorker, { t: "nodes" }>;
+    expect(last.t).toBe("nodes");
+    expect(Array.from(last.zIndex!)).toEqual([3, 1]);
+  });
+
   it("gives empty arrays for channels not asked for", async () => {
     const graph = await createGraph();
     graph.setNodes({ count: 3 });

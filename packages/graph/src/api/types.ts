@@ -102,6 +102,7 @@ export interface NodeData {
   sizes?: Float32Array;
   /** Shape per node, one of `NodeShape`. */
   shapes?: Uint8Array;
+  zIndex?: Uint8Array;
 }
 
 export interface NodeStreamChannels {

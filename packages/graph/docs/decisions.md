@@ -8,6 +8,30 @@ bandwidth), Edge 153, 1M nodes / 3M edges at fit unless stated.
 
 ---
 
+## 0048 — Z-index is a counting sort of the visible nodes by layer
+
+Nodes take a z-index from 0 to 15 in the 4 layer bits the style word already
+reserved. The cull packs the layer into bits 4–7 of the instance radius, next to
+the shape. When any node has a layer, NODE_ORDER sorts the NORMAL bucket with a
+16-bin counting sort sized by the visible count the cull left on the GPU: count
+per block, one scan, then each instance is written straight into a second
+buffer that the NORMAL draw reads. Blocks past the visible count exit at once.
+It is stable, so equal layers keep the draw order of 0020. Picking puts the
+layer above the draw position in its key. With no layer set nothing runs and
+nothing is allocated. AMD Radeon 890M, Edge 145 headless, 1M communities, a
+random layer on every node, median of 3. Fit (280k visible): order 0.24 ms,
+GPU 2.95 → 4.19 ms. Zoomed (499 visible): order 0.05 ms, GPU 0.60 → 0.65 ms.
+The draw itself costs ~1 ms more at fit in every variant tried: it comes from
+the layer order, not the extra buffer. Rejected, same runs: the shared radix
+sort over all nodes with a key pass and a gather (order 1.04 ms fit, 0.54 ms
+zoomed, GPU 5.12 / 1.16 ms); the layer as a cull cell, which made the count
+step write 16 × 64 far-apart cells per chunk even for hidden chunks (cull
+0.38 → 1.88 ms fit, 0.08 → 1.07 ms zoomed); a depth buffer, as soft edges and
+see-through nodes would cut holes in what is behind them. Bench large /
+large-zoom without z-index, GPU mean 3.90 → 3.75 ms and 6.08 → 6.19 ms.
+
+---
+
 ## 0047 — One node stream, and each node channel marks only what it changes
 
 `setNodes` builds its dirty flags from a table, one row per channel: a new

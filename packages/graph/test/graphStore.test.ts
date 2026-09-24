@@ -57,6 +57,21 @@ describe("GraphStore", () => {
     expect(s.hasNodeShapes).toBe(false);
   });
 
+  it("z-index goes in the layer bits of the node style, keeps the shape and flags the store", () => {
+    const s = new GraphStore();
+    const layer = (w: number) => (w >>> CONSTANTS.STYLE_ZLAYER_SHIFT) & CONSTANTS.STYLE_ZLAYER_MASK;
+    s.setNodes(3, { shapes: new Uint8Array([1, 2, 0]) });
+    expect(s.hasZLayers).toBe(false);
+    s.setNodes(3, { zIndex: new Uint8Array([0, 5, 40]) });
+    expect(s.hasZLayers).toBe(true);
+    expect(Array.from(s.channels.nodeStyle.data, layer)).toEqual([0, 5, 15]);
+    expect(Array.from(s.channels.nodeStyle.data, (w) => w & CONSTANTS.STYLE_SHAPE_MASK)).toEqual([1, 2, 0]);
+    s.setNodes(3, { shapes: new Uint8Array([2, 2, 2]) });
+    expect(Array.from(s.channels.nodeStyle.data, layer)).toEqual([0, 5, 15]);
+    s.setNodes(3, { zIndex: new Uint8Array(3) });
+    expect(s.hasZLayers).toBe(false);
+  });
+
   it("drawn bounds grow the node centres by the largest radius", () => {
     const s = new GraphStore();
     s.setNodes(3, { positions: new Float32Array([-40, 0, 0, 0, 40, 0]), sizes: new Float32Array([20, 10, 20]) });

@@ -24,6 +24,7 @@ import labelMark from "./passes/label_mark.wgsl";
 import labelPlace from "./passes/label_place.wgsl";
 import labelTree from "./passes/label_tree.wgsl";
 import nodeGeometry from "./passes/node_geometry.wgsl";
+import nodeOrder from "./passes/node_order.wgsl";
 import pickEdges from "./passes/pick_edges.wgsl";
 import pickNodes from "./passes/pick_nodes.wgsl";
 import scatterUpdate from "./passes/scatter_update.wgsl";
@@ -55,6 +56,7 @@ export const SHADERS: ShaderFs = {
   "passes/label_place.wgsl": labelPlace,
   "passes/label_tree.wgsl": labelTree,
   "passes/node_geometry.wgsl": nodeGeometry,
+  "passes/node_order.wgsl": nodeOrder,
   "passes/pick_edges.wgsl": pickEdges,
   "passes/pick_nodes.wgsl": pickNodes,
   "passes/scatter_update.wgsl": scatterUpdate,

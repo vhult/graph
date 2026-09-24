@@ -157,6 +157,8 @@ export const CONSTANTS = {
   STYLE_ICON_SHIFT: 8,
   STYLE_ICON_MASK: 0xffff,
   STYLE_ZLAYER_SHIFT: 24,
+  STYLE_ZLAYER_MASK: 0xf,
+  Z_LAYERS: 16,
   STYLE_FLAGS_SHIFT: 28,
   STYLE_FLAG_RING: 1 << 28,
   STYLE_FLAG_LABEL: 1 << 29,
@@ -166,6 +168,8 @@ export const CONSTANTS = {
   SHAPE_SQUARE: 1,
   SHAPE_HEXAGON: 2,
   INSTANCE_SHAPE_BITS: 0xf,
+  INSTANCE_LAYER_SHIFT: 4,
+  INSTANCE_LAYER_BITS: 0xf0,
   // edgeStyle fields
   EDGE_WIDTH_MASK: 0xff,
   EDGE_CURVE_SHIFT: 8,
@@ -193,7 +197,7 @@ export const DEFAULT_NODE_STYLE = CONSTANTS.NO_ICON << CONSTANTS.STYLE_ICON_SHIF
  */
 export const NODE_INSTANCE = defineStruct("NodeInstance", [
   { name: "screenPos", type: "vec2<f32>", doc: "device px" },
-  { name: "radiusPx", type: "f32", doc: "projected radius, device px; low INSTANCE_SHAPE_BITS mantissa bits hold the shape" },
+  { name: "radiusPx", type: "f32", doc: "projected radius, device px; low INSTANCE_SHAPE_BITS mantissa bits hold the shape, INSTANCE_LAYER_BITS the z layer" },
   { name: "color", type: "u32", doc: "rgba8unorm" },
 ] as const);
 
@@ -340,6 +344,8 @@ export const PICK_CONSTANTS = {
   PICK_FLAG_EDGES: 2,
   PICK_FLAG_SHAPES: 4,
   PICK_FLAG_EDGE_COLORS: 8,
+  PICK_FLAG_LAYERS: 16,
+  PICK_LAYER_SHIFT: 27,
   HOVER_FLAG_SHAPES: 1,
 } as const;
 

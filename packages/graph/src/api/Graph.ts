@@ -215,8 +215,9 @@ export class Graph {
     const colors = data.colors && take(asWords(data.colors), n, "colors", opts, transfer);
     const sizes = data.sizes && take(data.sizes, n, "sizes", opts, transfer);
     const shapes = data.shapes && take(data.shapes, n, "shapes", opts, transfer);
+    const zIndex = data.zIndex && take(data.zIndex, n, "zIndex", opts, transfer);
     this.nodeCount = n;
-    this.send({ t: "nodes", count: n, positions, colors, sizes, shapes }, transfer);
+    this.send({ t: "nodes", count: n, positions, colors, sizes, shapes, zIndex }, transfer);
     if (t0) this.apiEnd("setNodes", t0);
   }
 
@@ -281,6 +282,10 @@ export class Graph {
 
   setNodeShapes(shapes: Uint8Array, opts?: CopyOption): void {
     this.setNodes({ count: this.nodeCount, shapes }, opts);
+  }
+
+  setNodeZIndex(zIndex: Uint8Array, opts?: CopyOption): void {
+    this.setNodes({ count: this.nodeCount, zIndex }, opts);
   }
 
   streamNodes(channels: NodeStreamChannels): NodeStream {

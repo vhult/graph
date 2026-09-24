@@ -34,6 +34,7 @@ import { PICKED_EDGES, PICKED_NODES, PickPass, type PickRequest } from "../passe
 import { EdgeGeometryPass } from "../passes/EdgeGeometryPass";
 import { EdgeSortPass } from "../passes/EdgeSortPass";
 import { NodeGeometryPass } from "../passes/NodeGeometryPass";
+import { NodeOrderPass } from "../passes/NodeOrderPass";
 import { SortPass } from "../passes/SortPass";
 import { TransformCullPass } from "../passes/TransformCullPass";
 import { UploadPass } from "../passes/UploadPass";
@@ -64,6 +65,7 @@ export interface EngineInit {
 
 interface Passes {
   cull: TransformCullPass;
+  order: NodeOrderPass;
   nodes: NodeGeometryPass;
   edges: EdgeGeometryPass;
   edgeCull: EdgeCullPass;
@@ -81,6 +83,7 @@ const NODE_DIRTY = [
   ["sizes", Dirty.TOPOLOGY],
   ["shapes", Dirty.TOPOLOGY],
   ["colors", Dirty.STYLE],
+  ["zIndex", Dirty.STYLE],
 ] as const satisfies readonly (readonly [keyof NodeArrays, number])[];
 const PICK_DIRTY = Dirty.TOPOLOGY | Dirty.POSITIONS | Dirty.MOVED | Dirty.CAMERA | Dirty.STYLE | Dirty.STATE | Dirty.RESIZE | Dirty.EDGES | Dirty.LABELLED;
 
@@ -158,7 +161,7 @@ export class Engine {
   private frameGen = -1;
   private hoverNode = -1;
   private hoverEdge = -1;
-  private readonly pickRequest: PickRequest = { x: 0, y: 0, radiusPx: 0, edgeRadiusPx: 0, nodes: false, edges: false, shapes: false, edgeColors: false, token: 0 };
+  private readonly pickRequest: PickRequest = { x: 0, y: 0, radiusPx: 0, edgeRadiusPx: 0, nodes: false, edges: false, shapes: false, layers: false, edgeColors: false, token: 0 };
 
   private constructor(
     private readonly gpu: Gpu,
@@ -265,11 +268,14 @@ export class Engine {
       EdgeCullPass.create(device, layouts, edgeOpts),
       EdgeGeometryPass.create(device, format, layouts, edgeOpts),
     ]);
+    const order = await NodeOrderPass.create(device, cull, (b) => graph.retireAfterSubmit(b));
+    nodes.order = order;
     // Compute runs in stage order: upload, node sort, edge sort, node cull, edge cull.
     frameGraph.addCompute(new UploadPass(graph));
     frameGraph.addCompute(sort);
     frameGraph.addCompute(edgeSort);
     frameGraph.addCompute(cull);
+    frameGraph.addCompute(order);
     frameGraph.addCompute(edgeCull);
     const labelState = new Labels(device, { sizeCssPx: init.options.labelSize, paddingCssPx: init.options.labelPadding, font: init.options.labelFont });
     const [labels, labelDraw] = await Promise.all([
@@ -280,7 +286,7 @@ export class Engine {
     frameGraph.addRender(edges);
     frameGraph.addRender(nodes);
     frameGraph.addRender(labelDraw);
-    return new Engine(gpu, store, graph, profiler, frameGraph, { cull, nodes, edges, edgeCull, labels }, layouts, init, labelState);
+    return new Engine(gpu, store, graph, profiler, frameGraph, { cull, order, nodes, edges, edgeCull, labels }, layouts, init, labelState);
   }
 
   // ---- API (called from worker message dispatch) ----------------------------
@@ -471,6 +477,7 @@ export class Engine {
     req.nodes = nodes;
     req.edges = edges;
     req.shapes = this.store.hasNodeShapes;
+    req.layers = this.store.hasZLayers;
     req.edgeColors = this.store.hasEdgeColors;
     req.token = token;
     const device = this.gpu.device;
@@ -701,6 +708,7 @@ export class Engine {
     this.hover?.destroy();
     this.probe.destroy();
     this.passes.cull.destroy();
+    this.passes.order.destroy();
     this.passes.edgeCull.destroy();
     this.passes.labels.destroy();
     this.labels.destroy();
@@ -802,6 +810,9 @@ export class Engine {
     this.passes.edges.perEdgeStyle = this.store.hasEdgeStyles;
     this.passes.edges.perEdgeColor = this.store.hasEdgeColors;
     this.passes.cull.shapes = this.store.hasNodeShapes;
+    this.passes.cull.layers = this.store.hasZLayers;
+    this.passes.order.layers = this.store.hasZLayers;
+    this.passes.nodes.layers = this.store.hasZLayers;
     this.passes.nodes.shapes = this.store.hasNodeShapes;
     this.passes.edges.shapes = this.store.hasNodeShapes;
 
