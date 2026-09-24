@@ -77,7 +77,7 @@ fn edge_vs(@builtin(vertex_index) vi : u32) -> EdgeOut {
   }
   let d = b - a;
   let len = max(length(d), 1e-4);
-  arrowLen = min(arrowLen, len * 0.5);
+  arrowLen = arrowFitPx(arrowLen, len);
   let dir = d / len;
   let nor = vec2<f32>(-dir.y, dir.x);
   let halfLen = len * 0.5;

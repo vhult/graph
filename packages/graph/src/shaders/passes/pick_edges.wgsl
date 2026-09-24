@@ -36,7 +36,7 @@ fn pickEdge(e : u32, keep : f32, n : u32) -> bool {
   }
   let d = b - a;
   let len = max(length(d), 1e-4);
-  arrowLen = min(arrowLen, len * 0.5);
+  arrowLen = arrowFitPx(arrowLen, len);
   let dir = d / len;
   let halfLen = len * 0.5;
   let extX = halfLen + max(halfWidth, arrowLen) + EDGE_AA_PAD_PX;

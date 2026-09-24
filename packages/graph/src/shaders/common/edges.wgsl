@@ -30,9 +30,17 @@ fn edgeWidthPx(style : u32) -> f32 {
   return select(packed, frame.globalEdgeWidth, packed == 0.0);
 }
 
-/** Arrowhead length in device px for an edge this wide, before the cap at half the edge. */
+/** Arrowhead length in device px for an edge this wide. */
 fn arrowLenPx(widthPx : f32) -> f32 {
   return max(widthPx * ARROW_LEN_MUL, ARROW_MIN_LEN_CSS_PX * frame.pixelRatio);
+}
+
+const ARROW_HIDE_LEN_MUL : f32 = 2.0;
+const ARROW_FULL_LEN_MUL : f32 = 3.0;
+
+fn arrowFitPx(arrowLen : f32, edgeLenPx : f32) -> f32 {
+  let t = (edgeLenPx / max(arrowLen, 1e-6) - ARROW_HIDE_LEN_MUL) / (ARROW_FULL_LEN_MUL - ARROW_HIDE_LEN_MUL);
+  return arrowLen * clamp(t, 0.0, 1.0);
 }
 
 /** Farthest an edge of this width draws from its centreline, arrowhead and AA ramp included. */

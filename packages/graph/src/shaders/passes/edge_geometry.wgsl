@@ -78,8 +78,7 @@ fn vs(@builtin(vertex_index) vi : u32, @builtin(instance_index) ii : u32) -> VOu
 
   let d = b - a;
   let len = max(length(d), 1e-4);
-  // Never more arrow than half the visible edge: a short edge stays a line.
-  arrowLen = min(arrowLen, len * 0.5);
+  arrowLen = arrowFitPx(arrowLen, len);
   let dir = d / len;
   let nor = vec2<f32>(-dir.y, dir.x);
   let mid = (a + b) * 0.5;

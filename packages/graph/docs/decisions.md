@@ -8,6 +8,18 @@ bandwidth), Edge 153, 1M nodes / 3M edges at fit unless stated.
 
 ---
 
+## 0046 — Arrowheads shrink away on short edges
+
+An arrowhead used to shrink to half the visible edge, so at fit every short
+edge drew as a wedge. Now `arrowFitPx` scales the arrow from full size at 3x
+its length down to nothing at 2x, in screen px, per edge. It grows smoothly
+with zoom, and a hidden arrow gives back the narrow quad. Long edges keep
+their arrows at any zoom. The same rule runs in the draw, the pick and the
+hover. Communities 1M / 1.5M edges, directed, AMD Radeon 890M, Edge headless
+on Linux, GPU mean / p95, 2 runs each: fit 6.92 / 7.88 → 6.02 / 6.61 ms,
+zoomSweep 8.98 / 11.90 → 8.71 / 11.89 ms, standard 4.55 / 10.54 → 4.26 /
+10.16 ms. Undirected is unchanged (fit 3.59 → 3.55 ms).
+
 ## 0045 — Node drag moves one node in the worker and rebuilds only the chunks it touches
 
 `nodeDrag` (option and `setNodeDrag`) lets a left press drag a node.
