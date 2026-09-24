@@ -5,11 +5,14 @@ export interface GpuMotionSpec {
   data: Float32Array;
   params: readonly number[];
   wgsl: string;
+  depth?: boolean;
+  colors?: boolean;
 }
 
 const PARAMS = 32;
 const WG = 256;
 const READBACKS = 3;
+const LAYERS = 16;
 
 const prelude = `
 struct Motion {
@@ -39,8 +42,26 @@ fn main(@builtin(global_invocation_id) id : vec3<u32>) {
 }
 `;
 
+const depthEntry = (colors: boolean) => `
+@group(0) @binding(3) var<storage, read_write> layers : array<u32>;
+${colors ? "@group(0) @binding(4) var<storage, read_write> colorsOut : array<u32>;" : ""}
+
+@compute @workgroup_size(${WG})
+fn main(@builtin(global_invocation_id) id : vec3<u32>) {
+  let i = id.x + id.y * motion.groupsX * ${WG}u;
+  if (i >= motion.count) {
+    return;
+  }
+  let p = nodePosition(i, motion.time);
+  out[i] = p.xy;
+  layers[i] = u32(clamp(p.z, 0.0, 0.9999) * ${LAYERS}.0);
+  ${colors ? "colorsOut[i] = pack4x8unorm(nodeColor(i, motion.time, p));" : ""}
+}
+`;
+
 export class GpuMotion {
   speed = 1;
+  depthOn = true;
   private time = 0;
   private last = 0;
   private raf = 0;
@@ -57,6 +78,8 @@ export class GpuMotion {
     private readonly bindGroup: GPUBindGroup,
     private readonly params: GPUBuffer,
     private readonly out: GPUBuffer,
+    private readonly layers: GPUBuffer | null,
+    private readonly colorsOut: GPUBuffer | null,
     readbacks: GPUBuffer[],
     private readonly groups: [number, number],
     values: readonly number[],
@@ -77,7 +100,9 @@ export class GpuMotion {
         maxBufferSize: adapter.limits.maxBufferSize,
       },
     });
-    const module = device.createShaderModule({ label: "motion", code: prelude + spec.wgsl + entry });
+    const depth = spec.depth === true;
+    const colors = depth && spec.colors === true;
+    const module = device.createShaderModule({ label: "motion", code: prelude + spec.wgsl + (depth ? depthEntry(colors) : entry) });
     const pipeline = await device.createComputePipelineAsync({ label: "motion", layout: "auto", compute: { module, entryPoint: "main" } });
     const bytes = spec.count * 8;
     const params = device.createBuffer({ label: "motion/params", size: 16 + PARAMS * 4, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
@@ -85,8 +110,11 @@ export class GpuMotion {
     new Float32Array(data.getMappedRange()).set(spec.data);
     data.unmap();
     const out = device.createBuffer({ label: "motion/out", size: Math.max(16, bytes), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
+    const layers = depth ? device.createBuffer({ label: "motion/layers", size: Math.max(16, spec.count * 4), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC }) : null;
+    const colorsOut = colors ? device.createBuffer({ label: "motion/colors", size: Math.max(16, spec.count * 4), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC }) : null;
+    const readBytes = bytes + (depth ? spec.count * 4 : 0) + (colors ? spec.count * 4 : 0);
     const readbacks = Array.from({ length: READBACKS }, (_, k) =>
-      device.createBuffer({ label: `motion/readback${k}`, size: Math.max(16, bytes), usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST }),
+      device.createBuffer({ label: `motion/readback${k}`, size: Math.max(16, readBytes), usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST }),
     );
     const bindGroup = device.createBindGroup({
       layout: pipeline.getBindGroupLayout(0),
@@ -94,11 +122,14 @@ export class GpuMotion {
         { binding: 0, resource: { buffer: params } },
         { binding: 1, resource: { buffer: data } },
         { binding: 2, resource: { buffer: out } },
+        ...(layers ? [{ binding: 3, resource: { buffer: layers } }] : []),
+        ...(colorsOut ? [{ binding: 4, resource: { buffer: colorsOut } }] : []),
       ],
     });
     const total = Math.ceil(spec.count / WG);
     const gx = Math.min(total, device.limits.maxComputeWorkgroupsPerDimension);
-    const motion = new GpuMotion(device, graph.streamNodes({ positions: true }), spec.count, pipeline, bindGroup, params, out, readbacks, [gx, Math.ceil(total / gx)], spec.params);
+    const stream = graph.streamNodes({ positions: true, zIndex: depth, colors });
+    const motion = new GpuMotion(device, stream, spec.count, pipeline, bindGroup, params, out, layers, colorsOut, readbacks, [gx, Math.ceil(total / gx)], spec.params);
     motion.raf = requestAnimationFrame(motion.tick);
     return motion;
   }
@@ -131,11 +162,18 @@ export class GpuMotion {
     pass.dispatchWorkgroups(this.groups[0], this.groups[1]);
     pass.end();
     enc.copyBufferToBuffer(this.out, 0, buf, 0, this.count * 8);
+    if (this.layers) enc.copyBufferToBuffer(this.layers, 0, buf, this.count * 8, this.count * 4);
+    if (this.colorsOut) enc.copyBufferToBuffer(this.colorsOut, 0, buf, this.count * 12, this.count * 4);
     this.device.queue.submit([enc.finish()]);
     buf.mapAsync(GPUMapMode.READ).then(
       () => {
         if (this.stopped) return;
         this.stream.positions.set(new Float32Array(buf.getMappedRange(0, this.count * 8)));
+        if (this.layers) {
+          if (this.depthOn) this.stream.zIndex.set(new Uint32Array(buf.getMappedRange(this.count * 8, this.count * 4)));
+          else this.stream.zIndex.fill(0);
+        }
+        if (this.colorsOut) this.stream.colors.set(new Uint32Array(buf.getMappedRange(this.count * 12, this.count * 4)));
         buf.unmap();
         this.stream.commit();
         this.free.push(buf);
