@@ -11,6 +11,22 @@ const NODE_MIN_DRAW_RADIUS_PX : f32 = 0.5;
 // discard threshold (0.002): the node cannot produce a visible pixel.
 const NODE_MIN_VISIBLE_RADIUS_PX : f32 = 0.0224;
 
+fn sizeRadiusPx(size : f32) -> f32 {
+  return size * frame.globalNodeScale * frame.zoom * 0.5;
+}
+
 fn nodeRadiusPx(i : u32) -> f32 {
-  return unpack2x16float(nodeSize[i]).x * frame.globalNodeScale * frame.zoom * 0.5;
+  return sizeRadiusPx(unpack2x16float(nodeSize[i]).x);
+}
+
+fn nodeShape(i : u32) -> u32 {
+  return nodeStyle[i] & STYLE_SHAPE_MASK;
+}
+
+fn packInstanceShape(radiusPx : f32, shape : u32) -> f32 {
+  return bitcast<f32>((bitcast<u32>(radiusPx) & ~INSTANCE_SHAPE_BITS) | (shape & INSTANCE_SHAPE_BITS));
+}
+
+fn instanceShape(radiusPx : f32) -> u32 {
+  return bitcast<u32>(radiusPx) & INSTANCE_SHAPE_BITS;
 }

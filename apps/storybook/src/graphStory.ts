@@ -26,7 +26,7 @@ export interface GraphArgs {
   edgeColor: "tint" | "nodes";
   edgeWidth: number;
   edgeAlpha: number;
-  /** Overdraw a crowded area of edges is thinned to; 0 draws every edge. */
+  /** How much crowded areas of edges are thinned: lower draws fewer edges; 0 draws every edge. */
   edgeMaxOverdraw: number;
   /** On-screen length at or below which an edge is not drawn, CSS px. */
   edgeMinLengthPx: number;
@@ -57,11 +57,13 @@ export interface GraphStory<A extends GraphArgs> {
   /** Style word given to every edge, if any (e.g. `EDGE_DIRECTED`). */
   edgeStyle?: (a: A) => number | undefined;
   /** After every upload, e.g. to (re)start an animation. */
-  onLoad?: (graph: Graph, g: GraphDataset, a: A) => void;
+  onLoad?: (graph: Graph, g: GraphDataset, a: A, root: HTMLElement) => void;
+  backdrop?: string;
   /** Args handled live, without reloading anything. */
   onUpdate?: (graph: Graph, a: A, prev: A) => void;
   /** Label text for the loaded data; default: every node numbered, no edge labels. */
-  labels?: (g: GraphDataset) => GraphLabels;
+  labels?: (g: GraphDataset, a: A) => GraphLabels;
+  gate?: (graph: Graph, a: A, root: HTMLElement) => Promise<A | null>;
   dispose?: () => void;
 }
 
@@ -81,7 +83,7 @@ export const GRAPH_ARGS: Omit<GraphArgs, "nodes"> = {
   edgeColor: "tint",
   edgeWidth: 1,
   edgeAlpha: 0.4,
-  edgeMaxOverdraw: 6,
+  edgeMaxOverdraw: 1.5,
   edgeMinLengthPx: 6,
   edgeDebug: "off",
   nodeScale: 1,
@@ -116,6 +118,17 @@ export function graphArgTypes<A extends GraphArgs>(sizes: readonly number[], own
 }
 
 export function renderGraph<A extends GraphArgs>(spec: GraphStory<A>) {
+  let root: HTMLElement | null = null;
+  let nodes = 0;
+  const loaded = (a: A): A => ({ ...a, nodes });
+  const reload = (graph: Graph, a: A, hud: Hud): void => {
+    const load = (b: A) => {
+      nodes = b.nodes;
+      upload(graph, b, hud, spec, true, root!);
+    };
+    if (!spec.gate) return load(a);
+    void spec.gate(graph, a, root!).then((b) => b && load(b));
+  };
   return (args: A, ctx: StoryContext): HTMLElement =>
     stage(args, ctx, {
       options: (a) => ({
@@ -127,15 +140,17 @@ export function renderGraph<A extends GraphArgs>(spec: GraphStory<A>) {
         lodTargetPx: a.lodTargetPx,
         ...spec.options?.(a),
       }),
-      setup: (graph, a, hud) => {
+      setup: (graph, a, hud, r) => {
+        root = r;
+        if (spec.backdrop) r.style.background = spec.backdrop;
         graph.setNodeScale(a.nodeScale);
-        upload(graph, a, hud, spec, true);
+        reload(graph, a, hud);
       },
       update: (graph, a, prev, hud) => {
         const data = a.nodes !== prev.nodes || a.seed !== prev.seed || (spec.dataArgs ?? []).some((k) => a[k] !== prev[k]);
-        if (data) upload(graph, a, hud, spec, true);
-        else if (a.edges !== prev.edges || a.edgeColor !== prev.edgeColor) upload(graph, a, hud, spec, false);
-        else if (a.labels !== prev.labels) setLabels(graph, spec.load(a).data, a, spec);
+        if (data) reload(graph, a, hud);
+        else if (a.edges !== prev.edges || a.edgeColor !== prev.edgeColor) upload(graph, loaded(a), hud, spec, false, root!);
+        else if (a.labels !== prev.labels) setLabels(graph, spec.load(loaded(a)).data, a, spec);
         if (a.nodeScale !== prev.nodeScale) graph.setNodeScale(a.nodeScale);
         spec.onUpdate?.(graph, a, prev);
       },
@@ -143,7 +158,7 @@ export function renderGraph<A extends GraphArgs>(spec: GraphStory<A>) {
     });
 }
 
-function upload<A extends GraphArgs>(graph: Graph, a: A, hud: Hud, spec: GraphStory<A>, withNodes: boolean): void {
+function upload<A extends GraphArgs>(graph: Graph, a: A, hud: Hud, spec: GraphStory<A>, withNodes: boolean, root: HTMLElement): void {
   const { data: g, genMs } = spec.load(a);
   if (withNodes) {
     hud.measureLoad(graph, genMs, g.nodes.count);
@@ -154,7 +169,7 @@ function upload<A extends GraphArgs>(graph: Graph, a: A, hud: Hud, spec: GraphSt
   if (withNodes) graph.camera.fit();
   const edges = a.edges ? `${fmt(g.edges.count)} edges` : "edges off";
   hud.setNote(`${spec.describe(a)}\n${fmt(g.nodes.count)} nodes · ${edges}`);
-  spec.onLoad?.(graph, g, a);
+  spec.onLoad?.(graph, g, a, root);
 }
 
 function setEdges(graph: Graph, g: GraphDataset, a: GraphArgs, style: number | undefined): void {
@@ -179,7 +194,7 @@ function setLabels<A extends GraphArgs>(graph: Graph, g: GraphDataset, a: A, spe
     graph.setEdgeLabels([]);
     return;
   }
-  const labels = spec.labels?.(g) ?? { nodes: Array.from({ length: g.nodes.count }, (_, i) => `#${i}`) };
+  const labels = spec.labels?.(g, a) ?? { nodes: Array.from({ length: g.nodes.count }, (_, i) => `#${i}`) };
   graph.setNodeLabels(labels.nodes ?? []);
   graph.setEdgeLabels(a.edges ? (labels.edges ?? []) : []);
 }

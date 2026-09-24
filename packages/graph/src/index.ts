@@ -6,13 +6,21 @@ export type {
   CameraPathKey,
   CameraView,
   CopyOption,
+  DebugRecording,
+  DebugSummary,
+  DebugTotals,
   GraphCaps,
   GraphEvents,
   GraphOptions,
   GraphStats,
+  HoverStyle,
+  LabelSnapshot,
   EdgeData,
   EdgeDebugMode,
   NodeData,
+  NodeDragEvent,
+  NodePositionStream,
   RGBA,
 } from "./api/types";
+export { NodeShape } from "./api/types";
 export { packRgba } from "./data/Pack";

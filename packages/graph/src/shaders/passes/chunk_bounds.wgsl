@@ -12,6 +12,8 @@ var<workgroup> wgFlags : array<u32, WORKGROUP_SIZE>;
 
 const BIG : f32 = 3.0e38;
 
+@group(2) @binding(1) var<storage, read> moveList : array<u32>;
+
 @compute @workgroup_size(WORKGROUP_SIZE)
 fn chunk_bounds(
   @builtin(workgroup_id) wid : vec3<u32>,
@@ -23,7 +25,27 @@ fn chunk_bounds(
   if (c >= chunks) {
     return; // uniform per workgroup
   }
+  boundsOfChunk(c, chunks, lid);
+}
 
+@compute @workgroup_size(WORKGROUP_SIZE)
+fn chunk_bounds_list(
+  @builtin(workgroup_id) wid : vec3<u32>,
+  @builtin(num_workgroups) nwg : vec3<u32>,
+  @builtin(local_invocation_index) lid : u32,
+) {
+  let chunks = numChunks();
+  let n = moveList[MOVE_COUNT];
+  for (var i = wid.x; i < n; i += nwg.x) {
+    let c = moveList[MOVE_LIST + i];
+    if (c < chunks) {
+      boundsOfChunk(c, chunks, lid);
+    }
+  }
+}
+
+fn boundsOfChunk(c : u32, chunks : u32, lid : u32) {
+  workgroupBarrier();
   var lo = vec2<f32>(BIG);
   var hi = vec2<f32>(-BIG);
   var size = 0.0;

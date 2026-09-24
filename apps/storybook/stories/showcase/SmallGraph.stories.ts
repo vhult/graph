@@ -10,8 +10,10 @@
  *   - Labels: every node named, relations along the edges where they fit.
  */
 import type { Meta, StoryObj } from "@storybook/html-vite";
+import { NodeShape } from "@vhult/graph";
 import { PALETTE, rgbToWord, type GraphDataset } from "@vhult/graph-bench";
 import { EDGE_DIRECTED, GRAPH_ARGS, graphArgTypes, renderGraph, type GraphArgs, type GraphLabels } from "../../src/graphStory";
+import { showReadout } from "../../src/readout";
 
 interface Args extends GraphArgs {
   directed: boolean;
@@ -32,11 +34,13 @@ function smallGraph(): { graph: GraphDataset; labels: GraphLabels } {
   const positions = new Float32Array(NODES * 2);
   const colors = new Uint32Array(NODES);
   const sizes = new Float32Array(NODES);
-  const put = (i: number, x: number, y: number, size: number, rgb: number) => {
+  const shapes = new Uint8Array(NODES);
+  const put = (i: number, x: number, y: number, size: number, rgb: number, shape: NodeShape) => {
     positions[i * 2] = x;
     positions[i * 2 + 1] = y;
     sizes[i] = size;
     colors[i] = rgbToWord(rgb);
+    shapes[i] = shape;
   };
   const headOf = (g: number) => 1 + (g % GROUPS) * (1 + MEMBERS);
 
@@ -47,21 +51,21 @@ function smallGraph(): { graph: GraphDataset; labels: GraphLabels } {
     pairs.push(a, b);
     edgeNames.push(name);
   };
-  put(0, 0, 0, 18, 0xf2f4f8);
+  put(0, 0, 0, 18, 0xf2f4f8, NodeShape.hexagon);
   for (let g = 0; g < GROUPS; g++) {
     const a = (g / GROUPS) * Math.PI * 2;
     const head = headOf(g);
     const hx = Math.cos(a) * HEAD_RADIUS;
     const hy = Math.sin(a) * HEAD_RADIUS;
     const rgb = PALETTE[g % PALETTE.length]!;
-    put(head, hx, hy, 10, rgb);
+    put(head, hx, hy, 10, rgb, NodeShape.square);
     nodeNames[head] = GROUP_NAMES[g % GROUP_NAMES.length]!;
     link(0, head, "runs");
     link(head, headOf(g + 1), "works with"); // ring of heads
     for (let m = 0; m < MEMBERS; m++) {
       const b = a + (m / (MEMBERS - 1) - 0.5) * FAN;
       const member = head + 1 + m;
-      put(member, hx + Math.cos(b) * MEMBER_RADIUS, hy + Math.sin(b) * MEMBER_RADIUS, 5 + (m % 3), rgb);
+      put(member, hx + Math.cos(b) * MEMBER_RADIUS, hy + Math.sin(b) * MEMBER_RADIUS, 5 + (m % 3), rgb, NodeShape.circle);
       nodeNames[member] = `${PEOPLE[(g * MEMBERS + m) % PEOPLE.length]} ${String.fromCharCode(65 + g)}.`;
       link(head, member, "has");
       if (m > 0) link(member - 1, member, "pairs with"); // members of a group know each other
@@ -70,7 +74,7 @@ function smallGraph(): { graph: GraphDataset; labels: GraphLabels } {
   }
   return {
     graph: {
-      nodes: { count: NODES, positions, colors, sizes },
+      nodes: { count: NODES, positions, colors, sizes, shapes },
       edges: { count: pairs.length / 2, indices: new Uint32Array(pairs) },
     },
     labels: { nodes: nodeNames, edges: edgeNames },
@@ -78,24 +82,28 @@ function smallGraph(): { graph: GraphDataset; labels: GraphLabels } {
 }
 
 const DEMO = smallGraph();
+const names = DEMO.labels.nodes ?? [];
+const relations = DEMO.labels.edges ?? [];
+const ends = DEMO.graph.edges.indices;
 
 const meta: Meta<Args> = {
-  title: "Demos/Small graph",
+  title: "Showcase/Small graph",
   render: renderGraph<Args>({
     describe: (a) => `Small graph · a hub and ${GROUPS} groups${a.directed ? ", directed" : ""}`,
     load: () => ({ data: DEMO.graph, genMs: 0 }),
     labels: () => DEMO.labels,
     // Arrowheads are compiled into the edge shader, so this is an engine option.
-    options: (a) => ({ directedEdges: a.directed }),
+    options: (a) => ({ directedEdges: a.directed, nodeDrag: true }),
     edgeStyle: (a) => (a.directed ? EDGE_DIRECTED : undefined),
+    onLoad: (graph, _g, _a, root) =>
+      showReadout(graph, root, {
+        node: (i) => `${names[i]} (#${i})`,
+        edge: (e) => `${names[ends[e * 2]!]} → ${names[ends[e * 2 + 1]!]} · ${relations[e]} (#${e})`,
+      }),
   }),
-  argTypes: {
-    ...graphArgTypes<Args>([NODES], { directed: { control: "boolean" } }),
-    // A fixed, hand-built graph: neither applies.
-    nodes: { table: { disable: true } },
-    seed: { table: { disable: true } },
-  },
+  argTypes: graphArgTypes<Args>([NODES], { directed: { control: "boolean" } }),
   args: { nodes: NODES, directed: true, ...GRAPH_ARGS, edgeColor: "nodes", edgeWidth: 1.5, edgeAlpha: 0.8, labels: true },
+  parameters: { controls: { include: ["directed", "labels"] } },
 };
 
 export default meta;

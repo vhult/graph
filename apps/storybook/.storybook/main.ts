@@ -8,13 +8,13 @@ import { mergeConfig } from "vite";
  *
  * Performance hygiene: HTML renderer (no React/Vue in the preview iframe),
  * every preview-side addon that injects DOM or listeners is disabled, only
- * Controls remain.
+ * Controls and Docs (the welcome page) remain.
  */
 const config: StorybookConfig = {
-  stories: ["../stories/**/*.stories.ts"],
+  stories: ["../stories/**/*.mdx", "../stories/**/*.stories.ts"],
   // `_headers`: the static host's COOP/COEP (the dev server's `crossOriginIsolated` does not reach a static build).
   staticDirs: ["../public"],
-  addons: [],
+  addons: ["@storybook/addon-docs"],
   framework: { name: "@storybook/html-vite", options: {} },
   core: {
     disableTelemetry: true,

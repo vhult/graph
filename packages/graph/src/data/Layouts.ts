@@ -162,6 +162,10 @@ export const CONSTANTS = {
   STYLE_FLAG_LABEL: 1 << 29,
   STYLE_FLAG_PINNED: 1 << 30,
   NO_ICON: 0xffff,
+  SHAPE_CIRCLE: 0,
+  SHAPE_SQUARE: 1,
+  SHAPE_HEXAGON: 2,
+  INSTANCE_SHAPE_BITS: 0xf,
   // edgeStyle fields
   EDGE_WIDTH_MASK: 0xff,
   EDGE_CURVE_SHIFT: 8,
@@ -189,7 +193,7 @@ export const DEFAULT_NODE_STYLE = CONSTANTS.NO_ICON << CONSTANTS.STYLE_ICON_SHIF
  */
 export const NODE_INSTANCE = defineStruct("NodeInstance", [
   { name: "screenPos", type: "vec2<f32>", doc: "device px" },
-  { name: "radiusPx", type: "f32", doc: "projected radius, device px" },
+  { name: "radiusPx", type: "f32", doc: "projected radius, device px; low INSTANCE_SHAPE_BITS mantissa bits hold the shape" },
   { name: "color", type: "u32", doc: "rgba8unorm" },
 ] as const);
 
@@ -219,6 +223,8 @@ export const EDGE_CHUNK = defineStruct("EdgeChunk", [
   { name: "maxWidthPx", type: "f32", doc: "widest per-edge style width, device px; 0 = none" },
   { name: "density", type: "f32", doc: "edge length per area where this length level lies, 1/world" },
   { name: "_pad", type: "f32" },
+  { name: "midLo", type: "vec2<f32>" },
+  { name: "midHi", type: "vec2<f32>" },
 ] as const);
 
 /**
@@ -226,57 +232,133 @@ export const EDGE_CHUNK = defineStruct("EdgeChunk", [
  *   [EDGE_SCRATCH_DRAW_ARGS]      drawIndirect args: one quad per drawn edge
  *   [EDGE_SCRATCH_DISPATCH]       dispatchIndirect args: one workgroup per listed chunk
  *   [EDGE_SCRATCH_LIST_COUNT]     chunks listed this frame
- *   [EDGE_SCRATCH_LABEL_DISPATCH] dispatchIndirect args: one thread per drawn edge (edge labels)
  *   [EDGE_SCRATCH_LIST]           C listed chunk ids,
  *                             C + 1 offsets of each listed chunk's edges in the draw list,
- *                             C × EdgeChunk
+ *                             C × EdgeChunk,
+ *                             MOVE_LIST + C: edge chunks holding a dragged node's edges
  */
 export const EDGE_CONSTANTS = {
   /** Edges per chunk: one bounds record, one cull decision. */
   EDGE_CHUNK_SIZE: 1024,
   EDGE_CHUNK_SHIFT: 10,
-  EDGE_CHUNK_WORDS: 8,
+  EDGE_CHUNK_WORDS: 12,
   /** Sort-key bits for the length level: 16 octaves of length / graph extent. */
   EDGE_LEVEL_BITS: 4,
   EDGE_SCRATCH_DRAW_ARGS: 0,
   EDGE_SCRATCH_DISPATCH: 4,
   EDGE_SCRATCH_LIST_COUNT: 7,
-  EDGE_SCRATCH_LABEL_DISPATCH: 8,
-  EDGE_SCRATCH_LIST: 12,
+  EDGE_SCRATCH_LIST: 8,
 } as const;
 
-/**
- * One label candidate, written by the GPU for the worker to place (labels are
- * text, so placing them is the CPU's job; finding them among millions is not).
- * Nodes: `a` is the centre. Edges: `a` and `b` are the ends.
- */
-export const LABEL_RECORD = defineStruct("LabelRecord", [
-  { name: "index", type: "u32", doc: "engine node / sorted edge" },
-  { name: "user", type: "u32", doc: "the user's node / edge index, filled by label_map" },
-  { name: "priority", type: "f32", doc: "node size, world / edge length, device px" },
-  { name: "radius", type: "f32", doc: "drawn node radius, device px; 0 for edges" },
-  { name: "a", type: "vec2<f32>", doc: "node centre / edge source, device px" },
-  { name: "b", type: "vec2<f32>", doc: "edge target, device px" },
+export const LABEL_PARAMS = defineStruct("LabelParams", [
+  { name: "textH", type: "f32" },
+  { name: "labelH", type: "f32" },
+  { name: "gap", type: "f32" },
+  { name: "padding", type: "f32" },
+  { name: "maxHalfW", type: "f32" },
+  { name: "maxHalfH", type: "f32" },
+  { name: "minEdgeW", type: "f32" },
+  { name: "labelArea", type: "f32" },
+  { name: "cellW", type: "f32" },
+  { name: "bonus", type: "f32" },
+  { name: "fadeS", type: "f32" },
+  { name: "glyphTable", type: "u32" },
+  { name: "gridW", type: "u32" },
+  { name: "gridH", type: "u32" },
+  { name: "capacity", type: "u32" },
+  { name: "chunks", type: "u32" },
+  { name: "levels", type: "u32" },
+  { name: "nodeCount", type: "u32" },
+  { name: "edgeChunks", type: "u32" },
+  { name: "edgeLevels", type: "u32" },
+  { name: "edgeCount", type: "u32" },
+  { name: "bitsOffset", type: "u32" },
+  { name: "liveCount", type: "u32" },
 ] as const);
 
-/** One placed label, drawn by LABEL_DRAW at its anchor's current position. */
-export const LABEL_INSTANCE = defineStruct("LabelInstance", [
-  { name: "anchor", type: "u32", doc: "engine node / sorted edge" },
-  { name: "kind", type: "u32", doc: "LABEL_KIND_*" },
-  { name: "rect", type: "vec2<u32>", doc: "atlas (x | y << 16, w | h << 16), device px" },
-  { name: "alpha", type: "f32" },
-  { name: "_pad", type: "f32" },
+export const LABEL_CANDIDATE = defineStruct("LabelCandidate", [
+  { name: "center", type: "vec2<f32>" },
+  { name: "halfW", type: "f32" },
+  { name: "halfH", type: "f32" },
+  { name: "rank", type: "f32" },
+  { name: "index", type: "u32" },
+  { name: "size", type: "f32" },
+] as const);
+
+export const LIVE_LABEL = defineStruct("LiveLabel", [
+  { name: "index", type: "u32" },
+  { name: "slot", type: "u32" },
+  { name: "run", type: "u32" },
+  { name: "start", type: "f32" },
+  { name: "fadeOut", type: "u32" },
 ] as const);
 
 export const LABEL_CONSTANTS = {
-  LABEL_KIND_NODE: 0,
-  LABEL_KIND_EDGE: 1,
-  /** Candidates the GPU hands the worker per query, per kind. */
-  LABEL_NODE_CAPACITY: 2048,
-  LABEL_EDGE_CAPACITY: 1024,
-  /** Words before the records in a candidate buffer: the count, then padding. */
-  LABEL_HEADER_WORDS: 4,
+  LABEL_NONE: 0xffffffff,
+  LABEL_EDGE_BIT: 0x80000000,
+  LABEL_GLYPHS: 32,
+  LABEL_TREE_TOP: 16,
+  LABEL_ROUNDS: 8,
+  LABEL_NEIGHBOURS: 48,
+  LABEL_LANES: 8,
+  LABEL_SHOWN_MAX: 4096,
+  LABEL_SLOTS: 8192,
+  LABEL_GLYPH_MAX: 8192,
+  WORK_CANDIDATES: 0,
+  WORK_JOBS: 1,
+  WORK_SHOWN: 2,
+  WORK_ROUND: 3,
+  WORK_EDGE_JOBS: 12,
+  WORK_MAX_HALF_W: 13,
+  WORK_MAX_HALF_H: 14,
+  WORK_JOB_LIST: 16,
+  LABEL_EDGE_PARTS: 2,
+  LABEL_LIST_PARTS: 4,
+  ARGS_JOBS: 0,
+  ARGS_EDGE_JOBS: 1,
+  ARGS_LISTS: 3,
+  ARGS_ROUND: 7,
 } as const;
+
+export const PICK_PARAMS = defineStruct("PickParams", [
+  { name: "pointer", type: "vec2<f32>" },
+  { name: "radiusPx", type: "f32" },
+  { name: "flags", type: "u32" },
+  { name: "edgeRadiusPx", type: "f32" },
+] as const);
+
+export const PICK_CONSTANTS = {
+  PICK_NODE_COUNT: 0,
+  PICK_EDGE_BEST: 1,
+  PICK_NODE_RESULT: 2,
+  PICK_EDGE_RESULT: 3,
+  PICK_EDGE_COUNT: 4,
+  PICK_NODE_SCALE: 5,
+  PICK_NODE_ENGINE: 6,
+  PICK_LIST: 8,
+  PICK_FLAG_NODES: 1,
+  PICK_FLAG_EDGES: 2,
+  PICK_FLAG_SHAPES: 4,
+  PICK_FLAG_EDGE_COLORS: 8,
+  HOVER_FLAG_SHAPES: 1,
+} as const;
+
+export const HOVER_PARAMS = defineStruct("HoverParams", [
+  { name: "node", type: "u32" },
+  { name: "lodScale", type: "f32" },
+  { name: "nodeGrow", type: "f32" },
+  { name: "nodeColor", type: "u32" },
+  { name: "edgeA", type: "u32" },
+  { name: "edgeB", type: "u32" },
+  { name: "edgeStyle", type: "u32" },
+  { name: "edgeColor", type: "u32" },
+  { name: "edgeWidth", type: "f32" },
+  { name: "flags", type: "u32" },
+] as const);
+
+export function pickOutWords(nodeCount: number, edgeCount: number): number {
+  return PICK_CONSTANTS.PICK_LIST + 2 * Math.max(1, chunkCount(nodeCount), edgeChunkCount(edgeCount));
+}
 
 export function edgeChunkCount(edgeCount: number): number {
   return Math.ceil(edgeCount / EDGE_CONSTANTS.EDGE_CHUNK_SIZE);
@@ -284,6 +366,11 @@ export function edgeChunkCount(edgeCount: number): number {
 
 /** Words in the edge state buffer for `edgeCount` edges. */
 export function edgeScratchWords(edgeCount: number): number {
+  const c = edgeChunkCount(edgeCount);
+  return edgeMoveWordOffset(edgeCount) + ENGINE_CONSTANTS.MOVE_LIST + c;
+}
+
+export function edgeMoveWordOffset(edgeCount: number): number {
   const c = edgeChunkCount(edgeCount);
   return EDGE_CONSTANTS.EDGE_SCRATCH_LIST + c + (c + 1) + EDGE_CONSTANTS.EDGE_CHUNK_WORDS * c;
 }
@@ -301,13 +388,13 @@ export function edgeScratchWords(edgeCount: number): number {
  *   [SCRATCH_DRAW_ARGS]   NUM_BUCKETS × drawIndirect args (4 words each)
  *   [SCRATCH_BUCKET_BASE] NUM_BUCKETS × first instance slot of each bucket
  *   [SCRATCH_LIST_COUNT]  number of chunks with ≥ 1 visible node
- *   [SCRATCH_DRAW_STRIDE] chunk scramble multiplier (written by the CPU)
  *   [SCRATCH_CHUNKS]      (S + NUM_BUCKETS − 1)·C cell counts, in draw order (see cull_state.wgsl),
  *                         the same number of cell offsets (= draw slots),
  *                         ceil(cells / CHUNK_SIZE) scan block sums,
  *                         C visible-node totals per chunk,
  *                         C list of non-empty chunk ids,
- *                         C × ChunkBounds (CHUNK_BOUNDS_WORDS words each)
+ *                         C × ChunkBounds (CHUNK_BOUNDS_WORDS words each),
+ *                         ceil(N / 32) labelled node bits
  */
 export const ENGINE_CONSTANTS = {
   BUCKET_NORMAL: 0,
@@ -327,11 +414,14 @@ export const ENGINE_CONSTANTS = {
   SCRATCH_DRAW_ARGS: 0,
   SCRATCH_BUCKET_BASE: 16,
   SCRATCH_LIST_COUNT: 20,
-  SCRATCH_DRAW_STRIDE: 21,
   SCRATCH_CHUNKS: 32,
   /** Radix sort digit width and bin count. */
   RADIX_BITS: 4,
   RADIX_BINS: 16,
+  MOVE_COUNT: 0,
+  MOVE_NODE: 1,
+  MOVE_LIST: 2,
+  MOVE_GROUPS: 256,
 } as const;
 
 /** Workgroup size used by every engine compute pass (matches the WORKGROUP_SIZE override default). */
@@ -346,7 +436,18 @@ export function cullScratchWords(nodeCount: number): number {
   const k = ENGINE_CONSTANTS;
   const c = chunkCount(nodeCount);
   const cells = cullCellCount(nodeCount);
+  return labelledWordOffset(nodeCount) + Math.ceil(nodeCount / 32);
+}
+
+export function drawTableWordOffset(nodeCount: number): number {
+  const k = ENGINE_CONSTANTS;
+  const c = chunkCount(nodeCount);
+  const cells = cullCellCount(nodeCount);
   return k.SCRATCH_CHUNKS + 2 * cells + Math.ceil(cells / k.CHUNK_SIZE) + 2 * c + k.CHUNK_BOUNDS_WORDS * c;
+}
+
+export function labelledWordOffset(nodeCount: number): number {
+  return drawTableWordOffset(nodeCount) + chunkCount(nodeCount);
 }
 
 /** Scan cells: DRAW segments per chunk for BUCKET_NORMAL + one per other bucket. */
@@ -373,6 +474,13 @@ export function drawStride(chunks: number): number {
     [s0, s1] = [s1, s0 - q * s1];
   }
   return ((s0 % chunks) + chunks) % chunks;
+}
+
+export function drawPositions(chunks: number): Uint32Array {
+  const stride = drawStride(chunks);
+  const out = new Uint32Array(chunks);
+  for (let c = 0; c < chunks; c++) out[c] = (c * stride) % chunks;
+  return out;
 }
 
 /**

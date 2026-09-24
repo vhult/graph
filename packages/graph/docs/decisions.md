@@ -8,6 +8,196 @@ bandwidth), Edge 153, 1M nodes / 3M edges at fit unless stated.
 
 ---
 
+## 0046 — Arrowheads shrink away on short edges
+
+An arrowhead used to shrink to half the visible edge, so at fit every short
+edge drew as a wedge. Now `arrowFitPx` scales the arrow from full size at 3x
+its length down to nothing at 2x, in screen px, per edge. It grows smoothly
+with zoom, and a hidden arrow gives back the narrow quad. Long edges keep
+their arrows at any zoom. The same rule runs in the draw, the pick and the
+hover. Communities 1M / 1.5M edges, directed, AMD Radeon 890M, Edge headless
+on Linux, GPU mean / p95, 2 runs each: fit 6.92 / 7.88 → 6.02 / 6.61 ms,
+zoomSweep 8.98 / 11.90 → 8.71 / 11.89 ms, standard 4.55 / 10.54 → 4.26 /
+10.16 ms. Undirected is unchanged (fit 3.59 → 3.55 ms).
+
+## 0045 — Node drag moves one node in the worker and rebuilds only the chunks it touches
+
+`nodeDrag` (option and `setNodeDrag`) lets a left press drag a node.
+`nodeClick` / `edgeClick` report a press released within 3 CSS px, and
+`nodeDragStart` / `nodeDrag` / `nodeDragEnd` report the move as `{ index, x, y }`.
+
+**Press.** A left press runs a pick at once, skipping the 50 ms settle and
+`pickRate`. With drag on, the pan waits for it; a miss catches the pan up to
+the pointer in one step. A hit starts the drag once the pointer passes the
+3 px slop. The worker writes the node's position once per tick, keeping the
+grab offset, so the node moves in the same frame as the pointer. A host that
+pushes its own positions handles the dragged node itself.
+
+**Bounds.** A drag frame marks `Dirty.MOVED`, not `POSITIONS`. `cull.bounds`
+then rebuilds only the node's chunk (the pick now also returns the engine
+index). `edge.bounds` rebuilds only the edge chunks holding the node's edges,
+which `edge_touch` lists once when the drag starts, in a section at the end of
+the edge state buffer (a separate buffer would pass the 10 storage buffers per
+dispatch).
+
+**Drag end.** No extra step. The list stays set after the drag, so a last move
+that arrives with the release still rebuilds its chunks; only a drag marks
+`MOVED`, and the next drag replaces the list. Before this, a node dropped in the
+same frame as the release sat outside its chunk box and was culled once that box
+left the screen (from zoom 3.4 at 100k). A re-sort at drag end was measured and
+rejected: GPU 16 ms at 1M and 136 ms at 10M (node and edge sort), and when the
+drag grows the bounds every Morton key changes, so the zoomed-out sample changes
+everywhere. Skipping it leaves one stretched chunk until the next bulk position
+load: at 1M, fit, a far drag draws 801 more nodes (+0.3%) with no visible
+difference.
+
+**Measurements.** AMD Radeon 890M, Edge 145, Linux, headless, a 3 s drag at
+60 Hz, per frame:
+- communities 10M, rebuilding everything: GPU 26.38 ms, interval p50 30.1 ms.
+  `cull.bounds` 2.03 ms, `edge.bounds` 14.88 ms.
+- communities 10M, chunks touched only: GPU 9.30 ms, interval p50 16.2 ms,
+  against 9.20 ms for a pan. `cull.bounds` 0.023 ms, `edge.bounds` 0.030 ms;
+  `edge_touch` costs 1.7 ms once at drag start.
+- communities 1M: drag 3.64 ms, pan 3.59 ms.
+- Drag off, bench `large`, alternated with `dev`, 2 runs each: frame 5.80 /
+  5.87 → 5.87 / 6.13 ms, p95 12.03 / 11.46 → 11.08 / 11.89 ms. Within
+  run-to-run spread.
+
+## 0044 — The hover highlight is one extra draw, fed by the host's index
+
+While a hover handler is set, the engine draws the hovered item again, in
+`hoverStyle`:
+- The hovered node goes on top of all nodes, at its drawn size ×
+  `nodeScale` (default 1.25).
+- The hovered edge goes after all edges and under the nodes, at ×
+  `edgeWidth` (default 2), arrowhead included.
+- Default colour is white. `hoverStyle: false` turns it off.
+
+**Inputs.** The draw takes the host's index and maps it through `rank[]`, and
+edge endpoints come from the CPU mirror. It follows moving nodes and survives a
+re-sort. The pick returns the node's LOD scale, so the highlight matches the
+node as drawn.
+- Setting `STATE_HOVERED` was rejected: it flags the whole chunk as foreground,
+  which draws all 1024 nodes unsampled and shows as a patch at fit.
+- A hover change is one render-only frame, with no compute.
+- Hover clears when the camera moves (nothing is picked then) and is picked
+  again after it settles.
+
+**Measurements.** GPU per render-only frame, mean, camera still.
+- communities 1M: none 3.40 ms, node hovered 3.38, edge hovered 3.34; node
+  draw 1.453 → 1.461 ms.
+- communities 10M: 7.14 / 6.64 / 6.65; node draw 1.058 → 1.070.
+- 30 hover changes gave exactly 30 frames.
+
+**Bench, no handler set,** alternated with the previous commit, 2 runs each:
+- GPU mean: large 4.28 / 4.06 against 4.16 / 4.26 ms; xlarge 11.20 / 11.35
+  against 11.22 / 11.12 ms.
+- The xlarge frame interval is 0.13–0.42 ms higher in both pairs, unexplained
+  by GPU or CPU time.
+
+## 0043 — Picking is a compute pass over the cull's chunks, not an ID buffer
+
+`on("nodeHover")` and `on("edgeHover")` report the item under the pointer as the
+host's own index, mapped through `order[]` / `edgeOrder[]` on the GPU. Each kind
+runs only while it has a handler.
+
+**Nodes.** One workgroup walks the cull's list of visible chunks and keeps those
+whose box contains the pointer. An indirect dispatch then tests the candidates
+with the cull's own `classify`, LOD prefix and labelled rule, the draw's alpha
+and SDF, and the draw-order key.
+
+**Edges.** The same shape over the edge cull's list and keep counts. Before any
+endpoint gather, an 8 B line record per edge (packed normal + offset from the
+chunk centre) rejects the edge. The record is written by `edge_bounds`, and only
+while an edge handler is set.
+
+**Scheduling.**
+- Picks run in their own submission, before the frame.
+- Only once the camera has not changed for 50 ms.
+- At most `pickRate` per second (default 60), again whenever the data changes.
+- An edge is hit within its drawn half-width plus `edgePickRadius` (default
+  4 CSS px, as sigma v4's `edgePickingPadding`); a 1 px edge was impractical to
+  hover. Nodes use `pickRadius` (default 0).
+
+**Measurements.** Radeon 890M, Edge 145, 9 pointers at fit / x10 / x70.
+- GPU per pick at communities 1M: nodes 8–16 µs, edges 6.5–21 µs.
+- At 10M: nodes 11–34 µs, edges 8.6–28 µs.
+- An ID-buffer render into a 1×1 target costs 60 µs – 3.2 ms per pick.
+  - It must redo the vertex work of every drawn item.
+- Scanning the drawn instances needs node ids from the cull: +1–19% on
+  `cull.scatter` every frame.
+- Without the line test, edges cost up to 193 µs at 10M x70: long-edge chunk
+  boxes all contain the pointer.
+- The 8 B record is as fast as 16 B (25 vs 33 µs, fuzzball 201 vs 318) at half
+  the memory, with no miss in 1,800 checks against a full scan and the ID buffer.
+- Latency from pointer event to handler: 4.3 ms p50, 6.2 ms p95. The readback
+  floor is 2.5–3.5 ms; `mapSync` does not lower it.
+  - Submitting behind a frame instead of before it adds 4–8 ms.
+- With no handler set, bench `large` frame 5.10 / 5.14 → 5.04 / 4.77 ms, p95
+  10.08 / 10.50 → 9.83 / 11.44. `xlarge` 12.32 / 12.39 → 12.78 / 12.57, p95
+  19.41 / 19.56 → 20.27 / 19.53. Within run-to-run spread.
+
+**Two bugs the many-pointer runs caught.**
+1. The hit test must use the draw's alpha. Faint sub-pixel nodes were hit but
+   put no pixel there.
+2. The candidate list must be sized to the chunk count. Fuzzball puts 6,000
+   chunks under the pointer.
+
+## 0042 — Streamed positions upload straight from shared memory
+
+`streamNodePositions()` hands the caller a triple-buffered shared slot; the
+render worker takes the latest one at frame start and writes it to the scatter
+staging buffer directly, skipping the store mirror, which is synced only when
+`setNodes` comes without positions. Copying the slot into the mirror first was
+slower than the old message path. Galaxy story, 1M nodes, every position every
+frame, AMD Radeon 890M, Edge 145 headless, one run each after a warm-up:
+render worker CPU mean / p95 — message 0.78 / 1.76 ms, stream via mirror
+1.25 / 1.51 ms, direct 0.74 / 0.94 ms. All three held 60 fps; main thread
+0.22–0.24 ms mean in each.
+
+## 0041 — Node shapes are SDFs, and the shape rides in the instance radius
+
+Square and hexagon (flat top and bottom) join the circle. Every shape fits the
+circle's `[-1,1]²` box, so the quad, the cull margin, chunk bounds and LOD are
+unchanged. Both SDFs are exact distances, so the analytic AA of 0005 still
+holds. The shape travels in the low 4 mantissa bits of `NodeInstance.radiusPx`
+(radius error ≤ 2⁻¹⁹), keeping the instance at 16 B. A `NODE_SHAPES` override
+compiles the `nodeStyle` read and the shape `switch` out when no node has a
+shape, so circle-only graphs run the same code as before. Arrowheads stop at
+the target's real boundary. Circle-only, communities 1M, AMD Radeon 890M,
+Edge 145 headless: frame 5.16 -> 5.04 ms, p95 10.19 -> 9.88 ms; cull.count
+0.054 -> 0.054 ms, cull.scatter 0.080 -> 0.086 ms. Mixed shapes not measured.
+
+## 0040 — Chunk draw positions come from a table, not a multiply
+
+The NORMAL bucket scrambled chunks with `(chunk * stride) % chunks` in u32,
+which wraps above 65,536 chunks (67.1M nodes). Two chunks then share a draw
+position: at 90M, 15,580 chunks collided and 74,046,080 of 90,000,000 nodes were
+drawn; cells no chunk wrote kept stale words, so reusing a buffer (90M then
+102M) gave a 2.2B instance count and a GPU hang. The CPU now builds the same
+positions once per chunk count (exact in f64) and writes them into the cull
+state after the chunk bounds; `drawIndex` reads `table[chunk]`. Draw order below
+67.1M is unchanged; the table is 4 bytes per chunk. Measured on an AMD Radeon
+890M, Edge 145, Linux, runs alternated: 90M draws 90,000,000; 1M (5 runs each)
+frame 5.32 → 5.41 ms, p95 10.78 → 10.67 ms; 10M standard (2 runs each) frame
+12.62 → 12.72 ms, p95 20.32 → 19.98 ms. All inside run-to-run spread.
+
+## 0039 — Pinch zoom is direct, paired on the main thread
+
+Two fingers used to fight: each finger's down re-anchored the drag and the
+alternating moves panned back and forth by the finger gap. Now `PointerInput`
+keeps two touch slots and, while both are down, sends one `PINCH` record per
+move carrying the absolute midpoint and finger distance in device px. The worker
+pans by the midpoint delta and zooms by the distance ratio at the midpoint, so
+applying every record or only the last of a batch gives the same camera, as
+0006 does for pan. Pinch is direct, not glided like the wheel (0026): touch
+moves arrive at screen rate, so there is no gap to fill, and a glide would trail
+the fingers and keep rendering after they stop. The record layout, ring and
+protocol are unchanged; a pointer id per record would have widened the record
+for the same traffic. When one finger lifts, a `POINTER_DOWN` for the other
+re-anchors the drag without a jump. `gpu.mjs input` gained a pinch phase driven
+by CDP touch events; the headless probe has not yet run on this branch.
+
 ## 0038 — Edge sampling keys on density, not length
 
 Keeping an edge with probability `lim / screenLength` makes the threshold a

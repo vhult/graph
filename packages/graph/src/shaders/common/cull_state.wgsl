@@ -31,8 +31,7 @@ fn numScanBlocks(chunks : u32) -> u32 {
 }
 
 // Draw position of a NORMAL (segment, chunk) cell: segment-major, chunks
-// scrambled so consecutive positions are far apart in Morton order (stride set
-// by the CPU, see drawStride in Layouts.ts; chunk · stride < 2^32 for < 65536 chunks).
+// scrambled so consecutive positions are far apart in Morton order.
 // DRAW_SCRAMBLE off puts NORMAL cells in plain (chunk, segment) order, i.e.
 // spatial draw order. The scramble exists only to stop overlapping blended
 // quads issuing back to back (docs/decisions.md 0020); LOD caps the drawn
@@ -41,7 +40,7 @@ override DRAW_SCRAMBLE : bool = true;
 
 fn drawIndex(segment : u32, chunk : u32, chunks : u32) -> u32 {
   if (DRAW_SCRAMBLE) {
-    return segment * chunks + (chunk * scratch[SCRATCH_DRAW_STRIDE]) % chunks;
+    return segment * chunks + scratch[drawTableAt(chunks) + chunk];
   }
   return chunk * SEGMENTS + segment;
 }
@@ -78,6 +77,18 @@ fn listAt(chunks : u32) -> u32 {
 
 fn chunkBoundsAt(chunk : u32, chunks : u32) -> u32 {
   return listAt(chunks) + chunks + chunk * CHUNK_BOUNDS_WORDS;
+}
+
+fn drawTableAt(chunks : u32) -> u32 {
+  return chunkBoundsAt(chunks, chunks);
+}
+
+fn labelledAt(chunks : u32) -> u32 {
+  return drawTableAt(chunks) + chunks;
+}
+
+fn isLabelled(i : u32, chunks : u32) -> bool {
+  return ((scratch[labelledAt(chunks) + (i >> 5u)] >> (i & 31u)) & 1u) != 0u;
 }
 
 fn loadChunkBounds(chunk : u32, chunks : u32) -> ChunkBounds {

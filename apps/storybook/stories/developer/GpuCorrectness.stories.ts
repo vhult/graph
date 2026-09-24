@@ -12,7 +12,7 @@
  */
 import type { Meta, StoryObj } from "@storybook/html-vite";
 import type { Graph } from "@vhult/graph";
-import { clustered, cpuVisibleCount, sizesAsF16, type NodeDataset } from "@vhult/graph-bench";
+import { communities, cpuVisibleCount, sizesAsF16, type NodeDataset } from "@vhult/graph-bench";
 import { stage } from "../../src/stage";
 
 interface Args {
@@ -42,8 +42,10 @@ function bounds(d: NodeDataset) {
 }
 
 async function runChecks(graph: Graph, count: number, report: (c: Check[]) => void): Promise<Check[]> {
-  const d = clustered(count, 24, 7);
+  const g = communities(count, 2, 7);
+  const d = g.nodes;
   graph.setNodes(d, { copy: true });
+  graph.setEdges(g.edges, { copy: true });
   graph.camera.fit();
   await sleep(1500);
   const sizes = sizesAsF16(d.sizes);
@@ -98,7 +100,7 @@ const meta: Meta<Args> = {
       // clusters instead, so the two are only comparable with it disabled.
       // What this proves is that the cull itself is still exact; what LOD costs
       // visually is a separate, image-based question.
-      options: () => ({ lodTargetPx: 0 }),
+      options: () => ({ lodTargetPx: 0, controls: false }),
       setup: async (graph, a, hud, root) => {
         const panel = document.createElement("div");
         panel.className = "bench-panel";

@@ -575,6 +575,27 @@ async function cmdInput(opts) {
     await cdp.evaluate("globalThis.__inputProbe.disarm()", 30);
     out.drag = await cdp.evaluate("globalThis.__inputProbe.result()", 60);
 
+    await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 2 });
+    const fingers = (mx, gap) => [
+      { x: mx - gap, y: cy, id: 1 },
+      { x: mx + gap, y: cy, id: 2 },
+    ];
+    await cdp.evaluate("globalThis.__inputProbe.arm()", 30);
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: fingers(cx, 100) });
+    for (let i = 0; i < total; i++) {
+      const t0 = Date.now();
+      await cdp.send("Input.dispatchTouchEvent", {
+        type: "touchMove",
+        touchPoints: fingers(cx + Math.round(Math.cos(i / 6) * 40), 100 + Math.round(Math.sin(i / 6) * 60)),
+      });
+      const wait = gap - (Date.now() - t0);
+      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    }
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await new Promise((r) => setTimeout(r, 400));
+    await cdp.evaluate("globalThis.__inputProbe.disarm()", 30);
+    out.pinch = await cdp.evaluate("globalThis.__inputProbe.result()", 60);
+
     return { count, zoom, rateHz, seconds, viewport: [w, h], ...out };
   });
 }

@@ -13,6 +13,9 @@
 #include "common/scan.wgsl"
 
 @group(2) @binding(0) var<storage, read_write> edgeScratch : array<u32>;
+@group(2) @binding(1) var<storage, read_write> edgeLines : array<vec2<u32>>;
+
+override EDGE_LINES : bool = false;
 
 /** Arrowheads reach past the edge's width; the margin has to cover them. */
 override EDGE_ARROWS : bool = false;
@@ -28,6 +31,8 @@ fn loadEdgeChunk(c : u32, chunks : u32) -> EdgeChunk {
     bitcast<f32>(edgeScratch[o + 5u]),
     bitcast<f32>(edgeScratch[o + 6u]),
     0.0,
+    vec2<f32>(bitcast<f32>(edgeScratch[o + 8u]), bitcast<f32>(edgeScratch[o + 9u])),
+    vec2<f32>(bitcast<f32>(edgeScratch[o + 10u]), bitcast<f32>(edgeScratch[o + 11u])),
   );
 }
 
@@ -40,6 +45,10 @@ fn storeEdgeChunk(c : u32, chunks : u32, v : EdgeChunk) {
   edgeScratch[o + 4u] = bitcast<u32>(v.maxLen);
   edgeScratch[o + 5u] = bitcast<u32>(v.maxWidthPx);
   edgeScratch[o + 6u] = bitcast<u32>(v.density);
+  edgeScratch[o + 8u] = bitcast<u32>(v.midLo.x);
+  edgeScratch[o + 9u] = bitcast<u32>(v.midLo.y);
+  edgeScratch[o + 10u] = bitcast<u32>(v.midHi.x);
+  edgeScratch[o + 11u] = bitcast<u32>(v.midHi.y);
 }
 
 // ---- bounds -----------------------------------------------------------------
@@ -50,6 +59,11 @@ var<workgroup> wgBox : array<vec4<f32>, WORKGROUP_SIZE>;
 var<workgroup> wgMid : array<vec4<f32>, WORKGROUP_SIZE>;
 /** (longest edge, widest style, total length, -) */
 var<workgroup> wgLen : array<vec4<f32>, WORKGROUP_SIZE>;
+
+@group(2) @binding(2) var<storage, read_write> touchScratch : array<atomic<u32>>;
+
+var<workgroup> wgTouch : atomic<u32>;
+var<workgroup> wgMove : u32;
 
 @compute @workgroup_size(WORKGROUP_SIZE)
 fn edge_bounds(
@@ -62,12 +76,76 @@ fn edge_bounds(
   if (c >= chunks) {
     return; // uniform per workgroup
   }
+  edgeBoundsOf(c, chunks, lid);
+}
+
+@compute @workgroup_size(WORKGROUP_SIZE)
+fn edge_bounds_list(
+  @builtin(workgroup_id) wid : vec3<u32>,
+  @builtin(num_workgroups) nwg : vec3<u32>,
+  @builtin(local_invocation_index) lid : u32,
+) {
+  let chunks = numEdgeChunks();
+  let m = edgeMoveAt(chunks);
+  if (lid == 0u) {
+    wgMove = edgeScratch[m + MOVE_COUNT];
+  }
+  let n = workgroupUniformLoad(&wgMove);
+  for (var i = wid.x; i < n; i += nwg.x) {
+    if (lid == 0u) {
+      wgMove = edgeScratch[m + MOVE_LIST + i];
+    }
+    let c = workgroupUniformLoad(&wgMove);
+    if (c < chunks) {
+      edgeBoundsOf(c, chunks, lid);
+    }
+    workgroupBarrier();
+  }
+}
+
+@compute @workgroup_size(WORKGROUP_SIZE)
+fn edge_touch(
+  @builtin(workgroup_id) wid : vec3<u32>,
+  @builtin(num_workgroups) nwg : vec3<u32>,
+  @builtin(local_invocation_index) lid : u32,
+) {
+  let chunks = numEdgeChunks();
+  let c = wid.x + wid.y * nwg.x;
+  if (c >= chunks) {
+    return; // uniform per workgroup
+  }
+  if (lid == 0u) {
+    atomicStore(&wgTouch, 0u);
+  }
+  workgroupBarrier();
+  let m = edgeMoveAt(chunks);
+  let v = atomicLoad(&touchScratch[m + MOVE_NODE]);
+  for (var k = 0u; k < ITEMS_PER_THREAD; k++) {
+    let e = c * EDGE_CHUNK_SIZE + k * WORKGROUP_SIZE + lid;
+    if (e < frame.edgeCount) {
+      let ij = edgeIdx[e];
+      if (ij.x == v || ij.y == v) {
+        atomicStore(&wgTouch, 1u);
+      }
+    }
+  }
+  workgroupBarrier();
+  if (lid == 0u && atomicLoad(&wgTouch) != 0u) {
+    let at = atomicAdd(&touchScratch[m + MOVE_COUNT], 1u);
+    atomicStore(&touchScratch[m + MOVE_LIST + at], c);
+  }
+}
+
+fn edgeBoundsOf(c : u32, chunks : u32, lid : u32) {
+  workgroupBarrier();
   // Without per-edge styles the style buffer is a 16-byte placeholder of
   // zeros (= global width), so reading inside its length is always right.
   let styles = arrayLength(&edgeStyle);
   var box = vec4<f32>(vec2<f32>(BIG), vec2<f32>(-BIG));
   var mid = box;
   var len = vec4<f32>(0.0);
+  var lineN : array<vec2<f32>, ITEMS_PER_THREAD>;
+  var lineA : array<vec2<f32>, ITEMS_PER_THREAD>;
   for (var k = 0u; k < ITEMS_PER_THREAD; k++) {
     let e = c * EDGE_CHUNK_SIZE + k * WORKGROUP_SIZE + lid;
     if (e < frame.edgeCount) {
@@ -80,6 +158,11 @@ fn edge_bounds(
       let style = select(0u, edgeStyle[e], e < styles);
       let d = distance(pa, pb);
       len = vec4<f32>(max(len.x, d), max(len.y, f32(style & EDGE_WIDTH_MASK) / f32(EDGE_WIDTH_SCALE)), len.z + d, 0.0);
+      if (EDGE_LINES) {
+        let dir = pb - pa;
+        lineN[k] = select(vec2<f32>(0.0), vec2<f32>(-dir.y, dir.x) / max(d, 1e-30), d > 0.0);
+        lineA[k] = pa;
+      }
     }
   }
   wgBox[lid] = box;
@@ -97,6 +180,16 @@ fn edge_bounds(
     }
     workgroupBarrier();
   }
+  if (EDGE_LINES) {
+    let center = (wgMid[0].xy + wgMid[0].zw) * 0.5;
+    for (var k = 0u; k < ITEMS_PER_THREAD; k++) {
+      let e = c * EDGE_CHUNK_SIZE + k * WORKGROUP_SIZE + lid;
+      if (e < frame.edgeCount) {
+        let packed = pack2x16snorm(lineN[k]);
+        edgeLines[e] = vec2<u32>(packed, bitcast<u32>(dot(unpack2x16snorm(packed), lineA[k] - center)));
+      }
+    }
+  }
   if (lid == 0u) {
     // Density of the chunk's length level where it lies: its total length over
     // the area its MIDPOINTS span. Chunks of one level tile that level's
@@ -107,7 +200,7 @@ fn edge_bounds(
     let span = wgMid[0].zw - wgMid[0].xy;
     let pad = max(span.x, span.y) / sqrt(f32(edgeChunkLen(c)));
     let area = max((span.x + pad) * (span.y + pad), 1e-30);
-    storeEdgeChunk(c, chunks, EdgeChunk(wgBox[0].xy, wgBox[0].zw, wgLen[0].x, wgLen[0].y, wgLen[0].z / area, 0.0));
+    storeEdgeChunk(c, chunks, EdgeChunk(wgBox[0].xy, wgBox[0].zw, wgLen[0].x, wgLen[0].y, wgLen[0].z / area, 0.0, wgMid[0].xy, wgMid[0].zw));
   }
 }
 
@@ -174,7 +267,7 @@ fn edge_cull(@builtin(local_invocation_index) lid : u32) {
   if (lid == 0u) {
     edgeScratch[edgeOffsetsAt(chunks) + sl.total] = sd.total; // end of the last listed chunk
     let a = EDGE_SCRATCH_DRAW_ARGS;
-    edgeScratch[a] = 4u; // vertexCount: one triangle-strip quad
+    edgeScratch[a] = edgeStripVertices(EDGE_ARROWS);
     edgeScratch[a + 1u] = sd.total; // instanceCount: one per drawn edge
     edgeScratch[a + 2u] = 0u; // firstVertex
     edgeScratch[a + 3u] = 0u; // firstInstance
@@ -182,12 +275,6 @@ fn edge_cull(@builtin(local_invocation_index) lid : u32) {
     edgeScratch[d] = min(sl.total, 65535u);
     edgeScratch[d + 1u] = max(1u, (sl.total + 65534u) / 65535u);
     edgeScratch[d + 2u] = 1u;
-    // Edge label candidates: one thread per drawn edge (label_edges.wgsl).
-    let groups = (sd.total + WORKGROUP_SIZE - 1u) / WORKGROUP_SIZE;
-    let l = EDGE_SCRATCH_LABEL_DISPATCH;
-    edgeScratch[l] = min(groups, 65535u);
-    edgeScratch[l + 1u] = max(1u, (groups + 65534u) / 65535u);
-    edgeScratch[l + 2u] = 1u;
     edgeScratch[EDGE_SCRATCH_LIST_COUNT] = sl.total;
   }
 }

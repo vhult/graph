@@ -1,23 +1,34 @@
-// Label candidate buffers and the thresholds that fill them, shared by the
-// GPU passes that look for labels (see LabelPass.ts).
 #include "common/layouts.wgsl"
 
-/** A candidate buffer: how many were found (may exceed capacity), then the first `capacity`. */
-struct LabelCandidates {
-  count : atomic<u32>,
-  pad0 : u32,
-  pad1 : u32,
-  pad2 : u32,
-  records : array<LabelRecord>,
+@group(2) @binding(1) var<uniform> label : LabelParams;
+
+const LABEL_GROUP_SLOTS : f32 = 4.0;
+const LABEL_SLACK : f32 = 1.5;
+const LABEL_EDGE_SLACK : f32 = 0.5;
+const LABEL_FOREGROUND_RANK : f32 = 3.0e38;
+const LABEL_EDGE_FIT : f32 = 0.7;
+const LABEL_RAW_JOB : u32 = 0x80000000u;
+
+fn levelOffset(levels : u32, level : u32) -> u32 {
+  return (1u << (levels + 1u)) - (1u << (levels + 1u - level));
 }
 
-/** Written by the worker every query, from what the previous one found. */
-struct LabelParams {
-  /** Only nodes at least this big (world) are candidates: the biggest win. */
-  nodeMinSize : f32,
-  /** ...and drawn at least this wide, device px, so the node is visible. */
-  nodeMinRadiusPx : f32,
-  /** Only edges at least this long on screen, device px: shorter ones cannot fit text. */
-  edgeMinLenPx : f32,
-  pad : f32,
+fn treeOffset(level : u32) -> u32 {
+  return levelOffset(label.levels, level);
+}
+
+fn treeTop(level : u32, group : u32) -> u32 {
+  return label.nodeCount + (treeOffset(level) + group) * LABEL_TREE_TOP;
+}
+
+fn edgeTreeOffset(level : u32) -> u32 {
+  return levelOffset(label.edgeLevels, level);
+}
+
+fn edgeTreeTop(level : u32, group : u32) -> u32 {
+  return (edgeTreeOffset(level) + group) * LABEL_TREE_TOP;
+}
+
+fn sizeKey(size : u32) -> u32 {
+  return size & 0xFFFFu;
 }

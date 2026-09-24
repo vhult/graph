@@ -7,6 +7,7 @@ import { ENGINE_CONSTANTS } from "../data/Layouts";
 import type { ContractLayouts } from "../gpu/BindLayouts";
 import { Stage, type FrameContext, type RenderNode } from "../gpu/FrameGraph";
 import { createShaderModule } from "../gpu/ShaderModules";
+import type { HoverPass } from "./HoverPass";
 import type { CullOutputs } from "./TransformCullPass";
 
 const DRAW_ARGS_BYTES = 16;
@@ -14,6 +15,10 @@ const BUCKETS = [ENGINE_CONSTANTS.BUCKET_NORMAL, ENGINE_CONSTANTS.BUCKET_FOREGRO
 
 export class NodeGeometryPass implements RenderNode {
   readonly stage = Stage.NODE_GEOMETRY;
+  readonly name = "nodes";
+
+  shapes = false;
+  hover: HoverPass | null = null;
 
   private bindGroup: GPUBindGroup | null = null;
   private scratch: GPUBuffer | null = null;
@@ -22,8 +27,7 @@ export class NodeGeometryPass implements RenderNode {
   private constructor(
     private readonly device: GPUDevice,
     private readonly layout: GPUBindGroupLayout,
-    /** Indexed by bucket id. */
-    private readonly pipelines: readonly GPURenderPipeline[],
+    private readonly pipelines: readonly (readonly GPURenderPipeline[])[],
   ) {}
 
   static async create(device: GPUDevice, format: GPUTextureFormat, layouts: ContractLayouts): Promise<NodeGeometryPass> {
@@ -40,17 +44,21 @@ export class NodeGeometryPass implements RenderNode {
       color: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
       alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
     };
-    const make = (bucket: number) =>
+    const make = (bucket: number, shapes: number) =>
       device.createRenderPipelineAsync({
-        label: `nodes/bucket${bucket}`,
+        label: `nodes/bucket${bucket}#${shapes}`,
         layout: pipelineLayout,
-        vertex: { module, entryPoint: "vs", constants: { BUCKET: bucket } },
-        fragment: { module, entryPoint: "fs", targets: [{ format, blend }] },
+        vertex: { module, entryPoint: "vs", constants: { BUCKET: bucket, NODE_SHAPES: shapes } },
+        fragment: { module, entryPoint: "fs", targets: [{ format, blend }], constants: { NODE_SHAPES: shapes } },
         primitive: { topology: "triangle-strip" },
       });
-    const built = await Promise.all(BUCKETS.map(make));
-    const pipelines: GPURenderPipeline[] = [];
-    BUCKETS.forEach((b, k) => (pipelines[b] = built[k]!));
+    const variant = async (shapes: number) => {
+      const built = await Promise.all(BUCKETS.map((b) => make(b, shapes)));
+      const pipelines: GPURenderPipeline[] = [];
+      BUCKETS.forEach((b, k) => (pipelines[b] = built[k]!));
+      return pipelines;
+    };
+    const pipelines = await Promise.all([variant(0), variant(1)]);
     return new NodeGeometryPass(device, layout, pipelines);
   }
 
@@ -74,10 +82,12 @@ export class NodeGeometryPass implements RenderNode {
     pass.setBindGroup(0, ctx.frameBindGroup);
     pass.setBindGroup(1, ctx.graphBindGroup);
     pass.setBindGroup(2, this.bindGroup);
+    const pipelines = this.pipelines[this.shapes ? 1 : 0]!;
     for (let k = 0; k < BUCKETS.length; k++) {
       const b = BUCKETS[k]!;
-      pass.setPipeline(this.pipelines[b]!);
+      pass.setPipeline(pipelines[b]!);
       pass.drawIndirect(this.scratch, ENGINE_CONSTANTS.SCRATCH_DRAW_ARGS * 4 + b * DRAW_ARGS_BYTES);
     }
+    this.hover?.encodeNode(pass, ctx);
   }
 }

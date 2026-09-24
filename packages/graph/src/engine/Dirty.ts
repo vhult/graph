@@ -16,4 +16,7 @@ export const Dirty = {
   LABELS: 1 << 9,
   /** Ask the GPU for label candidates again (labels changed, or placement wants another look). */
   LABEL_QUERY: 1 << 10,
+  LABELLED: 1 << 11,
+  HOVER: 1 << 12,
+  MOVED: 1 << 13,
 } as const;

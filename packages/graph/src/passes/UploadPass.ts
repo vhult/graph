@@ -5,8 +5,9 @@ import type { GraphBuffers } from "../gpu/GraphBuffers";
 
 export class UploadPass implements ComputeNode {
   readonly stage = Stage.UPLOAD;
+  readonly name = "upload";
   readonly phases = ["upload"] as const;
-  readonly runsOn = Dirty.TOPOLOGY | Dirty.POSITIONS | Dirty.STYLE | Dirty.STATE;
+  readonly runsOn = Dirty.TOPOLOGY | Dirty.POSITIONS | Dirty.MOVED | Dirty.STYLE | Dirty.STATE;
 
   constructor(private readonly graph: GraphBuffers) {}
 

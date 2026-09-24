@@ -25,6 +25,7 @@ export interface StageSpec<A> {
 
 export interface StoryContext {
   id: string;
+  viewMode?: string;
   globals?: { hud?: string };
 }
 
@@ -36,7 +37,13 @@ interface Current {
   graph: Graph | null;
   ready: Promise<Graph | null>;
   hud: Hud;
+  hudOn: boolean;
   dispose?: () => void;
+}
+
+function setDebug(graph: Graph, on: boolean): void {
+  if (on) graph.debug.open();
+  else graph.debug.close();
 }
 
 let current: Current | null = null;
@@ -45,13 +52,15 @@ let current: Current | null = null;
 export function stage<A>(args: A, context: StoryContext, spec: StageSpec<A>): HTMLElement {
   const options = spec.options?.(args) ?? {};
   const optionsKey = JSON.stringify(options);
-  const hudOn = context.globals?.hud !== "off";
+  const embed = context.viewMode === "docs";
+  const hudOn = !embed && context.globals?.hud !== "off";
 
   if (current && current.storyId === context.id && current.optionsKey === optionsKey) {
     const cur = current;
     const prev = cur.args as A;
     cur.args = args;
-    cur.hud.setVisible(hudOn);
+    cur.hudOn = hudOn;
+    if (cur.graph) setDebug(cur.graph, hudOn);
     void cur.ready.then((g) => g && cur === current && spec.update?.(g, args, prev, cur.hud));
     return cur.root;
   }
@@ -59,14 +68,13 @@ export function stage<A>(args: A, context: StoryContext, spec: StageSpec<A>): HT
   disposeStage();
 
   const root = document.createElement("div");
-  root.className = "stage";
+  root.className = embed ? "stage stage-embed" : "stage";
   const canvas = document.createElement("canvas");
   root.append(canvas);
   const hud = new Hud(root);
-  hud.setVisible(hudOn);
 
   const errors: string[] = [];
-  const cur: Current = { storyId: context.id, root, optionsKey, args, graph: null, ready: Promise.resolve(null), hud, dispose: spec.dispose };
+  const cur: Current = { storyId: context.id, root, optionsKey, args, graph: null, ready: Promise.resolve(null), hud, hudOn, dispose: spec.dispose };
   current = cur;
 
   // Create after the element is in the DOM so the canvas has a real size.
@@ -83,6 +91,7 @@ export function stage<A>(args: A, context: StoryContext, spec: StageSpec<A>): HT
         errors.push(`${e.name}: ${e.message}`);
       });
       hud.attach(graph);
+      setDebug(graph, cur.hudOn);
       await spec.setup(graph, args, hud, root);
       return graph;
     })

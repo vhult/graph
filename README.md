@@ -1,29 +1,31 @@
 # @vhult/graph
 
-Super fast WebGPU graph rendering engine..
+Super fast WebGPU graph rendering engine.
 
 <img width="448" height="397" alt="image" src="https://github.com/user-attachments/assets/67372405-85ef-4394-9f5d-4096b1bd4dfe" />
 
-## Demo
-Storybook is available here: https://graph.vhult.com
+## Links
+
+- npm: https://www.npmjs.com/package/@vhult/graph
+- Storybook, latest release: https://graph.vhult.com
+- Storybook, dev branch: https://dev.graph.vhult.com
 
 ## Performance
-The goal of this library is to make a new generation graph rendering using webGPU with the highest possible level of performance.
-It is currently able to render a 25 million nodes and 66 million edges graph smoothly on a laptop iGPU.
-
-<img width="677" height="814" alt="image" src="https://github.com/user-attachments/assets/aa8b26e4-05c4-4dee-b9d0-eba157ce742a" />
+The goal of this library is to make a new generation graph rendering using WebGPU with the highest possible level of performance.
+It renders millions of nodes and edges easily.
 
 ## Workspace
 
 ```
 packages/graph/          @vhult/graph — the library (zero runtime dependencies)
-  src/api/               main-thread facade: Graph, public types, errors, pointer capture
-  src/bridge/            main ↔ worker: protocol, InputRing (SAB), shared state, worker entry
-  src/engine/            worker-side orchestrator: frame loop, dirty flags, idle sleep
-  src/gpu/               device/limits, caps, bind layouts, uploader, frame graph, shaders
+  src/api/               main-thread facade: Graph, public types, errors, pointer capture, debug overlay
+  src/bridge/            main ↔ worker: protocol, InputRing (SAB), shared state, position stream, worker entry
+  src/engine/            worker-side orchestrator: frame loop, dirty flags, idle sleep, press and drag, telemetry, benchmark
+  src/gpu/               device/limits, caps, bind layouts, graph buffers, frame graph, radix sort, profiler
   src/data/              Layouts.ts (single source of truth), SoA store, dirty ranges, packing
   src/camera/            f64 camera with hi/lo upload, pan/zoom controls
-  src/passes/            one file per frame-graph pass (cull, node geometry, …)
+  src/passes/            one file per frame-graph pass (upload, sort, cull, geometry, labels, pick, hover)
+  src/labels/            glyph atlas and label placement
   src/shaders/           WGSL (common/, passes/) + preprocessor
   test/                  unit tests (vitest)
   docs/decisions.md      ADR log

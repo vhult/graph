@@ -24,9 +24,9 @@ body,
   cursor: grabbing;
 }
 
-.stage-hud {
+.stage-note {
   position: absolute;
-  top: 8px;
+  bottom: 8px;
   left: 8px;
   padding: 6px 8px;
   border-radius: 4px;
@@ -38,6 +38,20 @@ body,
   /* Isolated: text updates never trigger layout or paint outside the box. */
   contain: layout paint style;
   max-width: calc(100% - 16px);
+}
+
+.stage-note:empty {
+  display: none;
+}
+
+.stage-embed {
+  height: 480px;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.stage-embed .stage-note {
+  display: none;
 }
 
 .stage-error {
@@ -114,4 +128,45 @@ body,
 
 .bench-panel .muted {
   color: #8b919c;
+}
+
+.danger-panel {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(640px, calc(100% - 32px));
+  max-height: calc(100% - 32px);
+  overflow: auto;
+  padding: 14px 16px;
+  border: 2px solid #ff3b3b;
+  border-radius: 6px;
+  background: rgba(40, 6, 8, 0.95);
+  color: #ffd6d6;
+  font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: pre-wrap;
+}
+
+.danger-title {
+  margin-bottom: 8px;
+  color: #ff4d4d;
+  font-weight: bold;
+  letter-spacing: 0.1em;
+}
+
+.danger-panel button {
+  margin-top: 12px;
+  padding: 6px 14px;
+  border: 1px solid #ff3b3b;
+  border-radius: 3px;
+  background: #b3141b;
+  color: #fff;
+  font: inherit;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.danger-panel button:disabled {
+  opacity: 0.6;
+  cursor: default;
 }

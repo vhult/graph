@@ -7,7 +7,7 @@
  */
 import { DirtyRanges } from "./DirtyRanges";
 import { DEFAULT_NODE_STYLE, GRAPH_BINDINGS, GRAPH_BUFFER_WORDS, type GraphBufferName } from "./Layouts";
-import { packNodeSizes, toHalfBits } from "./Pack";
+import { packNodeShapes, packNodeSizes, toHalfBits } from "./Pack";
 
 export interface Channel {
   /** CPU mirror, `elementCount * words` 32-bit words. */
@@ -31,6 +31,7 @@ export interface NodeArrays {
   positions?: Float32Array;
   colors?: Uint32Array;
   sizes?: Float32Array;
+  shapes?: Uint8Array;
 }
 
 export interface EdgeArrays {
@@ -49,6 +50,8 @@ export class GraphStore {
   hasEdgeStyles = false;
   /** Per-edge colours were supplied; otherwise every edge uses the global tint. */
   hasEdgeColors = false;
+  hasNodeShapes = false;
+  maxNodeSize = 0;
   /** Label text per node / edge, in the user's order; null when none were set. */
   nodeLabels: readonly string[] | null = null;
   edgeLabels: readonly string[] | null = null;
@@ -83,6 +86,7 @@ export class GraphStore {
    */
   setNodes(count: number, arrays: NodeArrays): void {
     const resized = count !== this.nodeCount;
+    const grown = count > this.nodeCount;
     this.nodeCount = count;
     const ch = this.channels;
 
@@ -92,15 +96,28 @@ export class GraphStore {
     if (arrays.colors) this.replace(ch.nodeColor, arrays.colors);
     else if (resized) this.replace(ch.nodeColor, resizeU32(ch.nodeColor.data as Uint32Array, count, DEFAULT_NODE_COLOR));
 
-    if (arrays.sizes) this.replace(ch.nodeSize, packNodeSizes(arrays.sizes, new Uint32Array(count)));
-    else if (resized) this.replace(ch.nodeSize, resizeU32(ch.nodeSize.data as Uint32Array, count, toHalfBits(DEFAULT_NODE_SIZE)));
-
-    if (resized) {
-      this.replace(ch.nodeStyle, resizeU32(ch.nodeStyle.data as Uint32Array, count, DEFAULT_NODE_STYLE));
-      this.replace(ch.nodeState, resizeU32(ch.nodeState.data as Uint32Array, count, 0));
+    if (arrays.sizes) {
+      this.replace(ch.nodeSize, packNodeSizes(arrays.sizes, new Uint32Array(count)));
+      this.maxNodeSize = arrays.sizes.reduce((m, s) => Math.max(m, s), 0);
+    } else if (resized) {
+      this.replace(ch.nodeSize, resizeU32(ch.nodeSize.data as Uint32Array, count, toHalfBits(DEFAULT_NODE_SIZE)));
+      if (grown) this.maxNodeSize = Math.max(this.maxNodeSize, DEFAULT_NODE_SIZE);
     }
 
+    if (arrays.shapes) {
+      this.replace(ch.nodeStyle, packNodeShapes(arrays.shapes, new Uint32Array(count)));
+      this.hasNodeShapes = arrays.shapes.some((s) => s !== 0);
+    } else if (resized) this.replace(ch.nodeStyle, resizeU32(ch.nodeStyle.data as Uint32Array, count, DEFAULT_NODE_STYLE));
+
+    if (resized) this.replace(ch.nodeState, resizeU32(ch.nodeState.data as Uint32Array, count, 0));
+
     if (arrays.positions || resized) this.computeBounds();
+  }
+
+  drawnBounds(nodeScale: number): Bounds {
+    const r = this.maxNodeSize * nodeScale * 0.5;
+    const b = this.bounds;
+    return { minX: b.minX - r, minY: b.minY - r, maxX: b.maxX + r, maxY: b.maxY + r };
   }
 
   /**
@@ -145,6 +162,14 @@ export class GraphStore {
     if (start + count > this.nodeCount) throw new RangeError("updatePositions: range exceeds node count");
     (pos.data as Float32Array).set(data, start * 2);
     this.markRange(pos, start, start + count);
+  }
+
+  growBounds(x: number, y: number): void {
+    const b = this.bounds;
+    if (x < b.minX) b.minX = x;
+    if (x > b.maxX) b.maxX = x;
+    if (y < b.minY) b.minY = y;
+    if (y > b.maxY) b.maxY = y;
   }
 
   updateColor(index: number, rgba: number): void {

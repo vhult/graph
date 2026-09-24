@@ -42,7 +42,7 @@ export class Telemetry {
     state[STATE_SLOT.GPU_MS_AVG] = NaN;
   }
 
-  onSample(s: ProfileSample, droppedFrames: number): void {
+  onSample(s: ProfileSample, droppedFrames: number, zeroSamples: number): void {
     const st = this.state;
     this.total.push(s.gpuTotalMs);
     st[STATE_SLOT.GPU_MS_AVG] = this.total.mean;
@@ -56,5 +56,6 @@ export class Telemetry {
     st[STATE_SLOT.VISIBLE_NODES] = visible;
     st[STATE_SLOT.VISIBLE_EDGES] = s.edgeCount;
     st[STATE_SLOT.PROFILER_DROPPED] = droppedFrames;
+    st[STATE_SLOT.PROFILER_ZERO] = zeroSamples;
   }
 }

@@ -8,6 +8,7 @@
 // short to see collapse to a point and rasterize nothing.
 #include "common/nodes.wgsl"
 #include "common/edges.wgsl"
+#include "common/sdf.wgsl"
 
 @group(2) @binding(0) var<storage, read> edgeScratch : array<u32>;
 @group(2) @binding(1) var<storage, read> edgeList : array<u32>;
@@ -19,6 +20,7 @@
 override EDGE_ARROWS : bool = false;
 override EDGE_PER_EDGE_STYLE : bool = false;
 override EDGE_PER_EDGE_COLOR : bool = false;
+override NODE_SHAPES : bool = false;
 
 struct VOut {
   @builtin(position) pos : vec4<f32>,
@@ -66,23 +68,23 @@ fn vs(@builtin(vertex_index) vi : u32, @builtin(instance_index) ii : u32) -> VOu
   if (EDGE_ARROWS && (style & EDGE_FLAG_DIRECTED) != 0u) {
     arrowLen = arrowLenPx(w);
     // Stop at the target's silhouette so the arrowhead touches the node.
-    b = b - full / fullLen * min(nodeRadiusPx(ij.y), fullLen * 0.5);
+    let dirAB = full / fullLen;
+    var reach = nodeRadiusPx(ij.y);
+    if (NODE_SHAPES) {
+      reach *= shapeReach(dirAB, nodeShape(ij.y));
+    }
+    b = b - dirAB * min(reach, fullLen * 0.5);
   }
 
   let d = b - a;
   let len = max(length(d), 1e-4);
-  // Never more arrow than half the visible edge: a short edge stays a line.
-  arrowLen = min(arrowLen, len * 0.5);
+  arrowLen = arrowFitPx(arrowLen, len);
   let dir = d / len;
   let nor = vec2<f32>(-dir.y, dir.x);
   let mid = (a + b) * 0.5;
   let halfLen = len * 0.5;
-  let extX = halfLen + max(halfWidth, arrowLen) + EDGE_AA_PAD_PX;
-  let extY = max(halfWidth, arrowLen * ARROW_HALF_MUL / ARROW_LEN_MUL) + EDGE_AA_PAD_PX;
-
-  // Triangle strip corners: (-1,-1) (1,-1) (-1,1) (1,1)
-  let corner = vec2<f32>(f32(vi & 1u) * 2.0 - 1.0, f32(vi >> 1u) * 2.0 - 1.0);
-  let sp = mid + dir * (corner.x * extX) + nor * (corner.y * extY);
+  let corner = edgeStripCorner(vi, halfLen, halfWidth, arrowLen);
+  let sp = mid + dir * corner.x + nor * corner.y;
 
   // Gradient: the corner's end selects the endpoint colour, the rasterizer
   // interpolates between them along the segment.
@@ -101,7 +103,7 @@ fn vs(@builtin(vertex_index) vi : u32, @builtin(instance_index) ii : u32) -> VOu
 
   var o : VOut;
   o.pos = vec4<f32>(screenToClip(sp), 0.0, 1.0);
-  o.uv = vec2<f32>(corner.x * extX, corner.y * extY);
+  o.uv = corner;
   o.halfLen = halfLen;
   o.halfWidth = halfWidth;
   o.color = vec4<f32>(c.rgb, edgeStandInAlpha(c.a * coverage * fade, f32(n) / keep) * fadeIn);
@@ -133,24 +135,6 @@ fn debugColor(fade : f32, kept : f32, chunk : u32) -> vec3<f32> {
       return 0.5 + 0.5 * cos(6.2831853 * (h + vec3<f32>(0.0, 0.33, 0.67)));
     }
   }
-}
-
-/** Distance to a capsule of half-length `halfLen` and radius `halfWidth`. */
-fn sdSegment(p : vec2<f32>, halfLen : f32, halfWidth : f32) -> f32 {
-  let q = vec2<f32>(max(abs(p.x) - halfLen, 0.0), p.y);
-  return length(q) - halfWidth;
-}
-
-/**
- * Isosceles arrowhead with its tip at (tipX, 0), opening backwards along -x:
- * the intersection of its two slanted sides and its base. Exact outside the
- * dominant plane, slightly conservative at the corners, which a 1 px coverage
- * ramp hides, and much cheaper than an exact triangle.
- */
-fn sdArrowhead(p : vec2<f32>, tipX : f32, len : f32, half : f32) -> f32 {
-  let q = vec2<f32>(p.x - tipX, abs(p.y));
-  let slant = dot(q, vec2<f32>(half, len)) * inverseSqrt(half * half + len * len);
-  return max(slant, -(q.x + len));
 }
 
 @fragment

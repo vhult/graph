@@ -7,6 +7,7 @@ export interface GraphOptions {
   pixelRatio?: number;
   /** Clear colour, straight alpha, 0..1. */
   background?: RGBA;
+  transparent?: boolean;
   /** Track the canvas CSS size with a ResizeObserver. Default: true. */
   autoResize?: boolean;
   /** Built-in pan/zoom controls. Default: true. */
@@ -28,10 +29,11 @@ export interface GraphOptions {
    */
   directedEdges?: boolean;
   /**
-   * How many times over edges of one length may cover a pixel before a
-   * crowded area is thinned. The edges kept carry the opacity of the ones
-   * dropped, so the area looks the same; zooming in only brings edges back,
-   * never removes them. `0` draws every edge. Default: 6.
+   * How much crowded areas of edges are thinned: lower draws fewer edges. It
+   * is not a count of edges per pixel; the edges that stay still cover a
+   * crowded pixel many times over. The edges kept carry the opacity of the
+   * ones dropped, so the area looks the same; zooming in only brings edges
+   * back, never removes them. `0` draws every edge. Default: 1.5.
    */
   edgeMaxOverdraw?: number;
   /**
@@ -48,21 +50,36 @@ export interface GraphOptions {
    * colour per chunk of 1024 edges. Default: "off".
    */
   edgeDebug?: EdgeDebugMode;
-  /** Node label size, CSS px; edge labels are drawn a little smaller. Default: 12. */
+  /** Label text size, CSS px. Default: 12. */
   labelSize?: number;
-  /**
-   * Labels on screen at most, nodes and edges together. Node labels sit
-   * centred under their node, edge labels along their edge. Which ones: bigger
-   * nodes first, then longer edges, each only where it overlaps no label
-   * already placed. Default: 300.
-   */
-  labelMax?: number;
+  /** Minimum gap between two labels, CSS px. Default: 2. */
+  labelPadding?: number;
+  /** CSS font family of labels, available to the render worker. Default: system-ui. */
+  labelFont?: string;
   /**
    * Level of detail: once a chunk's nodes would sit closer together than this
    * many device px, they are drawn as merged clusters instead. Larger merges
    * sooner (faster, coarser); `0` disables LOD and draws every node. Default: 2.5.
    */
   lodTargetPx?: number;
+  pickRate?: number;
+  pickRadius?: number;
+  edgePickRadius?: number;
+  hoverStyle?: HoverStyle | false;
+  nodeDrag?: boolean;
+}
+
+export interface NodeDragEvent {
+  index: number;
+  x: number;
+  y: number;
+}
+
+export interface HoverStyle {
+  nodeColor?: RGBA;
+  nodeScale?: number;
+  edgeColor?: RGBA;
+  edgeWidth?: number;
 }
 
 export type EdgeDebugMode = "off" | "length" | "thinning" | "chunk";
@@ -83,7 +100,17 @@ export interface NodeData {
   colors?: Uint32Array | Uint8Array;
   /** World-unit diameters, one per node. */
   sizes?: Float32Array;
+  /** Shape per node, one of `NodeShape`. */
+  shapes?: Uint8Array;
 }
+
+export interface NodePositionStream {
+  readonly positions: Float32Array;
+  commit(): void;
+}
+
+export const NodeShape = { circle: 0, square: 1, hexagon: 2 } as const;
+export type NodeShape = (typeof NodeShape)[keyof typeof NodeShape];
 
 export interface EdgeData {
   count: number;
@@ -134,6 +161,7 @@ export interface GraphStats {
    * total GPU memory, so this is what the engine itself uses.
    */
   gpuBytes: number;
+  peakGpuBytes: number;
   /** Device pixels per CSS pixel of the canvas. */
   pixelRatio: number;
   /** GPU time per frame, rolling mean over 30 frames, ms. NaN without `timestamp-query`. */
@@ -148,6 +176,37 @@ export interface GraphStats {
    * them are still dropped by the vertex shader, so this is an upper bound.
    */
   visibleEdges: number;
+  /** Labels on screen, not counting labels fading out. */
+  labelsShown: number;
+  /** Label placements completed since start. */
+  labelSolves: number;
+  /** Labels that started fading in since start. */
+  labelsAdded: number;
+  /** Labels that started fading out since start. */
+  labelsRemoved: number;
+  droppedSamples: number;
+}
+
+/** The candidates of one label placement and what the placement decided for each. */
+export interface LabelSnapshot {
+  /** Candidates found, including any beyond `capacity`. */
+  found: number;
+  /** Candidates the placement can hold. */
+  capacity: number;
+  /** Label box centres, device px, x y interleaved. */
+  center: Float32Array;
+  /** Label box half widths, device px, padding included. */
+  halfWidth: Float32Array;
+  /** Label box half heights, device px, padding included. */
+  halfHeight: Float32Array;
+  /** Priority: higher wins. */
+  rank: Float32Array;
+  /** Node size, world units, or edge length on screen, device px. */
+  size: Float32Array;
+  /** Engine node index, or sorted edge index with the top bit set. */
+  index: Uint32Array;
+  /** 0 undecided, 1 shown, 2 hidden. */
+  decision: Uint8Array;
 }
 
 export interface GraphCaps {
@@ -184,6 +243,7 @@ export interface BenchmarkOptions {
   frames: number;
   /** Frames rendered at the first key before recording starts. Default 10. */
   warmup?: number;
+  timing?: "off" | "passes" | "full";
 }
 
 /** Per-frame series; NaN where no sample exists. */
@@ -194,6 +254,7 @@ export interface BenchmarkResult {
   viewport: [width: number, height: number];
   adapter: string;
   timestampQuery: boolean;
+  wallMs: number;
   /** Worker CPU time per frame, ms. */
   cpuMs: Float64Array;
   /** Time between consecutive rendered frames, ms (vsync- or GPU-bound). */
@@ -208,6 +269,48 @@ export interface BenchmarkResult {
   visibleEdges: Float64Array;
 }
 
+export interface DebugSummary {
+  n: number;
+  ran: number;
+  mean: number;
+  p50: number;
+  p95: number;
+  p99: number;
+  max: number;
+}
+
+export interface DebugTotals {
+  count: number;
+  totalMs: number;
+  maxMs: number;
+}
+
+export interface DebugRecording {
+  schema: 1;
+  date: string;
+  userAgent: string;
+  adapter: string;
+  caps: GraphCaps;
+  nodeCount: number;
+  edgeCount: number;
+  viewport: [width: number, height: number];
+  pixelRatio: number;
+  durationMs: number;
+  frames: number;
+  gpuGroups: Record<string, string>;
+  summary: Record<string, DebugSummary>;
+  series: Record<string, number[]>;
+  workerMessages: Record<string, DebugTotals>;
+  mainThread: Record<string, DebugTotals>;
+}
+
 export interface GraphEvents {
   error: Error;
+  nodeHover: number | null;
+  edgeHover: number | null;
+  nodeClick: number | null;
+  edgeClick: number | null;
+  nodeDragStart: NodeDragEvent;
+  nodeDrag: NodeDragEvent;
+  nodeDragEnd: NodeDragEvent;
 }

@@ -1,6 +1,6 @@
 {
   "name": "@vhult/graph",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "WebGPU graph rendering engine. Rendering only.",
   "keywords": [
     "graph",
@@ -48,6 +48,7 @@
   "devDependencies": {
     "@webgpu/types": "^0.1.74",
     "esbuild": "^0.28.2",
+    "happy-dom": "^20.14.5",
     "typescript": "^7.0.2",
     "vitest": "^5.0.1"
   }

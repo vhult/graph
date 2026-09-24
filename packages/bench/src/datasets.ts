@@ -14,6 +14,7 @@ export interface NodeDataset {
   colors: Uint32Array;
   /** Diameters, world units. */
   sizes: Float32Array;
+  shapes?: Uint8Array;
 }
 
 // ---------------------------------------------------------------------------
