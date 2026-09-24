@@ -29,6 +29,8 @@ import { Labels } from "../labels/Labels";
 import { EDGE_DEBUG_MODES, EdgeCullPass } from "../passes/EdgeCullPass";
 import { LabelDrawPass } from "../passes/LabelDrawPass";
 import { LabelPass } from "../passes/LabelPass";
+import { HoverPass } from "../passes/HoverPass";
+import { PICKED_EDGES, PICKED_NODES, PickPass, type PickRequest } from "../passes/PickPass";
 import { EdgeGeometryPass } from "../passes/EdgeGeometryPass";
 import { EdgeSortPass } from "../passes/EdgeSortPass";
 import { NodeGeometryPass } from "../passes/NodeGeometryPass";
@@ -53,6 +55,7 @@ export interface EngineInit {
   onError: (e: GraphError, fatal: boolean) => void;
   onBenchmark: (id: number, result: BenchmarkResult, transfer: ArrayBuffer[]) => void;
   onLabelSnapshot: (id: number, snapshot: LabelSnapshot, transfer: ArrayBuffer[]) => void;
+  onHover: (node: number | undefined, edge: number | undefined) => void;
   probeSink: ProbeSink;
 }
 
@@ -68,6 +71,8 @@ const CPU_EMA = 0.1;
 const DEFAULT_WARMUP_FRAMES = 10;
 const FIT_PADDING_CSS_PX = 24;
 const BENCH_TIMING = { off: 0, passes: 1, full: 2 } as const;
+const CAMERA_SETTLE_MS = 50;
+const PICK_DIRTY = Dirty.TOPOLOGY | Dirty.POSITIONS | Dirty.CAMERA | Dirty.STYLE | Dirty.STATE | Dirty.RESIZE | Dirty.EDGES | Dirty.LABELLED;
 
 /** Straight-alpha RGBA in 0..1 to an rgba8unorm word (R in the low byte). */
 function packRgbaTuple(c: RGBA): number {
@@ -110,6 +115,22 @@ export class Engine {
   private bench: Benchmark | null = null;
   private labelSolves = 0;
   private benchTimer: ReturnType<typeof setTimeout> | undefined;
+  private pick: PickPass | null = null;
+  private hover: HoverPass | null = null;
+  private pickLoading = false;
+  private pickNodes = false;
+  private pickEdges = false;
+  private pickWanted = false;
+  private pickDue = 0;
+  private pickTimer: ReturnType<typeof setTimeout> | undefined;
+  private pickSeq = 0;
+  private readonly pickInterval: number;
+  private dataGen = 0;
+  private cameraMs = -Infinity;
+  private frameGen = -1;
+  private hoverNode = -1;
+  private hoverEdge = -1;
+  private readonly pickRequest: PickRequest = { x: 0, y: 0, radiusPx: 0, edgeRadiusPx: 0, nodes: false, edges: false, shapes: false, edgeColors: false, token: 0 };
 
   private constructor(
     private readonly gpu: Gpu,
@@ -118,7 +139,7 @@ export class Engine {
     private readonly profiler: Profiler,
     frameGraph: FrameGraph,
     private readonly passes: Passes,
-    layouts: ReturnType<typeof createContractLayouts>,
+    private readonly layouts: ReturnType<typeof createContractLayouts>,
     private readonly init: EngineInit,
     private readonly labels: Labels,
   ) {
@@ -146,6 +167,7 @@ export class Engine {
     this.encodeTimes = { row: this.probe.row, base: this.probe.encodeBase };
 
     this.controls.enabled = init.options.controls;
+    this.pickInterval = 1000 / Math.max(1, init.options.pickRate);
     this.pixelRatio = init.pixelRatio;
     this.frameCtx = {
       frameBindGroup: this.frameUniform.bindGroup,
@@ -252,12 +274,14 @@ export class Engine {
     this.streamed = null;
     this.store.setNodes(count, arrays);
     this.labels.setNodeCount(count);
+    this.newData();
     this.markDirty(Dirty.TOPOLOGY);
   }
 
   setEdges(count: number, arrays: EdgeArrays): void {
     this.store.setEdges(count, arrays);
     this.labels.setEdgeCount(count);
+    this.newData();
     this.markDirty(Dirty.EDGES);
   }
 
@@ -270,15 +294,152 @@ export class Engine {
 
   /** Label text per edge, in the user's order; empty clears. */
   setEdgeLabels(labels: string[]): void {
-    const store = this.store;
-    store.edgeLabels = labels.length > 0 ? labels : null;
-    const keep = store.edgeLabels !== null;
-    this.graph.keepEdgeOrder = keep;
-    if (!keep) this.graph.setEdgeOrder(null);
-    // Labels need sorted edge -> user edge, kept only by a sort that knew: sort again.
-    else if (!this.graph.edgeOrder && store.edgeCount > 0) store.reloadEdges();
+    this.store.edgeLabels = labels.length > 0 ? labels : null;
+    this.syncEdgeOrder();
     this.labels.setEdgeText(labels);
     this.markDirty(Dirty.EDGES | Dirty.LABEL_QUERY | Dirty.LABELS);
+  }
+
+  private syncEdgeOrder(): void {
+    const store = this.store;
+    const keep = store.edgeLabels !== null || this.pickEdges;
+    this.graph.keepEdgeOrder = keep;
+    if (!keep) this.graph.setEdgeOrder(null);
+    else if (!this.graph.edgeOrder && store.edgeCount > 0) {
+      store.reloadEdges();
+      this.newData();
+      this.markDirty(Dirty.EDGES);
+    }
+  }
+
+  setPicking(nodes: boolean, edges: boolean): void {
+    if (!nodes) this.hoverNode = -1;
+    if (!edges) this.hoverEdge = -1;
+    if (!nodes && this.hover?.setNode(-1, 0, false)) this.markDirty(Dirty.HOVER);
+    if (!edges && this.hover?.setEdge(-1, 0, 0, 0)) this.markDirty(Dirty.HOVER);
+    const edgesChanged = edges !== this.pickEdges;
+    this.pickNodes = nodes;
+    this.pickEdges = edges;
+    this.pickSeq++;
+    if (edgesChanged) {
+      this.passes.edgeCull.setLines(edges, (b) => this.graph.retireAfterSubmit(b));
+      this.syncEdgeOrder();
+      this.markDirty(Dirty.STYLE);
+    }
+    if ((nodes || edges) && !this.pick && !this.pickLoading) {
+      this.pickLoading = true;
+      const o = this.init.options;
+      const edgeOpts = {
+        directed: o.directedEdges,
+        maxOverdraw: o.edgeMaxOverdraw,
+        minLengthPx: o.edgeMinLengthPx,
+        debug: Math.max(0, EDGE_DEBUG_MODES.indexOf(o.edgeDebug)),
+      };
+      const style = o.hoverStyle;
+      const hover = style
+        ? HoverPass.create(this.gpu.device, this.gpu.format, this.layouts, this.graph, o.directedEdges, {
+            nodeColor: packRgbaTuple(style.nodeColor),
+            nodeScale: style.nodeScale,
+            edgeColor: packRgbaTuple(style.edgeColor),
+            edgeWidth: style.edgeWidth,
+          })
+        : Promise.resolve(null);
+      Promise.all([PickPass.create(this.gpu.device, this.layouts, o.lodTargetPx, edgeOpts), hover]).then(
+        ([pick, hover]) => {
+          if (this.destroyed) {
+            pick.destroy();
+            hover?.destroy();
+            return;
+          }
+          pick.onResult = this.onPick;
+          this.pick = pick;
+          this.hover = hover;
+          this.passes.nodes.hover = hover;
+          this.passes.edges.hover = hover;
+          this.pickWanted = this.pickNodes || this.pickEdges;
+          this.wake();
+        },
+        (e) => this.init.onError(e instanceof GraphError ? e : new GraphError("internal", String(e)), false),
+      );
+    }
+    this.pickWanted = nodes || edges;
+    this.wake();
+  }
+
+  private newData(): void {
+    this.dataGen++;
+    this.clearHover();
+  }
+
+  private clearHover(): void {
+    this.pickSeq++;
+    if (this.hoverNode !== -1 || this.hoverEdge !== -1) this.emitHover(-1, -1, PICKED_NODES | PICKED_EDGES, 1);
+  }
+
+  private maybePick(now: number): void {
+    if (!this.pickWanted || this.bench) return;
+    const x = this.controls.pointerX;
+    const y = this.controls.pointerY;
+    if (x < 0 || y < 0) {
+      this.pickWanted = false;
+      this.pickSeq++;
+      this.emitHover(-1, -1, PICKED_NODES | PICKED_EDGES, 1);
+      return;
+    }
+    const pick = this.pick;
+    if (!pick || this.frameGen !== this.dataGen || !pick.free) return;
+    const due = Math.max(this.pickDue, this.cameraMs + CAMERA_SETTLE_MS);
+    if (now < due) {
+      if (this.pickTimer === undefined) this.pickTimer = setTimeout(this.pickWake, due - now);
+      return;
+    }
+    const req = this.pickRequest;
+    req.x = x;
+    req.y = y;
+    req.radiusPx = this.init.options.pickRadius * this.pixelRatio;
+    req.edgeRadiusPx = this.init.options.edgePickRadius * this.pixelRatio;
+    req.nodes = this.pickNodes;
+    req.edges = this.pickEdges;
+    req.shapes = this.store.hasNodeShapes;
+    req.edgeColors = this.store.hasEdgeColors;
+    req.token = this.pickSeq;
+    const device = this.gpu.device;
+    const encoder = device.createCommandEncoder();
+    if (pick.encode(encoder, this.frameCtx, this.graph, this.passes.cull, this.passes.edgeCull, req) === 0) return;
+    device.queue.submit([encoder.finish()]);
+    pick.afterSubmit();
+    this.pickWanted = false;
+    this.pickDue = now + this.pickInterval;
+  }
+
+  private readonly pickWake = (): void => {
+    this.pickTimer = undefined;
+    this.wake();
+  };
+
+  private readonly onPick = (node: number, edge: number, nodeScale: number, token: number): void => {
+    if (this.destroyed) return;
+    if (Math.floor(token / 4) === this.pickSeq) this.emitHover(node, edge, token % 4, nodeScale);
+    if (this.pickWanted) this.wake();
+  };
+
+  private emitHover(node: number, edge: number, picked: number, nodeScale: number): void {
+    let n: number | undefined;
+    let e: number | undefined;
+    if ((picked & PICKED_NODES) !== 0 && this.pickNodes && node !== this.hoverNode) n = this.hoverNode = node;
+    if ((picked & PICKED_EDGES) !== 0 && this.pickEdges && edge !== this.hoverEdge) e = this.hoverEdge = edge;
+    if (n !== undefined || e !== undefined) this.init.onHover(n, e);
+    const hover = this.hover;
+    if (!hover) return;
+    let changed = false;
+    if ((picked & PICKED_NODES) !== 0 && this.pickNodes) changed = hover.setNode(node, nodeScale, this.store.hasNodeShapes) || changed;
+    if ((picked & PICKED_EDGES) !== 0 && this.pickEdges) {
+      const ch = this.store.channels;
+      const ends = ch.edgeIdx.data as Uint32Array;
+      const style = edge >= 0 && this.store.hasEdgeStyles ? ch.edgeStyle.data[edge]! : 0;
+      changed = hover.setEdge(edge, edge >= 0 ? ends[edge * 2]! : 0, edge >= 0 ? ends[edge * 2 + 1]! : 0, style) || changed;
+    }
+    if (changed) this.markDirty(Dirty.HOVER);
   }
 
   updatePositions(start: number, data: Float32Array): void {
@@ -356,10 +517,10 @@ export class Engine {
   input(rec: InputRecord): void {
     if (this.probe.full) this.probe.input(rec.t);
     if (this.controls.apply(rec, this.camera)) this.dirty |= Dirty.CAMERA;
-    if (rec.type === INPUT.POINTER_MOVE || rec.type === INPUT.POINTER_LEAVE) {
-      // pointerPx only feeds picking/hover shaders (M8); it does not force a frame yet.
+    if (rec.type === INPUT.POINTER_MOVE || rec.type === INPUT.POINTER_LEAVE || rec.type === INPUT.POINTER_DOWN) {
       this.frameInputs.pointerX = this.controls.pointerX;
       this.frameInputs.pointerY = this.controls.pointerY;
+      if (this.pickNodes || this.pickEdges) this.pickWanted = true;
     }
   }
 
@@ -372,6 +533,9 @@ export class Engine {
   destroy(): void {
     this.destroyed = true;
     clearTimeout(this.benchTimer);
+    clearTimeout(this.pickTimer);
+    this.pick?.destroy();
+    this.hover?.destroy();
     this.probe.destroy();
     this.passes.cull.destroy();
     this.passes.edgeCull.destroy();
@@ -426,6 +590,15 @@ export class Engine {
       bench.beforeFrame(this.camera);
       this.dirty |= Dirty.CAMERA;
     }
+
+    if ((this.dirty & (Dirty.CAMERA | Dirty.RESIZE)) !== 0) {
+      this.cameraMs = t0;
+      if (this.hoverNode !== -1 || this.hoverEdge !== -1) {
+        this.clearHover();
+        this.pickWanted = true;
+      }
+    }
+    if (this.pickWanted) this.maybePick(t0);
 
     if (this.dirty === 0) {
       // Idle: skip the frame entirely. Sleep unless input raced in.
@@ -509,6 +682,8 @@ export class Engine {
     this.cpuMsAvg = this.renderedFrames === 1 ? cpuMs : this.cpuMsAvg + (cpuMs - this.cpuMsAvg) * CPU_EMA;
     this.publishState(cpuMs, (uploaded ? this.graph.lastUploadBytes : 0) + streamedBytes);
     if (bench && !bench.driving) this.scheduleBenchCheck();
+    this.frameGen = this.dataGen;
+    if ((frameDirty & PICK_DIRTY) !== 0 && (this.pickNodes || this.pickEdges)) this.pickWanted = true;
 
     // One more tick to pick up input that arrived during this frame; it sleeps if there is none.
     this.wake();

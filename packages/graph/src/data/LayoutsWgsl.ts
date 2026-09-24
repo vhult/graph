@@ -14,12 +14,15 @@ import {
   GRAPH_BINDINGS,
   GROUP_FRAME,
   GROUP_GRAPH,
+  HOVER_PARAMS,
   LABEL_CANDIDATE,
   LABEL_CONSTANTS,
   LABEL_PARAMS,
   LIVE_LABEL,
   NODE_INSTANCE,
   OVERRIDES,
+  PICK_CONSTANTS,
+  PICK_PARAMS,
   type BindingDef,
   type StructLayout,
 } from "./Layouts";
@@ -91,6 +94,12 @@ export function emitLayoutsWgsl(): string {
     ...Object.entries(LABEL_CONSTANTS).map(([k, v]) => `const ${k} : u32 = ${u32Literal(k, v)};`),
     "",
     ...Object.entries(ENGINE_CONSTANTS).map(([k, v]) => `const ${k} : u32 = ${u32Literal(k, v)};`),
+    "",
+    emitStruct(PICK_PARAMS),
+    "",
+    ...Object.entries(PICK_CONSTANTS).map(([k, v]) => `const ${k} : u32 = ${u32Literal(k, v)};`),
+    "",
+    emitStruct(HOVER_PARAMS),
     "",
   ];
   return out.join("\n");

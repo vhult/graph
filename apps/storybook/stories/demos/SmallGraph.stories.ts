@@ -13,6 +13,7 @@ import type { Meta, StoryObj } from "@storybook/html-vite";
 import { NodeShape } from "@vhult/graph";
 import { PALETTE, rgbToWord, type GraphDataset } from "@vhult/graph-bench";
 import { EDGE_DIRECTED, GRAPH_ARGS, graphArgTypes, renderGraph, type GraphArgs, type GraphLabels } from "../../src/graphStory";
+import { removeHoverBox, showHoverBox } from "../../src/hoverBox";
 
 interface Args extends GraphArgs {
   directed: boolean;
@@ -81,6 +82,9 @@ function smallGraph(): { graph: GraphDataset; labels: GraphLabels } {
 }
 
 const DEMO = smallGraph();
+const names = DEMO.labels.nodes ?? [];
+const relations = DEMO.labels.edges ?? [];
+const ends = DEMO.graph.edges.indices;
 
 const meta: Meta<Args> = {
   title: "Demos/Small graph",
@@ -91,6 +95,12 @@ const meta: Meta<Args> = {
     // Arrowheads are compiled into the edge shader, so this is an engine option.
     options: (a) => ({ directedEdges: a.directed }),
     edgeStyle: (a) => (a.directed ? EDGE_DIRECTED : undefined),
+    onLoad: (graph) =>
+      showHoverBox(graph, {
+        node: (i) => `${names[i]} (#${i})`,
+        edge: (e) => `${names[ends[e * 2]!]} → ${names[ends[e * 2 + 1]!]} · ${relations[e]} (#${e})`,
+      }),
+    dispose: removeHoverBox,
   }),
   argTypes: {
     ...graphArgTypes<Args>([NODES], { directed: { control: "boolean" } }),

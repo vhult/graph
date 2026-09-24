@@ -4,7 +4,7 @@
  * and never produce a message in steady state.
  */
 import type { GraphErrorCode } from "../api/errors";
-import type { BenchmarkOptions, BenchmarkResult, CameraView, EdgeDebugMode, GraphCaps, LabelSnapshot, RGBA } from "../api/types";
+import type { BenchmarkOptions, BenchmarkResult, CameraView, EdgeDebugMode, GraphCaps, HoverStyle, LabelSnapshot, RGBA } from "../api/types";
 
 export type DebugLevel = 0 | 1 | 2;
 
@@ -32,6 +32,10 @@ export interface InitOptions {
   labelSize: number;
   labelPadding: number;
   labelFont: string;
+  pickRate: number;
+  pickRadius: number;
+  edgePickRadius: number;
+  hoverStyle: Required<HoverStyle> | null;
   timeOrigin: number;
 }
 
@@ -66,6 +70,7 @@ export type ToWorker =
   | { t: "render" }
   | { t: "benchmark"; id: number; options: BenchmarkOptions }
   | { t: "labelSnapshot"; id: number }
+  | { t: "pick"; nodes: boolean; edges: boolean }
   | { t: "debug"; level: DebugLevel }
   | { t: "debugRecord"; on: boolean }
   | { t: "destroy" };
@@ -77,6 +82,7 @@ export type FromWorker =
   | { t: "state"; data: Float64Array }
   | { t: "benchmark"; id: number; result: BenchmarkResult }
   | { t: "labelSnapshot"; id: number; snapshot: LabelSnapshot }
+  | { t: "hover"; node?: number; edge?: number }
   | { t: "debugRing"; columns: string[]; gpuGroups: string[]; frames: number; buffer: SharedArrayBuffer | null }
   | { t: "debugRows"; data: Float64Array }
   | { t: "debugTotals"; messages: MessageTotals }

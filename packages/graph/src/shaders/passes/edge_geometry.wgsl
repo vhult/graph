@@ -142,24 +142,6 @@ fn debugColor(fade : f32, kept : f32, chunk : u32) -> vec3<f32> {
   }
 }
 
-/** Distance to a capsule of half-length `halfLen` and radius `halfWidth`. */
-fn sdSegment(p : vec2<f32>, halfLen : f32, halfWidth : f32) -> f32 {
-  let q = vec2<f32>(max(abs(p.x) - halfLen, 0.0), p.y);
-  return length(q) - halfWidth;
-}
-
-/**
- * Isosceles arrowhead with its tip at (tipX, 0), opening backwards along -x:
- * the intersection of its two slanted sides and its base. Exact outside the
- * dominant plane, slightly conservative at the corners, which a 1 px coverage
- * ramp hides, and much cheaper than an exact triangle.
- */
-fn sdArrowhead(p : vec2<f32>, tipX : f32, len : f32, half : f32) -> f32 {
-  let q = vec2<f32>(p.x - tipX, abs(p.y));
-  let slant = dot(q, vec2<f32>(half, len)) * inverseSqrt(half * half + len * len);
-  return max(slant, -(q.x + len));
-}
-
 @fragment
 fn fs(in : VOut) -> @location(0) vec4<f32> {
   var d = sdSegment(in.uv, in.halfLen, in.halfWidth);

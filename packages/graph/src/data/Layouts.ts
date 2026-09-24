@@ -319,6 +319,45 @@ export const LABEL_CONSTANTS = {
   ARGS_ROUND: 7,
 } as const;
 
+export const PICK_PARAMS = defineStruct("PickParams", [
+  { name: "pointer", type: "vec2<f32>" },
+  { name: "radiusPx", type: "f32" },
+  { name: "flags", type: "u32" },
+  { name: "edgeRadiusPx", type: "f32" },
+] as const);
+
+export const PICK_CONSTANTS = {
+  PICK_NODE_COUNT: 0,
+  PICK_EDGE_BEST: 1,
+  PICK_NODE_RESULT: 2,
+  PICK_EDGE_RESULT: 3,
+  PICK_EDGE_COUNT: 4,
+  PICK_NODE_SCALE: 5,
+  PICK_LIST: 8,
+  PICK_FLAG_NODES: 1,
+  PICK_FLAG_EDGES: 2,
+  PICK_FLAG_SHAPES: 4,
+  PICK_FLAG_EDGE_COLORS: 8,
+  HOVER_FLAG_SHAPES: 1,
+} as const;
+
+export const HOVER_PARAMS = defineStruct("HoverParams", [
+  { name: "node", type: "u32" },
+  { name: "lodScale", type: "f32" },
+  { name: "nodeGrow", type: "f32" },
+  { name: "nodeColor", type: "u32" },
+  { name: "edgeA", type: "u32" },
+  { name: "edgeB", type: "u32" },
+  { name: "edgeStyle", type: "u32" },
+  { name: "edgeColor", type: "u32" },
+  { name: "edgeWidth", type: "f32" },
+  { name: "flags", type: "u32" },
+] as const);
+
+export function pickOutWords(nodeCount: number, edgeCount: number): number {
+  return PICK_CONSTANTS.PICK_LIST + 2 * Math.max(1, chunkCount(nodeCount), edgeChunkCount(edgeCount));
+}
+
 export function edgeChunkCount(edgeCount: number): number {
   return Math.ceil(edgeCount / EDGE_CONSTANTS.EDGE_CHUNK_SIZE);
 }

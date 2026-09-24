@@ -7,6 +7,7 @@ import { ENGINE_CONSTANTS } from "../data/Layouts";
 import type { ContractLayouts } from "../gpu/BindLayouts";
 import { Stage, type FrameContext, type RenderNode } from "../gpu/FrameGraph";
 import { createShaderModule } from "../gpu/ShaderModules";
+import type { HoverPass } from "./HoverPass";
 import type { CullOutputs } from "./TransformCullPass";
 
 const DRAW_ARGS_BYTES = 16;
@@ -17,6 +18,7 @@ export class NodeGeometryPass implements RenderNode {
   readonly name = "nodes";
 
   shapes = false;
+  hover: HoverPass | null = null;
 
   private bindGroup: GPUBindGroup | null = null;
   private scratch: GPUBuffer | null = null;
@@ -86,5 +88,6 @@ export class NodeGeometryPass implements RenderNode {
       pass.setPipeline(pipelines[b]!);
       pass.drawIndirect(this.scratch, ENGINE_CONSTANTS.SCRATCH_DRAW_ARGS * 4 + b * DRAW_ARGS_BYTES);
     }
+    this.hover?.encodeNode(pass, ctx);
   }
 }

@@ -8,6 +8,7 @@ import type { ContractLayouts } from "../gpu/BindLayouts";
 import { Stage, type FrameContext, type RenderNode } from "../gpu/FrameGraph";
 import { createShaderModule } from "../gpu/ShaderModules";
 import type { EdgeCullOptions, EdgeCullOutputs } from "./EdgeCullPass";
+import type { HoverPass } from "./HoverPass";
 
 /** Pipeline variant index: bit 0 = per-edge style, bit 1 = per-edge colour, bit 2 = node shapes. */
 const VARIANTS = 4;
@@ -21,6 +22,7 @@ export class EdgeGeometryPass implements RenderNode {
   perEdgeStyle = false;
   perEdgeColor = false;
   shapes = false;
+  hover: HoverPass | null = null;
 
   private bound: EdgeCullOutputs | null = null;
   private bindGroup: GPUBindGroup | null = null;
@@ -86,5 +88,6 @@ export class EdgeGeometryPass implements RenderNode {
     pass.setBindGroup(2, this.bindGroup);
     // Instance count is written by the cull: the CPU never learns it.
     pass.drawIndirect(this.bound.scratch, EDGE_CONSTANTS.EDGE_SCRATCH_DRAW_ARGS * 4);
+    this.hover?.encodeEdge(pass, ctx);
   }
 }
