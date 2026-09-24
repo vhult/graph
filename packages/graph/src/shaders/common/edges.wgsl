@@ -63,10 +63,9 @@ fn edgeLengthFade(lenPx : f32) -> f32 {
 // ---- thinning ---------------------------------------------------------------
 
 /**
- * How many times over one length level may cover a pixel before its edges are
- * thinned (engine option `edgeMaxOverdraw`). 0 draws every edge.
+ * How much crowded areas of edges are thinned: lower draws fewer edges (engine option `edgeMaxOverdraw`). 0 draws every edge.
  */
-override EDGE_MAX_OVERDRAW : f32 = 6.0;
+override EDGE_MAX_OVERDRAW : f32 = 1.5;
 
 /**
  * How many of a chunk's `n` edges to draw, as a real number. The chunk is

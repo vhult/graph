@@ -31,8 +31,8 @@ const DEFAULT_BACKGROUND: RGBA = [0.04, 0.04, 0.06, 1];
 const DEFAULT_EDGE_COLOR_RGBA: RGBA = [0.24, 0.27, 0.31, 0.4];
 /** Sampled-node spacing, device px, chosen by eye in Storybook. */
 const DEFAULT_LOD_TARGET_PX = 2.5;
-/** Overdraw a crowded area of edges is thinned to: dense enough to read as solid at usual alphas. */
-const DEFAULT_EDGE_MAX_OVERDRAW = 6;
+/** How much crowded areas of edges are thinned: lower draws fewer edges. */
+const DEFAULT_EDGE_MAX_OVERDRAW = 1.5;
 /** CSS px: shorter edges do not read as lines. */
 const DEFAULT_EDGE_MIN_LENGTH_PX = 6;
 const DEFAULT_LABEL_SIZE = 12;

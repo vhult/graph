@@ -29,10 +29,11 @@ export interface GraphOptions {
    */
   directedEdges?: boolean;
   /**
-   * How many times over edges of one length may cover a pixel before a
-   * crowded area is thinned. The edges kept carry the opacity of the ones
-   * dropped, so the area looks the same; zooming in only brings edges back,
-   * never removes them. `0` draws every edge. Default: 6.
+   * How much crowded areas of edges are thinned: lower draws fewer edges. It
+   * is not a count of edges per pixel; the edges that stay still cover a
+   * crowded pixel many times over. The edges kept carry the opacity of the
+   * ones dropped, so the area looks the same; zooming in only brings edges
+   * back, never removes them. `0` draws every edge. Default: 1.5.
    */
   edgeMaxOverdraw?: number;
   /**
