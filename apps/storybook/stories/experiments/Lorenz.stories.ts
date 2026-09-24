@@ -28,7 +28,7 @@ const meta: Meta<Args> = {
   title: "Experiments/Lorenz",
   render: renderGraph<Args>({
     describe: () => "Lorenz · points flowing along the attractor as it turns in 3D, depth streamed as z-index every frame",
-    options: () => ({ hoverStyle: false }),
+    options: () => ({ hoverStyle: false, nodeDrag: false }),
     load: (a) => {
       const l = attractor(a);
       return { data: l.data.graph, genMs: l.genMs };

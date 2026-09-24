@@ -35,7 +35,7 @@ const meta: Meta<Args> = {
   render: renderGraph<Args>({
     describe: () =>
       "Black hole 3D · a thin disk on Keplerian orbits around a Schwarzschild black hole, each particle drawn as its direct image and the two thin rings of light that circle the hole, bent through a traced photon table, shifted by the gas motion and by gravity\nthe inner edge is pulled in to 4.5M, closer than a non-spinning hole allows, for the look of a fast-spinning one like Gargantua",
-    options: () => ({ hoverStyle: false, transparent: true }),
+    options: () => ({ hoverStyle: false, transparent: true, nodeDrag: false }),
     backdrop: "radial-gradient(ellipse 70% 80% at center, #34292a 0%, #241c1c 35%, #130f0f 70%, #0a0807 100%)",
     load: (a) => {
       const l = hole(a);

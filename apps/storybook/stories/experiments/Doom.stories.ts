@@ -17,7 +17,7 @@ const meta: Meta<GraphArgs> = {
   render: renderGraph<GraphArgs>({
     describe: () =>
       `Doom · one square node per pixel, colours streamed ${DOOM.rate} times a second\nclick the graph, then: arrows move · Ctrl fire · Space use · Enter / Esc menu · scroll to zoom`,
-    options: () => ({ hoverStyle: false }),
+    options: () => ({ hoverStyle: false, nodeDrag: false }),
     gate: (_graph, a, root) => askToDownload(root).then((ok) => (ok ? a : null)),
     load: () => cached("doom:screen", () => screen()),
     onLoad: (graph) => {

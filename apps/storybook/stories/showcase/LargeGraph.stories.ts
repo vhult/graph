@@ -20,12 +20,11 @@ const meta: Meta<Args> = {
     describe: (a) => `Large graph · ${a.layout} · ${DESCRIBE[a.layout]}`,
     load: (a) => loadMap(a.layout, a.nodes, a.seed),
     dataArgs: ["layout"],
-    options: () => ({ nodeDrag: true }),
     onLoad: (graph, _g, _a, root) => showReadout(graph, root),
   }),
   argTypes: { layout: { control: "select", options: MAP_OPTIONS }, ...graphArgTypes<Args>(NODE_COUNTS) },
   args: { layout: "cosmic web", ...GRAPH_ARGS, nodes: 1_000_000, edgeColor: "nodes", edgeAlpha: 0.6 },
-  parameters: { controls: { include: ["layout", "nodes", "seed", "labels", "edges"] } },
+  parameters: { controls: { include: ["layout", "nodes", "seed"] } },
 };
 
 export default meta;

@@ -30,6 +30,7 @@ const meta: Meta<Args> = {
   render: renderGraph<Args>({
     describe: () => "Galaxy · stars on density-wave orbits, positions computed on the GPU and streamed",
     load,
+    options: () => ({ nodeDrag: false }),
     onLoad: (graph, g, a) => {
       stop();
       const id = run;

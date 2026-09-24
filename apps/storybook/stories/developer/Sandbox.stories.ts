@@ -10,11 +10,9 @@ interface Args extends GraphArgs {
   directed: boolean;
   labelSize: number;
   labelPadding: number;
-  nodeDrag: boolean;
   pickRate: number;
   pickRadius: number;
   edgePickRadius: number;
-  hover: boolean;
   hoverNodeScale: number;
   hoverEdgeWidth: number;
   pixelRatio: number;
@@ -25,9 +23,7 @@ const CATEGORY: Record<string, string> = {
   layout: "Data",
   nodes: "Data",
   seed: "Data",
-  edges: "Data",
   edgeColor: "Data",
-  labels: "Data",
   edgeLabels: "Data",
   nodeScale: "Nodes",
   lodTargetPx: "Nodes",
@@ -39,11 +35,9 @@ const CATEGORY: Record<string, string> = {
   edgeDebug: "Edges",
   labelSize: "Labels",
   labelPadding: "Labels",
-  nodeDrag: "Interaction",
   pickRate: "Interaction",
   pickRadius: "Interaction",
   edgePickRadius: "Interaction",
-  hover: "Interaction",
   hoverNodeScale: "Interaction",
   hoverEdgeWidth: "Interaction",
   pixelRatio: "Engine",
@@ -58,13 +52,11 @@ const own: Partial<ArgTypes<Args>> = {
   directed: { control: "boolean" },
   labelSize: range(6, 32, 1),
   labelPadding: range(0, 16, 1),
-  nodeDrag: { control: "boolean" },
   pickRate: range(1, 240, 1),
   pickRadius: range(0, 16, 0.5),
   edgePickRadius: range(0, 16, 0.5),
-  hover: { control: "boolean" },
-  hoverNodeScale: { ...range(0.5, 3, 0.05), if: { arg: "hover" } },
-  hoverEdgeWidth: { ...range(0.5, 6, 0.25), if: { arg: "hover" } },
+  hoverNodeScale: range(0.5, 3, 0.05),
+  hoverEdgeWidth: range(0.5, 6, 0.25),
   pixelRatio: range(0.5, 3, 0.25),
   background: { control: "color" },
 };
@@ -109,18 +101,14 @@ const meta: Meta<Args> = {
       pickRate: a.pickRate,
       pickRadius: a.pickRadius,
       edgePickRadius: a.edgePickRadius,
-      hoverStyle: a.hover ? { nodeScale: a.hoverNodeScale, edgeWidth: a.hoverEdgeWidth } : false,
+      hoverStyle: { nodeScale: a.hoverNodeScale, edgeWidth: a.hoverEdgeWidth },
       pixelRatio: a.pixelRatio,
       background: toRgba(a.background),
     }),
     edgeStyle: (a) => (a.directed ? EDGE_DIRECTED : undefined),
     labels: (g, a) => ({ nodes: numbered(g.nodes.count, "#"), edges: edgeText(a) }),
-    onLoad: (graph, _g, a, root) => {
-      graph.setNodeDrag(a.nodeDrag);
-      showReadout(graph, root);
-    },
+    onLoad: (graph, _g, _a, root) => showReadout(graph, root),
     onUpdate: (graph, a, prev) => {
-      if (a.nodeDrag !== prev.nodeDrag) graph.setNodeDrag(a.nodeDrag);
       if (a.edgeLabels !== prev.edgeLabels) graph.setEdgeLabels(edgeText(a));
     },
   }),
@@ -133,11 +121,9 @@ const meta: Meta<Args> = {
     directed: false,
     labelSize: 12,
     labelPadding: 2,
-    nodeDrag: true,
     pickRate: 60,
     pickRadius: 0,
     edgePickRadius: 4,
-    hover: true,
     hoverNodeScale: 1.25,
     hoverEdgeWidth: 2,
     pixelRatio: globalThis.devicePixelRatio ?? 1,

@@ -10,7 +10,6 @@ const meta: Meta = {
   title: "Nodes/Z-index",
   render: (args, ctx) =>
     stage(args, ctx, {
-      options: () => ({ nodeDrag: true }),
       setup: (graph, _a, hud) => {
         const positions = new Float32Array(COUNT * 2);
         const colors = new Uint32Array(COUNT);
