@@ -164,6 +164,14 @@ export class GraphStore {
     this.markRange(pos, start, start + count);
   }
 
+  growBounds(x: number, y: number): void {
+    const b = this.bounds;
+    if (x < b.minX) b.minX = x;
+    if (x > b.maxX) b.maxX = x;
+    if (y < b.minY) b.minY = y;
+    if (y > b.maxY) b.maxY = y;
+  }
+
   updateColor(index: number, rgba: number): void {
     const ch = this.channels.nodeColor;
     ch.data[index] = rgba;

@@ -234,7 +234,8 @@ export const EDGE_CHUNK = defineStruct("EdgeChunk", [
  *   [EDGE_SCRATCH_LIST_COUNT]     chunks listed this frame
  *   [EDGE_SCRATCH_LIST]           C listed chunk ids,
  *                             C + 1 offsets of each listed chunk's edges in the draw list,
- *                             C × EdgeChunk
+ *                             C × EdgeChunk,
+ *                             MOVE_LIST + C: edge chunks holding a dragged node's edges
  */
 export const EDGE_CONSTANTS = {
   /** Edges per chunk: one bounds record, one cull decision. */
@@ -333,6 +334,7 @@ export const PICK_CONSTANTS = {
   PICK_EDGE_RESULT: 3,
   PICK_EDGE_COUNT: 4,
   PICK_NODE_SCALE: 5,
+  PICK_NODE_ENGINE: 6,
   PICK_LIST: 8,
   PICK_FLAG_NODES: 1,
   PICK_FLAG_EDGES: 2,
@@ -364,6 +366,11 @@ export function edgeChunkCount(edgeCount: number): number {
 
 /** Words in the edge state buffer for `edgeCount` edges. */
 export function edgeScratchWords(edgeCount: number): number {
+  const c = edgeChunkCount(edgeCount);
+  return edgeMoveWordOffset(edgeCount) + ENGINE_CONSTANTS.MOVE_LIST + c;
+}
+
+export function edgeMoveWordOffset(edgeCount: number): number {
   const c = edgeChunkCount(edgeCount);
   return EDGE_CONSTANTS.EDGE_SCRATCH_LIST + c + (c + 1) + EDGE_CONSTANTS.EDGE_CHUNK_WORDS * c;
 }
@@ -411,6 +418,10 @@ export const ENGINE_CONSTANTS = {
   /** Radix sort digit width and bin count. */
   RADIX_BITS: 4,
   RADIX_BINS: 16,
+  MOVE_COUNT: 0,
+  MOVE_NODE: 1,
+  MOVE_LIST: 2,
+  MOVE_GROUPS: 256,
 } as const;
 
 /** Workgroup size used by every engine compute pass (matches the WORKGROUP_SIZE override default). */

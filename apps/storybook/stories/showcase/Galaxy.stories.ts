@@ -26,7 +26,7 @@ function stop(): void {
 }
 
 const meta: Meta<Args> = {
-  title: "Demos/Galaxy",
+  title: "Showcase/Galaxy",
   render: renderGraph<Args>({
     describe: () => "Galaxy · stars on density-wave orbits, positions computed on the GPU and streamed",
     load,
@@ -48,6 +48,7 @@ const meta: Meta<Args> = {
   }),
   argTypes: graphArgTypes<Args>(SIZES, { speed: { control: { type: "range", min: 0, max: 4, step: 0.1 } } }),
   args: { nodes: 1_000_000, speed: 1, ...GRAPH_ARGS, edgeColor: "nodes", edgeAlpha: 0.05, edgeMinLengthPx: 12, lodTargetPx: 0 },
+  parameters: { controls: { include: ["nodes", "speed"] } },
 };
 
 export default meta;

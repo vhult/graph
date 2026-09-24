@@ -13,7 +13,7 @@ import type { Meta, StoryObj } from "@storybook/html-vite";
 import { NodeShape } from "@vhult/graph";
 import { PALETTE, rgbToWord, type GraphDataset } from "@vhult/graph-bench";
 import { EDGE_DIRECTED, GRAPH_ARGS, graphArgTypes, renderGraph, type GraphArgs, type GraphLabels } from "../../src/graphStory";
-import { removeHoverBox, showHoverBox } from "../../src/hoverBox";
+import { showReadout } from "../../src/readout";
 
 interface Args extends GraphArgs {
   directed: boolean;
@@ -87,28 +87,23 @@ const relations = DEMO.labels.edges ?? [];
 const ends = DEMO.graph.edges.indices;
 
 const meta: Meta<Args> = {
-  title: "Demos/Small graph",
+  title: "Showcase/Small graph",
   render: renderGraph<Args>({
     describe: (a) => `Small graph · a hub and ${GROUPS} groups${a.directed ? ", directed" : ""}`,
     load: () => ({ data: DEMO.graph, genMs: 0 }),
     labels: () => DEMO.labels,
     // Arrowheads are compiled into the edge shader, so this is an engine option.
-    options: (a) => ({ directedEdges: a.directed }),
+    options: (a) => ({ directedEdges: a.directed, nodeDrag: true }),
     edgeStyle: (a) => (a.directed ? EDGE_DIRECTED : undefined),
-    onLoad: (graph) =>
-      showHoverBox(graph, {
+    onLoad: (graph, _g, _a, root) =>
+      showReadout(graph, root, {
         node: (i) => `${names[i]} (#${i})`,
         edge: (e) => `${names[ends[e * 2]!]} → ${names[ends[e * 2 + 1]!]} · ${relations[e]} (#${e})`,
       }),
-    dispose: removeHoverBox,
   }),
-  argTypes: {
-    ...graphArgTypes<Args>([NODES], { directed: { control: "boolean" } }),
-    // A fixed, hand-built graph: neither applies.
-    nodes: { table: { disable: true } },
-    seed: { table: { disable: true } },
-  },
+  argTypes: graphArgTypes<Args>([NODES], { directed: { control: "boolean" } }),
   args: { nodes: NODES, directed: true, ...GRAPH_ARGS, edgeColor: "nodes", edgeWidth: 1.5, edgeAlpha: 0.8, labels: true },
+  parameters: { controls: { include: ["directed", "labels"] } },
 };
 
 export default meta;

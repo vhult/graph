@@ -44,6 +44,16 @@ body,
   display: none;
 }
 
+.stage-embed {
+  height: 480px;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.stage-embed .stage-note {
+  display: none;
+}
+
 .stage-error {
   position: absolute;
   inset: 0;

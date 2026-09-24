@@ -205,6 +205,10 @@ const SCRATCH_LIST_COUNT : u32 = 20u;
 const SCRATCH_CHUNKS : u32 = 32u;
 const RADIX_BITS : u32 = 4u;
 const RADIX_BINS : u32 = 16u;
+const MOVE_COUNT : u32 = 0u;
+const MOVE_NODE : u32 = 1u;
+const MOVE_LIST : u32 = 2u;
+const MOVE_GROUPS : u32 = 256u;
 
 // size 24, align 8
 struct PickParams {
@@ -220,6 +224,7 @@ const PICK_NODE_RESULT : u32 = 2u;
 const PICK_EDGE_RESULT : u32 = 3u;
 const PICK_EDGE_COUNT : u32 = 4u;
 const PICK_NODE_SCALE : u32 = 5u;
+const PICK_NODE_ENGINE : u32 = 6u;
 const PICK_LIST : u32 = 8u;
 const PICK_FLAG_NODES : u32 = 0x1u;
 const PICK_FLAG_EDGES : u32 = 0x2u;

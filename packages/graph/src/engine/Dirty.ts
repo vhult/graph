@@ -18,4 +18,5 @@ export const Dirty = {
   LABEL_QUERY: 1 << 10,
   LABELLED: 1 << 11,
   HOVER: 1 << 12,
+  MOVED: 1 << 13,
 } as const;

@@ -15,17 +15,17 @@ npm install @vhult/graph
 Requires a WebGPU-capable browser (Chrome/Edge 113+, Firefox 141+ on Windows,
 Safari 26+). Zero runtime dependencies.
 
-## Demo
+## Links
 
-Storybook is available here: https://graph.vhult.com
+- npm: https://www.npmjs.com/package/@vhult/graph
+- Storybook, latest release: https://graph.vhult.com
+- Storybook, dev branch: https://dev.graph.vhult.com
 
 ## Performance
 
 The goal of this library is to make a new generation graph rendering using
-WebGPU with the highest possible level of performance. It is currently able to
-render a 25 million nodes and 66 million edges graph smoothly on a laptop iGPU.
-
-<img width="677" height="814" alt="image" src="https://github.com/user-attachments/assets/aa8b26e4-05c4-4dee-b9d0-eba157ce742a" />
+WebGPU with the highest possible level of performance. It renders millions of
+nodes and edges easily.
 
 ## Quick start
 
@@ -57,8 +57,9 @@ graph.camera.fit();
 ```
 
 Pan and zoom are built in, with one-finger pan and two-finger pinch zoom on
-touch screens (`controls: false` turns them off). Call `graph.destroy()` to
-release the worker and the GPU device.
+touch screens (`controls: false` turns them off). Hover and click events work
+as soon as you listen to them, and `nodeDrag: true` lets the user drag nodes.
+Call `graph.destroy()` to release the worker and the GPU device.
 
 **Arrays are transferred, not copied**: after `setNodes` / `setEdges` the arrays
 you passed are detached. Pass `{ copy: true }` as the second argument to keep
@@ -100,13 +101,22 @@ Everything is typed; the `.d.ts` files document each option and method.
 |---|---|
 | `Graph.create(canvas, options?)` | Start the engine. Rejects with `UnsupportedError` when WebGPU or `OffscreenCanvas` is missing |
 | `setNodes`, `setEdges` | Bulk-load typed arrays (set nodes first, then edges) |
+| `setNodePositions`, `setNodeColors`, `setNodeSizes`, `setNodeShapes`, `setNodeCount` | Replace one node channel. Shapes are `NodeShape.circle`, `square` or `hexagon` |
 | `updateNodePositions`, `updateNodeColor` | Partial updates |
+| `streamNodePositions()` | Write every position each frame from your own loop, then `commit()` |
 | `setNodeLabels`, `setEdgeLabels` | Label text, placed without overlap |
+| `setBackground`, `setNodeScale` | Style |
+| `setNodeDrag(enabled)` | Turn node dragging on or off (also the `nodeDrag` option) |
 | `camera.fit`, `camera.setView`, `camera.getView` | Camera control |
+| `resize`, `requestRender` | Manual resize (with `autoResize: false`) and a forced frame |
 | `readStats(out?)` | Frame stats: visible counts, CPU/GPU ms, GPU memory held. GPU ms are NaN while the debug overlay is closed |
 | `debug.open`, `debug.close`, `debug.toggle`, `debug.isOpen` | Debug overlay drawn over the canvas. Measures nothing while closed |
 | `debug.expand(bool)` | Switch the overlay between the small view and the full per-pass, per-stage view |
 | `debug.record()`, `debug.stop()` | Record up to 10 s of per-frame data; resolves with the JSON recording |
+| `benchmark(options)` | Play a camera path and record per-frame CPU and GPU times |
+| `on("nodeHover", fn)`, `on("edgeHover", fn)` | The node or edge under the pointer, as your index, or `null` |
+| `on("nodeClick", fn)`, `on("edgeClick", fn)` | The node or edge clicked, or `null` for empty space |
+| `on("nodeDragStart", fn)`, `on("nodeDrag", fn)`, `on("nodeDragEnd", fn)` | A node the user drags, as `{ index, x, y }` in world units |
 | `on("error", fn)` | Runtime errors, e.g. device loss |
 | `destroy()` | Release everything |
 

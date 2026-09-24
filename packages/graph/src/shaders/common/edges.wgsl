@@ -105,3 +105,7 @@ fn edgeOffsetsAt(chunks : u32) -> u32 {
 fn edgeChunkAt(c : u32, chunks : u32) -> u32 {
   return EDGE_SCRATCH_LIST + 2u * chunks + 1u + c * EDGE_CHUNK_WORDS;
 }
+
+fn edgeMoveAt(chunks : u32) -> u32 {
+  return EDGE_SCRATCH_LIST + 2u * chunks + 1u + chunks * EDGE_CHUNK_WORDS;
+}

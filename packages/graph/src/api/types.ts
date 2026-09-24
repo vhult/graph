@@ -65,6 +65,13 @@ export interface GraphOptions {
   pickRadius?: number;
   edgePickRadius?: number;
   hoverStyle?: HoverStyle | false;
+  nodeDrag?: boolean;
+}
+
+export interface NodeDragEvent {
+  index: number;
+  x: number;
+  y: number;
 }
 
 export interface HoverStyle {
@@ -300,4 +307,9 @@ export interface GraphEvents {
   error: Error;
   nodeHover: number | null;
   edgeHover: number | null;
+  nodeClick: number | null;
+  edgeClick: number | null;
+  nodeDragStart: NodeDragEvent;
+  nodeDrag: NodeDragEvent;
+  nodeDragEnd: NodeDragEvent;
 }

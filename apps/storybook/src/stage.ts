@@ -25,6 +25,7 @@ export interface StageSpec<A> {
 
 export interface StoryContext {
   id: string;
+  viewMode?: string;
   globals?: { hud?: string };
 }
 
@@ -51,7 +52,8 @@ let current: Current | null = null;
 export function stage<A>(args: A, context: StoryContext, spec: StageSpec<A>): HTMLElement {
   const options = spec.options?.(args) ?? {};
   const optionsKey = JSON.stringify(options);
-  const hudOn = context.globals?.hud !== "off";
+  const embed = context.viewMode === "docs";
+  const hudOn = !embed && context.globals?.hud !== "off";
 
   if (current && current.storyId === context.id && current.optionsKey === optionsKey) {
     const cur = current;
@@ -66,7 +68,7 @@ export function stage<A>(args: A, context: StoryContext, spec: StageSpec<A>): HT
   disposeStage();
 
   const root = document.createElement("div");
-  root.className = "stage";
+  root.className = embed ? "stage stage-embed" : "stage";
   const canvas = document.createElement("canvas");
   root.append(canvas);
   const hud = new Hud(root);

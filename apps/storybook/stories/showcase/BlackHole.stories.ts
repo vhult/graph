@@ -24,7 +24,7 @@ function stop(): void {
 }
 
 const meta: Meta<Args> = {
-  title: "Demos/Black hole",
+  title: "Showcase/Black hole",
   render: renderGraph<Args>({
     describe: () => "Black hole · lensed accretion disk, positions computed on the GPU and streamed",
     options: () => ({ controls: false, transparent: true }),
@@ -55,12 +55,9 @@ const meta: Meta<Args> = {
   argTypes: {
     nodes: countControl(SIZES),
     speed: { control: { type: "range", min: 0, max: 4, step: 0.1 } },
-    seed: { control: { type: "number", min: 1, step: 1 } },
-    nodeScale: { control: { type: "range", min: 0.1, max: 4, step: 0.1 } },
-    lodTargetPx: { control: { type: "range", min: 0, max: 8, step: 0.5 } },
   },
   args: { ...GRAPH_ARGS, nodes: 1_000_000, speed: 0.1, edges: false, lodTargetPx: 0 },
-  parameters: { controls: { include: ["nodes", "speed", "seed", "nodeScale", "lodTargetPx"] } },
+  parameters: { controls: { include: ["nodes", "speed"] } },
 };
 
 export default meta;

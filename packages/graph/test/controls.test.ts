@@ -16,6 +16,43 @@ function rec(type: number, x: number, y: number, dx = 0, dy = 0, buttons = 0): I
   return { type, t: 0, x, y, dx, dy, buttons, mods: 0 };
 }
 
+describe("Controls hold", () => {
+  it("does not pan while held", () => {
+    const { camera, controls } = make();
+    controls.apply(rec(INPUT.POINTER_DOWN, 100, 100, 0, 0, 1), camera);
+    controls.hold = true;
+    const before = { x: camera.x, y: camera.y };
+    expect(controls.apply(rec(INPUT.POINTER_MOVE, 140, 120, 0, 0, 1), camera)).toBe(false);
+    expect(camera.x).toBe(before.x);
+    expect(camera.y).toBe(before.y);
+    expect(controls.pointerX).toBe(140);
+  });
+
+  it("release catches the pan up to the pointer", () => {
+    const { camera, controls } = make();
+    controls.apply(rec(INPUT.POINTER_DOWN, 100, 100, 0, 0, 1), camera);
+    controls.hold = true;
+    controls.apply(rec(INPUT.POINTER_MOVE, 140, 120, 0, 0, 1), camera);
+    camera.worldToScreen(0, 0, p);
+    const origin = { ...p };
+    expect(controls.release(100, 100, camera)).toBe(true);
+    expect(controls.hold).toBe(false);
+    camera.worldToScreen(0, 0, p);
+    expect(p.x - origin.x).toBeCloseTo(40, 9);
+    expect(p.y - origin.y).toBeCloseTo(20, 9);
+    expect(controls.apply(rec(INPUT.POINTER_MOVE, 150, 120, 0, 0, 1), camera)).toBe(true);
+  });
+
+  it("release does not pan after the button is up", () => {
+    const { camera, controls } = make();
+    controls.apply(rec(INPUT.POINTER_DOWN, 100, 100, 0, 0, 1), camera);
+    controls.hold = true;
+    controls.apply(rec(INPUT.POINTER_MOVE, 140, 120, 0, 0, 1), camera);
+    controls.apply(rec(INPUT.POINTER_UP, 140, 120), camera);
+    expect(controls.release(100, 100, camera)).toBe(false);
+  });
+});
+
 describe("Controls pinch", () => {
   it("first pinch record only anchors", () => {
     const { camera, controls } = make();

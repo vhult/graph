@@ -79,4 +79,55 @@ describe("Graph.destroy", () => {
     await createGraph({ transparent: true });
     expect(init(FakeWorker.last).options.transparent).toBe(true);
   });
+
+  it("sends nodeDrag at init, off by default, and on setNodeDrag", async () => {
+    const init = (w: FakeWorker) => w.sent.find((m) => m.t === "init") as Extract<ToWorker, { t: "init" }>;
+    await createGraph();
+    expect(init(FakeWorker.last).options.nodeDrag).toBe(false);
+    const graph = await createGraph({ nodeDrag: true });
+    expect(init(FakeWorker.last).options.nodeDrag).toBe(true);
+    graph.setNodeDrag(false);
+    expect(FakeWorker.last.sent.at(-1)).toEqual({ t: "nodeDrag", on: false });
+  });
+
+  it("tells the worker which events have handlers", async () => {
+    const graph = await createGraph();
+    const worker = FakeWorker.last;
+    const picks = () => worker.sent.filter((m) => m.t === "pick");
+    const offClick = graph.on("edgeClick", () => {});
+    expect(picks().at(-1)).toEqual({ t: "pick", hover: 0, click: 2, drag: false });
+    const offDrag = graph.on("nodeDragEnd", () => {});
+    expect(picks().at(-1)).toEqual({ t: "pick", hover: 0, click: 2, drag: true });
+    graph.on("nodeHover", () => {});
+    expect(picks().at(-1)).toEqual({ t: "pick", hover: 1, click: 2, drag: true });
+    offClick();
+    offDrag();
+    expect(picks().at(-1)).toEqual({ t: "pick", hover: 1, click: 0, drag: false });
+    expect(picks()).toHaveLength(5);
+  });
+
+  it("delivers click and drag events", async () => {
+    const graph = await createGraph();
+    const worker = FakeWorker.last;
+    const got: unknown[] = [];
+    graph.on("nodeClick", (i) => got.push(["nodeClick", i]));
+    graph.on("edgeClick", (i) => got.push(["edgeClick", i]));
+    graph.on("nodeDragStart", (e) => got.push(["start", e]));
+    graph.on("nodeDrag", (e) => got.push(["drag", e]));
+    graph.on("nodeDragEnd", (e) => got.push(["end", e]));
+    const post = (data: unknown) => worker.onmessage?.({ data });
+    post({ t: "click", node: 3, edge: -1 });
+    post({ t: "click", node: -1 });
+    post({ t: "drag", event: "nodeDragStart", index: 3, x: 1, y: 2 });
+    post({ t: "drag", event: "nodeDrag", index: 3, x: 4, y: 5 });
+    post({ t: "drag", event: "nodeDragEnd", index: 3, x: 4, y: 5 });
+    expect(got).toEqual([
+      ["nodeClick", 3],
+      ["edgeClick", null],
+      ["nodeClick", null],
+      ["start", { index: 3, x: 1, y: 2 }],
+      ["drag", { index: 3, x: 4, y: 5 }],
+      ["end", { index: 3, x: 4, y: 5 }],
+    ]);
+  });
 });

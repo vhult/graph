@@ -101,6 +101,7 @@ export class Graph {
                 edgeColor: options.hoverStyle?.edgeColor ?? HOVER_WHITE,
                 edgeWidth: Math.max(0, options.hoverStyle?.edgeWidth ?? 2),
               },
+        nodeDrag: options.nodeDrag ?? false,
         timeOrigin: performance.timeOrigin,
       },
     };
@@ -155,9 +156,19 @@ export class Graph {
   private benchSeq = 0;
   private benchPending: { id: number; resolve: (r: BenchmarkResult) => void; reject: (e: Error) => void } | null = null;
   private readonly snapshotPending = new Map<number, { resolve: (s: LabelSnapshot) => void; reject: (e: Error) => void }>();
-  private readonly listeners: { [K in keyof GraphEvents]: Set<Listener<K>> } = { error: new Set(), nodeHover: new Set(), edgeHover: new Set() };
-  private pickingNodes = false;
-  private pickingEdges = false;
+  private readonly listeners: { [K in keyof GraphEvents]: Set<Listener<K>> } = {
+    error: new Set(),
+    nodeHover: new Set(),
+    edgeHover: new Set(),
+    nodeClick: new Set(),
+    edgeClick: new Set(),
+    nodeDragStart: new Set(),
+    nodeDrag: new Set(),
+    nodeDragEnd: new Set(),
+  };
+  private pickHover = 0;
+  private pickClick = 0;
+  private pickDrag = false;
   private readonly pointer: PointerInput;
   private readonly resizeObserver: ResizeObserver | null = null;
 
@@ -320,6 +331,10 @@ export class Graph {
     this.send({ t: "nodeScale", value });
   }
 
+  setNodeDrag(enabled: boolean): void {
+    this.send({ t: "nodeDrag", on: enabled });
+  }
+
   // ---- lifecycle -----------------------------------------------------------------
 
   /** Manual resize in CSS px (only needed with `autoResize: false`). */
@@ -399,12 +414,15 @@ export class Graph {
   }
 
   private syncPicking(): void {
-    const nodes = this.listeners.nodeHover.size > 0;
-    const edges = this.listeners.edgeHover.size > 0;
-    if (this.destroyed || (nodes === this.pickingNodes && edges === this.pickingEdges)) return;
-    this.pickingNodes = nodes;
-    this.pickingEdges = edges;
-    this.send({ t: "pick", nodes, edges });
+    const l = this.listeners;
+    const hover = (l.nodeHover.size > 0 ? 1 : 0) | (l.edgeHover.size > 0 ? 2 : 0);
+    const click = (l.nodeClick.size > 0 ? 1 : 0) | (l.edgeClick.size > 0 ? 2 : 0);
+    const drag = l.nodeDragStart.size > 0 || l.nodeDrag.size > 0 || l.nodeDragEnd.size > 0;
+    if (this.destroyed || (hover === this.pickHover && click === this.pickClick && drag === this.pickDrag)) return;
+    this.pickHover = hover;
+    this.pickClick = click;
+    this.pickDrag = drag;
+    this.send({ t: "pick", hover, click, drag });
   }
 
   /** Release the worker, the GPU device and all listeners. Idempotent. */
@@ -487,6 +505,15 @@ export class Graph {
         if (m.node !== undefined) for (const fn of this.listeners.nodeHover) fn(m.node < 0 ? null : m.node);
         if (m.edge !== undefined) for (const fn of this.listeners.edgeHover) fn(m.edge < 0 ? null : m.edge);
         return;
+      case "click":
+        if (m.node !== undefined) for (const fn of this.listeners.nodeClick) fn(m.node < 0 ? null : m.node);
+        if (m.edge !== undefined) for (const fn of this.listeners.edgeClick) fn(m.edge < 0 ? null : m.edge);
+        return;
+      case "drag": {
+        const e = { index: m.index, x: m.x, y: m.y };
+        for (const fn of this.listeners[m.event]) fn(e);
+        return;
+      }
       case "labelSnapshot": {
         const p = this.snapshotPending.get(m.id);
         this.snapshotPending.delete(m.id);

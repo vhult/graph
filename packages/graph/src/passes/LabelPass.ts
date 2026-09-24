@@ -20,8 +20,8 @@ const CANDIDATES_PER_LABEL_AREA = 32;
 const MAX_CAPACITY = 1 << 18;
 const READ_WORDS = 16;
 const TREE_LEVELS_PER_PASS = 8;
-const SOLVE_TRIGGERS = Dirty.TOPOLOGY | Dirty.POSITIONS | Dirty.CAMERA | Dirty.STYLE | Dirty.STATE | Dirty.RESIZE | Dirty.EDGES | Dirty.LABEL_QUERY;
-const EDGE_TREE_DIRTY = Dirty.TOPOLOGY | Dirty.POSITIONS | Dirty.EDGES;
+const SOLVE_TRIGGERS = Dirty.TOPOLOGY | Dirty.POSITIONS | Dirty.MOVED | Dirty.CAMERA | Dirty.STYLE | Dirty.STATE | Dirty.RESIZE | Dirty.EDGES | Dirty.LABEL_QUERY;
+const EDGE_TREE_DIRTY = Dirty.TOPOLOGY | Dirty.POSITIONS | Dirty.MOVED | Dirty.EDGES;
 
 type Access = "uniform" | "read-only-storage" | "storage";
 type Table = Record<string, readonly [number, Access]>;

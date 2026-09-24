@@ -11,6 +11,7 @@ const meta: Meta = {
   title: "Nodes/Shapes",
   render: (args, ctx) =>
     stage(args, ctx, {
+      options: () => ({ nodeDrag: true }),
       setup: (graph, _a, hud) => {
         const n = SHAPES.length;
         const positions = new Float32Array(n * 2);
