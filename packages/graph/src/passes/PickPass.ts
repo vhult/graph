@@ -131,7 +131,7 @@ export class PickPass {
     const [nodeSelect, nodeTest, nodeResolve, edgeSelect, edgeTest, edgeResolve] = await Promise.all([
       make(nodeModule, "pick_nodes_select", [layouts.nodeGraph, layouts.nodeState, layouts.select], nodeConstants),
       make(nodeModule, "pick_nodes_test", [layouts.nodeGraph, layouts.nodeState, layouts.test], nodeConstants),
-      make(nodeModule, "pick_nodes_resolve", [layouts.empty, layouts.nodeState, layouts.resolve], nodeConstants),
+      make(nodeModule, "pick_nodes_resolve", [layouts.nodeGraph, layouts.nodeState, layouts.resolve], nodeConstants),
       make(edgeModule, "pick_edges_select", [layouts.edgeGraph, layouts.edgeState, layouts.select], edgeConstants),
       make(edgeModule, "pick_edges_test", [layouts.edgeGraph, layouts.edgeState, layouts.test], edgeConstants),
       make(edgeModule, "pick_edges_resolve", [layouts.empty, layouts.empty, layouts.resolve], edgeConstants),
@@ -185,7 +185,6 @@ export class PickPass {
       pass.setBindGroup(3, groups.test);
       pass.setPipeline(p.nodeTest);
       pass.dispatchWorkgroupsIndirect(this.args, 0);
-      pass.setBindGroup(1, this.empty);
       pass.setBindGroup(3, groups.nodeResolve);
       pass.setPipeline(p.nodeResolve);
       pass.dispatchWorkgroups(1);

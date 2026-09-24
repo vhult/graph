@@ -25,7 +25,7 @@ export interface InitOptions {
   edgeColor: RGBA;
   /** Compile the arrowhead into the edge pipeline (wider quad, more fill). */
   directedEdges: boolean;
-  /** Edges per pixel a crowded length level is thinned to; 0 = never. */
+  /** How much crowded areas of edges are thinned: lower draws fewer edges; 0 = never. */
   edgeMaxOverdraw: number;
   /** Edges this short on screen or shorter are not drawn, CSS px. */
   edgeMinLengthPx: number;

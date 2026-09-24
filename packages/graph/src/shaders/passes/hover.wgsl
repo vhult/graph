@@ -77,16 +77,14 @@ fn edge_vs(@builtin(vertex_index) vi : u32) -> EdgeOut {
   }
   let d = b - a;
   let len = max(length(d), 1e-4);
-  arrowLen = min(arrowLen, len * 0.5);
+  arrowLen = arrowFitPx(arrowLen, len);
   let dir = d / len;
   let nor = vec2<f32>(-dir.y, dir.x);
   let halfLen = len * 0.5;
-  let extX = halfLen + max(halfWidth, arrowLen) + EDGE_AA_PAD_PX;
-  let extY = max(halfWidth, arrowLen * ARROW_HALF_MUL / ARROW_LEN_MUL) + EDGE_AA_PAD_PX;
-  let corner = stripCorner(vi);
+  let corner = edgeStripCorner(vi, halfLen, halfWidth, arrowLen);
   var o : EdgeOut;
-  o.pos = vec4<f32>(screenToClip((a + b) * 0.5 + dir * (corner.x * extX) + nor * (corner.y * extY)), 0.0, 1.0);
-  o.uv = vec2<f32>(corner.x * extX, corner.y * extY);
+  o.pos = vec4<f32>(screenToClip((a + b) * 0.5 + dir * corner.x + nor * corner.y), 0.0, 1.0);
+  o.uv = corner;
   o.halfLen = halfLen;
   o.halfWidth = halfWidth;
   o.arrowLen = arrowLen;

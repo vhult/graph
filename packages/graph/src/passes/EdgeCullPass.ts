@@ -34,7 +34,7 @@ export const EDGE_DEBUG_MODES: readonly EdgeDebugMode[] = ["off", "length", "thi
 
 export interface EdgeCullOptions {
   directed: boolean;
-  /** Edges per pixel a crowded length level is thinned to; 0 = never. */
+  /** How much crowded areas of edges are thinned: lower draws fewer edges; 0 = never. */
   maxOverdraw: number;
   /** Edges this short on screen or shorter are not drawn, CSS px. */
   minLengthPx: number;

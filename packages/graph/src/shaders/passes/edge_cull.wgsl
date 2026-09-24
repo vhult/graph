@@ -267,7 +267,7 @@ fn edge_cull(@builtin(local_invocation_index) lid : u32) {
   if (lid == 0u) {
     edgeScratch[edgeOffsetsAt(chunks) + sl.total] = sd.total; // end of the last listed chunk
     let a = EDGE_SCRATCH_DRAW_ARGS;
-    edgeScratch[a] = 4u; // vertexCount: one triangle-strip quad
+    edgeScratch[a] = edgeStripVertices(EDGE_ARROWS);
     edgeScratch[a + 1u] = sd.total; // instanceCount: one per drawn edge
     edgeScratch[a + 2u] = 0u; // firstVertex
     edgeScratch[a + 3u] = 0u; // firstInstance

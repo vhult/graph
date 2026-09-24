@@ -30,9 +30,38 @@ fn edgeWidthPx(style : u32) -> f32 {
   return select(packed, frame.globalEdgeWidth, packed == 0.0);
 }
 
-/** Arrowhead length in device px for an edge this wide, before the cap at half the edge. */
+/** Arrowhead length in device px for an edge this wide. */
 fn arrowLenPx(widthPx : f32) -> f32 {
   return max(widthPx * ARROW_LEN_MUL, ARROW_MIN_LEN_CSS_PX * frame.pixelRatio);
+}
+
+const ARROW_HIDE_LEN_MUL : f32 = 2.0;
+const ARROW_FULL_LEN_MUL : f32 = 3.0;
+
+fn arrowFitPx(arrowLen : f32, edgeLenPx : f32) -> f32 {
+  let t = (edgeLenPx / max(arrowLen, 1e-6) - ARROW_HIDE_LEN_MUL) / (ARROW_FULL_LEN_MUL - ARROW_HIDE_LEN_MUL);
+  return arrowLen * clamp(t, 0.0, 1.0);
+}
+
+fn edgeStripVertices(arrows : bool) -> u32 {
+  return select(4u, 10u, arrows);
+}
+
+fn edgeStripCorner(vi : u32, halfLen : f32, halfWidth : f32, arrowLen : f32) -> vec2<f32> {
+  let capX = halfLen + halfWidth + EDGE_AA_PAD_PX;
+  let lineY = halfWidth + EDGE_AA_PAD_PX;
+  let arrow = arrowLen > 0.0;
+  if (vi >= 4u && !arrow) {
+    return vec2<f32>(capX, lineY);
+  }
+  let baseX = select(capX, halfLen - arrowLen, arrow);
+  if (vi < 5u) {
+    let k = min(vi, 3u);
+    return vec2<f32>(select(-capX, baseX, (k & 1u) != 0u), select(-lineY, lineY, (k >> 1u) != 0u));
+  }
+  let k = select(vi - 6u, 0u, vi == 5u);
+  let boxY = max(lineY, arrowLen * ARROW_HALF_MUL / ARROW_LEN_MUL + EDGE_AA_PAD_PX);
+  return vec2<f32>(select(baseX, halfLen + EDGE_AA_PAD_PX, (k & 1u) != 0u), select(-boxY, boxY, (k >> 1u) != 0u));
 }
 
 /** Farthest an edge of this width draws from its centreline, arrowhead and AA ramp included. */
@@ -55,10 +84,9 @@ fn edgeLengthFade(lenPx : f32) -> f32 {
 // ---- thinning ---------------------------------------------------------------
 
 /**
- * How many times over one length level may cover a pixel before its edges are
- * thinned (engine option `edgeMaxOverdraw`). 0 draws every edge.
+ * How much crowded areas of edges are thinned: lower draws fewer edges (engine option `edgeMaxOverdraw`). 0 draws every edge.
  */
-override EDGE_MAX_OVERDRAW : f32 = 6.0;
+override EDGE_MAX_OVERDRAW : f32 = 1.5;
 
 /**
  * How many of a chunk's `n` edges to draw, as a real number. The chunk is

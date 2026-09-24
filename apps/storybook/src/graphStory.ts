@@ -26,7 +26,7 @@ export interface GraphArgs {
   edgeColor: "tint" | "nodes";
   edgeWidth: number;
   edgeAlpha: number;
-  /** Overdraw a crowded area of edges is thinned to; 0 draws every edge. */
+  /** How much crowded areas of edges are thinned: lower draws fewer edges; 0 draws every edge. */
   edgeMaxOverdraw: number;
   /** On-screen length at or below which an edge is not drawn, CSS px. */
   edgeMinLengthPx: number;
@@ -83,7 +83,7 @@ export const GRAPH_ARGS: Omit<GraphArgs, "nodes"> = {
   edgeColor: "tint",
   edgeWidth: 1,
   edgeAlpha: 0.4,
-  edgeMaxOverdraw: 6,
+  edgeMaxOverdraw: 1.5,
   edgeMinLengthPx: 6,
   edgeDebug: "off",
   nodeScale: 1,
