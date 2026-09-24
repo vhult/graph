@@ -10,9 +10,10 @@
  *   - Labels: every node named, relations along the edges where they fit.
  */
 import type { Meta, StoryObj } from "@storybook/html-vite";
-import { NodeShape, type Graph } from "@vhult/graph";
+import { NodeShape } from "@vhult/graph";
 import { PALETTE, rgbToWord, type GraphDataset } from "@vhult/graph-bench";
 import { EDGE_DIRECTED, GRAPH_ARGS, graphArgTypes, renderGraph, type GraphArgs, type GraphLabels } from "../../src/graphStory";
+import { removeHoverBox, showHoverBox } from "../../src/hoverBox";
 
 interface Args extends GraphArgs {
   directed: boolean;
@@ -81,40 +82,9 @@ function smallGraph(): { graph: GraphDataset; labels: GraphLabels } {
 }
 
 const DEMO = smallGraph();
-
-let hoverBox: HTMLElement | null = null;
-const hovered = new WeakSet<Graph>();
-
-function showHover(graph: Graph): void {
-  if (hovered.has(graph)) return;
-  hovered.add(graph);
-  if (!hoverBox) {
-    hoverBox = document.createElement("div");
-    hoverBox.className = "stage-note";
-    hoverBox.style.cssText = "position: fixed; top: 8px; right: 8px; left: auto; bottom: auto";
-    (document.querySelector("#storybook-root") ?? document.body).append(hoverBox);
-  }
-  const box = hoverBox;
-  const names = DEMO.labels.nodes ?? [];
-  const relations = DEMO.labels.edges ?? [];
-  const ends = DEMO.graph.edges.indices;
-  let node: number | null = null;
-  let edge: number | null = null;
-  const render = () => {
-    const n = node === null ? "—" : `${names[node]} (#${node})`;
-    const e = edge === null ? "—" : `${names[ends[edge * 2]!]} → ${names[ends[edge * 2 + 1]!]} · ${relations[edge]} (#${edge})`;
-    box.textContent = `node: ${n}\nedge: ${e}`;
-  };
-  graph.on("nodeHover", (i) => {
-    node = i;
-    render();
-  });
-  graph.on("edgeHover", (i) => {
-    edge = i;
-    render();
-  });
-  render();
-}
+const names = DEMO.labels.nodes ?? [];
+const relations = DEMO.labels.edges ?? [];
+const ends = DEMO.graph.edges.indices;
 
 const meta: Meta<Args> = {
   title: "Demos/Small graph",
@@ -125,11 +95,12 @@ const meta: Meta<Args> = {
     // Arrowheads are compiled into the edge shader, so this is an engine option.
     options: (a) => ({ directedEdges: a.directed }),
     edgeStyle: (a) => (a.directed ? EDGE_DIRECTED : undefined),
-    onLoad: (graph) => showHover(graph),
-    dispose: () => {
-      hoverBox?.remove();
-      hoverBox = null;
-    },
+    onLoad: (graph) =>
+      showHoverBox(graph, {
+        node: (i) => `${names[i]} (#${i})`,
+        edge: (e) => `${names[ends[e * 2]!]} → ${names[ends[e * 2 + 1]!]} · ${relations[e]} (#${e})`,
+      }),
+    dispose: removeHoverBox,
   }),
   argTypes: {
     ...graphArgTypes<Args>([NODES], { directed: { control: "boolean" } }),
