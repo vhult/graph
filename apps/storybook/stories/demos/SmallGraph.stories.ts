@@ -93,7 +93,7 @@ const meta: Meta<Args> = {
     load: () => ({ data: DEMO.graph, genMs: 0 }),
     labels: () => DEMO.labels,
     // Arrowheads are compiled into the edge shader, so this is an engine option.
-    options: (a) => ({ directedEdges: a.directed }),
+    options: (a) => ({ directedEdges: a.directed, nodeDrag: true }),
     edgeStyle: (a) => (a.directed ? EDGE_DIRECTED : undefined),
     onLoad: (graph) =>
       showHoverBox(graph, {
