@@ -24,7 +24,7 @@ function stop(): void {
 }
 
 const meta: Meta<Args> = {
-  title: "Showcase/Black hole",
+  title: "Experiments/Black hole",
   render: renderGraph<Args>({
     describe: () => "Black hole · lensed accretion disk, positions computed on the GPU and streamed",
     options: () => ({ controls: false, transparent: true }),

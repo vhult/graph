@@ -12,7 +12,7 @@ function stop(): void {
 }
 
 const meta: Meta<GraphArgs> = {
-  title: "Showcase/Ripples",
+  title: "Experiments/Ripples",
   render: renderGraph<GraphArgs>({
     describe: () => "Ripples · hover the water to drop into it, waves travel along the graph, computed on the main thread and streamed every frame",
     options: () => ({ transparent: true, hoverStyle: false }),

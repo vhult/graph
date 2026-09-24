@@ -26,7 +26,7 @@ function stop(): void {
 }
 
 const meta: Meta<Args> = {
-  title: "Showcase/Galaxy",
+  title: "Experiments/Galaxy",
   render: renderGraph<Args>({
     describe: () => "Galaxy · stars on density-wave orbits, positions computed on the GPU and streamed",
     load,

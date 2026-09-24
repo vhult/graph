@@ -28,7 +28,7 @@ const preview: Preview = {
         order: [
           "Welcome",
           "Showcase",
-          ["Small graph", "Large graph", "Galaxy", "Black hole"],
+          ["Small graph", "Large graph"],
           "Nodes",
           ["Shapes"],
           "Edges",
@@ -37,6 +37,8 @@ const preview: Preview = {
           ["Scale"],
           "Developer",
           ["Sandbox", "Benchmark", "GPU correctness", "Label correctness", "Label flicker"],
+          "Experiments",
+          ["Galaxy", "Black hole", "Ripples"],
         ],
       },
     },
