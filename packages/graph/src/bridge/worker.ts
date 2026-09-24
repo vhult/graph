@@ -101,7 +101,7 @@ function dispatch(msg: ToWorker): void {
     case "nodes":
       return e.setNodes(msg.count, msg);
     case "nodeStream":
-      return e.setStream(new StreamSlots(msg.buffer, msg.count, msg.positions, msg.colors));
+      return e.setStream(new StreamSlots(msg.buffer, msg.count, msg.positions, msg.colors, msg.zIndex));
     case "edges":
       return e.setEdges(msg.count, msg);
     case "nodeLabels":

@@ -18,6 +18,7 @@ import edgeExpand from "./passes/edge_expand.wgsl";
 import edgeGeometry from "./passes/edge_geometry.wgsl";
 import edgeSort from "./passes/edge_sort.wgsl";
 import gather from "./passes/gather.wgsl";
+import mergeLayers from "./passes/merge_layers.wgsl";
 import hover from "./passes/hover.wgsl";
 import labelDraw from "./passes/label_draw.wgsl";
 import labelMark from "./passes/label_mark.wgsl";
@@ -50,6 +51,7 @@ export const SHADERS: ShaderFs = {
   "passes/edge_geometry.wgsl": edgeGeometry,
   "passes/edge_sort.wgsl": edgeSort,
   "passes/gather.wgsl": gather,
+  "passes/merge_layers.wgsl": mergeLayers,
   "passes/hover.wgsl": hover,
   "passes/label_draw.wgsl": labelDraw,
   "passes/label_mark.wgsl": labelMark,

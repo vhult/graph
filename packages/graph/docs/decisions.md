@@ -8,6 +8,22 @@ bandwidth), Edge 153, 1M nodes / 3M edges at fit unless stated.
 
 ---
 
+## 0049 — Streamed z-index is merged into the style words on the GPU
+
+`streamNodes({ zIndex })` carries one byte per node in the shared slot. The
+worker uploads the bytes as they are (1 MB at 1M nodes) and one kernel writes
+each layer into the style word of its node in engine order; the store copy is
+brought up to date only when a later `setNodes` needs it. Packing the bytes
+into the style words in the worker first cost 1.8–2.1 ms of worker CPU a frame
+at 1M. 1M communities, a new z-index every frame, AMD Radeon 890M, Edge 145
+headless, three runs: worker CPU 0.21–0.24 ms streamed against 0.41–0.43 ms
+through `setNodeZIndex` (whose packing also runs in the message handler,
+outside the frame, and allocates 1 MB on the main thread each frame); GPU
+5.55–5.68 ms against 4.97–5.08 ms, the merge's scattered reads. The galaxy's
+position stream is unchanged: GPU 4.69–4.75 → 4.65–4.74 ms.
+
+---
+
 ## 0048 — Z-index is a counting sort of the visible nodes by layer
 
 Nodes take a z-index from 0 to 15 in the 4 layer bits the style word already

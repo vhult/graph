@@ -6,7 +6,7 @@
  * strings or objects; node identity is the index.
  */
 import { DirtyRanges } from "./DirtyRanges";
-import { DEFAULT_NODE_STYLE, GRAPH_BINDINGS, GRAPH_BUFFER_WORDS, type GraphBufferName } from "./Layouts";
+import { CONSTANTS, DEFAULT_NODE_STYLE, GRAPH_BINDINGS, GRAPH_BUFFER_WORDS, type GraphBufferName } from "./Layouts";
 import { packNodeSizes, packNodeStyle, toHalfBits } from "./Pack";
 
 export interface Channel {
@@ -165,6 +165,20 @@ export class GraphStore {
     if (start + count > this.nodeCount) throw new RangeError("updatePositions: range exceeds node count");
     (pos.data as Float32Array).set(data, start * 2);
     this.markRange(pos, start, start + count);
+  }
+
+  syncZIndex(zIndex: Uint8Array): void {
+    const { STYLE_ZLAYER_SHIFT, STYLE_ZLAYER_MASK } = CONSTANTS;
+    const style = this.channels.nodeStyle.data as Uint32Array;
+    const keep = ~(STYLE_ZLAYER_MASK << STYLE_ZLAYER_SHIFT);
+    let any = 0;
+    for (let i = 0; i < style.length; i++) {
+      const z = zIndex[i]!;
+      const layer = z > STYLE_ZLAYER_MASK ? STYLE_ZLAYER_MASK : z;
+      any |= layer;
+      style[i] = (style[i]! & keep) | (layer << STYLE_ZLAYER_SHIFT);
+    }
+    this.hasZLayers = any !== 0;
   }
 
   updateColors(start: number, data: Uint32Array): void {

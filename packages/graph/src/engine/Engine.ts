@@ -115,6 +115,7 @@ export class Engine {
   private stream: StreamSlots | null = null;
   private streamedPositions: Float32Array | null = null;
   private streamedColors: Uint32Array | null = null;
+  private streamedZIndex: Uint8Array | null = null;
   /** performance.now() of the previous tick, for the zoom glide. */
   private lastTickMs = 0;
   private frameIndex = 0;
@@ -602,6 +603,7 @@ export class Engine {
     const n = this.store.nodeCount;
     if (!s || !s.pending || s.count !== n) return 0;
     if ((s.positions && !this.graph.canStream("nodePos", n)) || (s.colors && !this.graph.canStream("nodeColor", n))) return 0;
+    if (s.zIndex && !this.graph.canStream("nodeStyle", n)) return 0;
     const slot = s.take()!;
     let bytes = 0;
     if (s.positions) {
@@ -614,6 +616,12 @@ export class Engine {
       this.dirty |= Dirty.STYLE;
       bytes += this.graph.streamChannel("nodeColor", slot.colors);
     }
+    if (s.zIndex) {
+      this.streamedZIndex = slot.zIndex;
+      this.store.hasZLayers = true;
+      this.dirty |= Dirty.STYLE;
+      bytes += this.graph.streamLayers(slot.zWords);
+    }
     return bytes;
   }
 
@@ -623,8 +631,11 @@ export class Engine {
     if (p && !arrays.positions && p.length === n * 2) this.store.updatePositions(0, p);
     const c = this.streamedColors;
     if (c && !arrays.colors && c.length === n) this.store.updateColors(0, c);
+    const z = this.streamedZIndex;
+    if (z && !arrays.zIndex && z.length === n) this.store.syncZIndex(z);
     this.streamedPositions = null;
     this.streamedColors = null;
+    this.streamedZIndex = null;
   }
 
   updateColor(index: number, rgba: number): void {

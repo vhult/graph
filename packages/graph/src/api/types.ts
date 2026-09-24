@@ -108,11 +108,13 @@ export interface NodeData {
 export interface NodeStreamChannels {
   positions?: boolean;
   colors?: boolean;
+  zIndex?: boolean;
 }
 
 export interface NodeStream {
   readonly positions: Float32Array;
   readonly colors: Uint32Array;
+  readonly zIndex: Uint8Array;
   commit(): void;
 }
 

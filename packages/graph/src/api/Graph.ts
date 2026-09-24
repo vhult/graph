@@ -292,24 +292,30 @@ export class Graph {
     const count = this.nodeCount;
     const positions = channels.positions === true;
     const colors = channels.colors === true;
+    const zIndex = channels.zIndex === true;
     const ring = this.ring;
     if (!ring) {
       const p = new Float32Array(positions ? count * 2 : 0);
       const c = new Uint32Array(colors ? count : 0);
+      const z = new Uint8Array(zIndex ? count : 0);
       const commit = (): void => {
         if (positions) this.updateNodePositions(0, p, { copy: true });
         if (colors) this.setNodeColors(c, { copy: true });
+        if (zIndex) this.setNodeZIndex(z, { copy: true });
       };
-      return { positions: p, colors: c, commit };
+      return { positions: p, colors: c, zIndex: z, commit };
     }
-    const slots = StreamSlots.create(count, positions, colors);
-    this.send({ t: "nodeStream", buffer: slots.buffer, count, positions, colors });
+    const slots = StreamSlots.create(count, positions, colors, zIndex);
+    this.send({ t: "nodeStream", buffer: slots.buffer, count, positions, colors, zIndex });
     return {
       get positions() {
         return slots.data.positions;
       },
       get colors() {
         return slots.data.colors;
+      },
+      get zIndex() {
+        return slots.data.zIndex;
       },
       commit: () => {
         slots.commit();

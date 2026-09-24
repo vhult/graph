@@ -72,6 +72,18 @@ describe("GraphStore", () => {
     expect(s.hasZLayers).toBe(false);
   });
 
+  it("streamed z-index syncs into the layer bits and keeps the shape", () => {
+    const s = new GraphStore();
+    s.setNodes(3, { shapes: new Uint8Array([1, 2, 0]) });
+    s.syncZIndex(new Uint8Array([3, 0, 99]));
+    const words = s.channels.nodeStyle.data;
+    expect(s.hasZLayers).toBe(true);
+    expect(Array.from(words, (w) => (w >>> CONSTANTS.STYLE_ZLAYER_SHIFT) & CONSTANTS.STYLE_ZLAYER_MASK)).toEqual([3, 0, 15]);
+    expect(Array.from(words, (w) => w & CONSTANTS.STYLE_SHAPE_MASK)).toEqual([1, 2, 0]);
+    s.syncZIndex(new Uint8Array(3));
+    expect(s.hasZLayers).toBe(false);
+  });
+
   it("drawn bounds grow the node centres by the largest radius", () => {
     const s = new GraphStore();
     s.setNodes(3, { positions: new Float32Array([-40, 0, 0, 0, 40, 0]), sizes: new Float32Array([20, 10, 20]) });

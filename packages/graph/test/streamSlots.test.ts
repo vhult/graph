@@ -48,6 +48,18 @@ describe("StreamSlots", () => {
     expect(Array.from(slot.colors)).toEqual([0xff0000ff, 0xff00ff00, 0xffff0000]);
   });
 
+  it("carries z-index bytes after the other channels", () => {
+    const writer = StreamSlots.create(3, true, false, true);
+    const reader = new StreamSlots(writer.buffer, 3, true, false, true);
+    writer.data.positions.set([1, 2, 3, 4, 5, 6]);
+    writer.data.zIndex.set([7, 0, 15]);
+    writer.commit();
+    const slot = reader.take()!;
+    expect(Array.from(slot.positions)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(Array.from(slot.zIndex)).toEqual([7, 0, 15]);
+    expect(slot.colors.length).toBe(0);
+  });
+
   it("gives an empty array for a channel that is not streamed", () => {
     const writer = StreamSlots.create(4, false, true);
     expect(writer.data.positions.length).toBe(0);

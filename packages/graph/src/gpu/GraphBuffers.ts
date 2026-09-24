@@ -22,7 +22,7 @@
 import type { GraphStore } from "../data/GraphStore";
 import { DirtyRanges } from "../data/DirtyRanges";
 import { GRAPH_BINDINGS, GRAPH_BUFFER_WORDS, type GraphBufferName } from "../data/Layouts";
-import type { PermuteKernels, ScatterSlot } from "./PermuteKernels";
+import type { LayerSlot, PermuteKernels, ScatterSlot } from "./PermuteKernels";
 
 /** Smallest buffer we create: bindings need non-zero size, vec2 arrays need ≥ 8 B. */
 const MIN_BUFFER_BYTES = 16;
@@ -66,6 +66,8 @@ export class GraphBuffers {
   private readonly gathers: { name: NodeChannel; userOrder: GPUBuffer }[] = [];
   private readonly scatters: ScatterJob[] = [];
   private readonly slots: Record<NodeChannel, ScatterSlot>;
+  private readonly layerSlot: LayerSlot;
+  private layerJob = 0;
   private readonly rangeTable = new Uint32Array(DirtyRanges.CAPACITY * 2);
   private readonly retired: GPUBuffer[] = [];
 
@@ -76,11 +78,12 @@ export class GraphBuffers {
     private readonly kernels: PermuteKernels,
   ) {
     this.slots = Object.fromEntries(NODE_CHANNELS.map((n) => [n, kernels.createScatterSlot(n)])) as Record<NodeChannel, ScatterSlot>;
+    this.layerSlot = kernels.createLayerSlot();
   }
 
   /** GPU work queued by `flush` that must be encoded this frame. */
   get hasPendingWork(): boolean {
-    return this.gathers.length > 0 || this.scatters.length > 0;
+    return this.gathers.length > 0 || this.scatters.length > 0 || this.layerJob > 0;
   }
 
   /** CPU side of the upload: create/fill buffers and stage partial updates. */
@@ -152,6 +155,11 @@ export class GraphBuffers {
       this.kernels.scatter(pass, this.slots[s.name], this.rank, this.buffers[s.name], s.total, s.ranges, GRAPH_BUFFER_WORDS[s.name]);
     }
     this.scatters.length = 0;
+
+    if (this.layerJob > 0) {
+      this.kernels.mergeLayers(pass, this.layerSlot, this.order, this.buffers.nodeStyle, this.layerJob);
+      this.layerJob = 0;
+    }
   }
 
   /**
@@ -216,6 +224,8 @@ export class GraphBuffers {
   }
 
   destroy(): void {
+    this.layerSlot.params.destroy();
+    this.layerSlot.upload?.destroy();
     this.afterSubmit();
     for (const b of GRAPH_BINDINGS) this.buffers[b.name]?.destroy();
     this.order?.destroy();
@@ -233,6 +243,17 @@ export class GraphBuffers {
   canStream(name: NodeChannel, count: number): boolean {
     const ch = this.store.channels[name];
     return this.nodeCount === count && !ch.realloc && ch.dirty.isEmpty;
+  }
+
+  streamLayers(words: Uint32Array): number {
+    const slot = this.layerSlot;
+    if (!slot.upload || slot.upload.size < words.byteLength) {
+      if (slot.upload) this.retire(slot.upload);
+      slot.upload = this.device.createBuffer({ label: "layers/upload", size: Math.max(MIN_BUFFER_BYTES, Math.ceil((words.byteLength * 1.5) / 16) * 16), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+    }
+    this.device.queue.writeBuffer(slot.upload, 0, words);
+    this.layerJob = this.nodeCount;
+    return words.byteLength;
   }
 
   streamChannel(name: NodeChannel, data: Float32Array | Uint32Array): number {
