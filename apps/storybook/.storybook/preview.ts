@@ -30,7 +30,7 @@ const preview: Preview = {
           "Showcase",
           ["Small graph", "Large graph"],
           "Nodes",
-          ["Shapes"],
+          ["Shapes", "Z-index"],
           "Edges",
           ["Styles"],
           "Stress",
