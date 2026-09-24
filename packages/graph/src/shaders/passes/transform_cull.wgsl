@@ -31,6 +31,7 @@ var<workgroup> wgCells : array<atomic<u32>, CELLS_PER_CHUNK>;
 var<workgroup> wgTotal : atomic<u32>;
 var<workgroup> wgRun : array<u32, NUM_BUCKETS>;
 var<workgroup> wgLevel : u32;
+var<workgroup> wgBig : u32;
 
 fn nodeIndex(chunk : u32, k : u32, lid : u32) -> u32 {
   return chunk * CHUNK_SIZE + k * WORKGROUP_SIZE + lid;
@@ -101,14 +102,27 @@ fn lodCount(cb : ChunkBounds) -> f32 {
   }
   // m nodes spread over ext px sit about ext/sqrt(m) apart; keep that >= target.
   let m = (ext / LOD_TARGET_PX) * (ext / LOD_TARGET_PX);
-  // Once nodes are as wide as the spacing we sample TO, they tile the region
-  // and a dropped one leaves a hole its neighbours cannot fill: blend back to
-  // every node as their width grows from half that spacing to all of it. Size
-  // is the test, not separation: sub-pixel nodes are always far apart, so a
-  // separation test would keep every node exactly where sampling matters most.
-  let maxR = cb.maxSize * frame.globalNodeScale * frame.zoom * 0.5;
-  let wide = smoothstep(0.5, 1.0, 2.0 * maxR / LOD_TARGET_PX);
-  return clamp(mix(m, all, wide), 1.0, all);
+  return clamp(m, 1.0, all);
+}
+
+fn lodBigAt(radiusPx : f32) -> f32 {
+  return smoothstep(0.5, 1.0, 2.0 * radiusPx / LOD_TARGET_PX);
+}
+
+fn lodChunkHasBig(cb : ChunkBounds) -> bool {
+  if (LOD_TARGET_PX <= 0.0) {
+    return false;
+  }
+  return lodBigAt(cb.maxSize * frame.globalNodeScale * frame.zoom * 0.5) > 0.0;
+}
+
+fn lodPick(i : u32, t : u32, count : f32, labelled : bool, hasBig : bool) -> vec2<f32> {
+  var big = 0.0;
+  if (hasBig) {
+    big = lodBigAt(nodeRadiusPx(i));
+  }
+  let a = max(clamp(count - f32(t), 0.0, 1.0), big);
+  return vec2<f32>(mix(lodScale(count), 1.0, big), select(a, 1.0, labelled));
 }
 
 /**
@@ -120,9 +134,7 @@ fn lodScale(count : f32) -> f32 {
   return sqrt(f32(CHUNK_SIZE) / count);
 }
 
-/** The node at prefix position `t` fades in with the fractional part of `count`. */
-fn lodFade(color : u32, count : f32, t : u32) -> u32 {
-  let fade = clamp(count - f32(t), 0.0, 1.0);
+fn lodFade(color : u32, fade : f32) -> u32 {
   if (fade >= 1.0) {
     return color;
   }
@@ -172,18 +184,23 @@ fn cull_count(
   if (lid == 0u) {
     let cb = loadChunkBounds(c, chunks);
     wgFlag = select(0u, bitcast<u32>(lodCount(cb)), chunkMayBeVisible(c, chunks));
+    wgBig = select(0u, 1u, lodChunkHasBig(cb));
   }
   let flag = workgroupUniformLoad(&wgFlag);
+  let hasBig = workgroupUniformLoad(&wgBig) != 0u;
   if (flag != 0u) {
     let count = bitcast<f32>(flag);
     let items = u32(ceil(count));
-    let scale = lodScale(count);
     for (var k = 0u; k < ITEMS_PER_THREAD; k++) {
       let t = k * WORKGROUP_SIZE + lid;
       var b = BUCKET_CULLED;
       let i = nodeIndex(c, k, lid);
-      if (t < items || isLabelled(i, chunks)) {
-        b = classify(i, scale);
+      let labelled = isLabelled(i, chunks);
+      if (t < items || labelled || hasBig) {
+        let p = lodPick(i, t, count, labelled, hasBig);
+        if (p.y > 0.0) {
+          b = classify(i, p.x);
+        }
       }
       if (b != BUCKET_CULLED) {
         // local cell: NORMAL → its segment, other buckets → SEGMENTS + b - 1
@@ -342,11 +359,13 @@ fn cull_scatter(
   // Same prefix cull_count chose, derived the same way — but ONCE per workgroup.
   // Doing it per thread cost ~0.5 ms/frame even at 10k nodes, where LOD is inert.
   if (lid == 0u) {
-    wgLevel = bitcast<u32>(lodCount(loadChunkBounds(c, chunks)));
+    let cb = loadChunkBounds(c, chunks);
+    wgLevel = bitcast<u32>(lodCount(cb));
+    wgBig = select(0u, 1u, lodChunkHasBig(cb));
   }
   let count = bitcast<f32>(workgroupUniformLoad(&wgLevel));
+  let hasBig = workgroupUniformLoad(&wgBig) != 0u;
   let items = u32(ceil(count));
-  let scale = lodScale(count);
   // First lane of this lane's NORMAL segment within the row (segments never span rows).
   let segLane = lid - lid % DRAW_SEGMENT;
   if (lid < NUM_BUCKETS) {
@@ -359,8 +378,12 @@ fn cull_scatter(
     let i = nodeIndex(c, k, lid);
     var b = BUCKET_CULLED;
     let labelled = isLabelled(i, chunks);
-    if (t < items || labelled) {
-      b = classify(i, scale);
+    var p = vec2<f32>(0.0);
+    if (t < items || labelled || hasBig) {
+      p = lodPick(i, t, count, labelled, hasBig);
+      if (p.y > 0.0) {
+        b = classify(i, p.x);
+      }
     }
     let one = select(vec2<u32>(0u), oneHot16(b), b != BUCKET_CULLED);
     let s = wgScanVec2(one, lid);
@@ -373,11 +396,11 @@ fn cull_scatter(
       } else {
         slot = scratch[offsetsAt(chunks) + chunkCell(b, c, chunks)] + wgRun[b] + field16(s.exclusive, b);
       }
-      var r = nodeRadiusPx(i) * scale;
+      var r = nodeRadiusPx(i) * p.x;
       if (NODE_SHAPES) {
         r = packInstanceShape(r, nodeShape(i));
       }
-      instances[slot] = NodeInstance(worldToScreen(nodePos[i]), r, select(lodFade(nodeColor[i], count, t), nodeColor[i], labelled));
+      instances[slot] = NodeInstance(worldToScreen(nodePos[i]), r, lodFade(nodeColor[i], p.y));
     }
     workgroupBarrier(); // every lane has read wgRun and scanVec2
     if (lid < NUM_BUCKETS) {

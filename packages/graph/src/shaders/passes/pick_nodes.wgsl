@@ -24,17 +24,22 @@ fn pickKey(b : u32, c : u32, t : u32, chunks : u32) -> u32 {
 fn pickNode(c : u32, t : u32, count : f32, chunks : u32) -> vec2<u32> {
   let i = c * CHUNK_SIZE + t;
   let labelled = isLabelled(i, chunks);
-  if (t >= u32(ceil(count)) && !labelled) {
+  let hasBig = lodChunkHasBig(loadChunkBounds(c, chunks));
+  if (t >= u32(ceil(count)) && !labelled && !hasBig) {
     return vec2<u32>(0u);
   }
-  let scale = lodScale(count);
+  let p = lodPick(i, t, count, labelled, hasBig);
+  if (p.y <= 0.0) {
+    return vec2<u32>(0u);
+  }
+  let scale = p.x;
   let b = classify(i, scale);
   if (b == BUCKET_CULLED) {
     return vec2<u32>(0u);
   }
   let r = nodeRadiusPx(i) * scale;
   let rDraw = max(r, NODE_MIN_DRAW_RADIUS_PX);
-  let color = select(lodFade(nodeColor[i], count, t), nodeColor[i], labelled);
+  let color = lodFade(nodeColor[i], p.y);
   let base = unpack4x8unorm(color).a * min(1.0, (r * r) / (rDraw * rDraw));
   let d = pickPoint() - worldToScreen(nodePos[i]);
   var sd = length(d) - rDraw;
@@ -136,6 +141,8 @@ fn pick_nodes_resolve(@builtin(local_invocation_index) lid : u32) {
     atomicStore(&pickOut[PICK_NODE_ENGINE], r.y);
     let chunks = numChunks();
     let c = min(r.y / CHUNK_SIZE, max(chunks, 1u) - 1u);
-    atomicStore(&pickOut[PICK_NODE_SCALE], bitcast<u32>(lodScale(lodCount(loadChunkBounds(c, chunks)))));
+    let cb = loadChunkBounds(c, chunks);
+    let t = min(r.y, c * CHUNK_SIZE + CHUNK_SIZE - 1u) - c * CHUNK_SIZE;
+    atomicStore(&pickOut[PICK_NODE_SCALE], bitcast<u32>(lodPick(r.y, t, lodCount(cb), isLabelled(r.y, chunks), lodChunkHasBig(cb)).x));
   }
 }
