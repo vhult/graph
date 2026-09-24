@@ -1,19 +1,52 @@
 import { Meta, Story } from "@storybook/addon-docs/blocks";
 import * as SmallGraph from "./showcase/SmallGraph.stories";
+import "./welcome.css";
 
 <Meta title="Welcome" />
 
-# @vhult/graph
+<div className="sb-unstyled vg-welcome">
+  <header className="vg-hero">
+    <h1 className="vg-title">@vhult/graph</h1>
+    <p className="vg-tagline">The WebGPU graph renderer built for speed.</p>
+    <p className="vg-lead">Millions of nodes and edges, drawn from a worker. Rendering only: you bring the positions, it draws them.</p>
+    <div className="vg-links">
+      <a className="vg-button vg-primary" href="https://www.npmjs.com/package/@vhult/graph" target="_blank" rel="noreferrer">npm</a>
+      <a className="vg-button" href="https://graph.vhult.com" target="_blank" rel="noreferrer">Storybook</a>
+      <a className="vg-button" href="https://dev.graph.vhult.com" target="_blank" rel="noreferrer">Dev Storybook</a>
+    </div>
+    <code className="vg-install">npm install @vhult/graph</code>
+    <ul className="vg-points">
+      <li>Millions of nodes and edges</li>
+      <li>Zero runtime dependencies</li>
+      <li>Runs in a Web Worker</li>
+    </ul>
+  </header>
 
-A WebGPU graph renderer. It draws millions of nodes and edges from a worker, and does nothing else: no layout, no analysis.
+  <div className="vg-graph">
+    <Story of={SmallGraph.SmallGraph} />
+  </div>
+  <p className="vg-hint">Drag a node · hover it · scroll to zoom</p>
 
-Drag a node, hover it, scroll to zoom.
-
-<Story of={SmallGraph.SmallGraph} />
-
-## Sections
-
-- **Showcase**: the small graph, a large graph with five layouts from 100 to 10 million nodes, and purpose-built graphs computed on the GPU every frame.
-- **Nodes** and **Edges**: what each can look like.
-- **Stress**: the memory ceiling.
-- **Developer**: the sandbox with every option, benchmarks and correctness checks.
+  <nav className="vg-cards">
+    <a className="vg-card" href="/?path=/story/showcase-small-graph--small-graph" target="_top">
+      <strong>Showcase</strong>
+      <span>The small graph, a large graph with five layouts up to 10 million nodes, a galaxy and a black hole.</span>
+    </a>
+    <a className="vg-card" href="/?path=/story/nodes-shapes--shapes" target="_top">
+      <strong>Nodes</strong>
+      <span>Shapes, sizes and colours.</span>
+    </a>
+    <a className="vg-card" href="/?path=/story/edges-styles--styles" target="_top">
+      <strong>Edges</strong>
+      <span>Widths, arrowheads, colours, gradients and labels.</span>
+    </a>
+    <a className="vg-card" href="/?path=/story/stress-scale--scale" target="_top">
+      <strong>Stress</strong>
+      <span>The memory ceiling.</span>
+    </a>
+    <a className="vg-card" href="/?path=/story/developer-sandbox--sandbox" target="_top">
+      <strong>Developer</strong>
+      <span>The sandbox with every option, benchmarks and correctness checks.</span>
+    </a>
+  </nav>
+</div>
