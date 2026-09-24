@@ -34,6 +34,7 @@ const meta: Meta<Args> = {
     vramGB: { control: { type: "range", min: 2, max: 32, step: 1 }, if: { arg: "dangerZone" } },
   }),
   args: { nodes: 10_000_000, neighbours: 2, dangerZone: false, vramGB: 8, ...GRAPH_ARGS, edgeAlpha: 0.25 },
+  parameters: { controls: { include: ["nodes", "neighbours", "dangerZone", "vramGB"] } },
 };
 
 export default meta;

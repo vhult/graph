@@ -56,6 +56,24 @@ export function loadGraph(name: GraphName, count: number): Loaded<GraphDataset> 
   return cached(`graph:${name}:${count}`, () => GRAPHS[name](count));
 }
 
+export const LAYOUTS = {
+  communities: (n: number, seed: number) => communities(n, 2, seed),
+  grid: (n: number, seed: number) => gridGraph(n, seed),
+  mesh: (n: number, seed: number) => mesh(n, 3, seed),
+  "hierarchy nested": (n: number, seed: number) => hierarchy(n, "nested", seed),
+  "hierarchy layered": (n: number, seed: number) => hierarchy(n, "layered", seed),
+} as const;
+
+export type LayoutName = keyof typeof LAYOUTS;
+
+export const LAYOUT_OPTIONS = Object.keys(LAYOUTS) as LayoutName[];
+
+export const NODE_COUNTS = [100, 1_000, 10_000, 100_000, 1_000_000, 10_000_000] as const;
+
+export function loadLayout(name: LayoutName, count: number, seed: number): Loaded<GraphDataset> {
+  return cached(`layout:${name}:${count}:${seed}`, () => LAYOUTS[name](count, seed));
+}
+
 export interface GraphText {
   nodes: string[];
   edges: string[];

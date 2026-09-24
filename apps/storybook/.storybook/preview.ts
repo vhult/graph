@@ -1,4 +1,5 @@
 import type { Preview } from "@storybook/html-vite";
+import { themes } from "storybook/theming";
 import { disposeStage } from "../src/stage";
 import "./preview.css";
 
@@ -21,19 +22,22 @@ const preview: Preview = {
   parameters: {
     layout: "fullscreen",
     controls: { expanded: true, sort: "none" },
+    docs: { theme: themes.dark },
     options: {
       storySort: {
         order: [
-          "Demos",
+          "Welcome",
+          "Showcase",
           ["Small graph", "Galaxy", "Black hole"],
+          "Large graph",
           "Nodes",
           ["Shapes"],
-          "Graphs",
-          ["Grid", "Communities", "Hierarchy", "Mesh", "Live layout"],
+          "Edges",
+          ["Styles"],
           "Stress",
-          ["Fuzzball", "Scale", "Far from origin"],
+          ["Scale"],
           "Developer",
-          ["Benchmark", "GPU correctness"],
+          ["Sandbox", "Benchmark", "GPU correctness", "Label correctness", "Label flicker"],
         ],
       },
     },
