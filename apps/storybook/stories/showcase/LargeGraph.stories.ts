@@ -1,14 +1,14 @@
 import type { Meta, StoryObj } from "@storybook/html-vite";
-import { LAYOUT_OPTIONS, loadLayout, NODE_COUNTS, type LayoutName } from "../src/data";
-import { GRAPH_ARGS, graphArgTypes, renderGraph, type GraphArgs } from "../src/graphStory";
-import { showReadout } from "../src/readout";
+import { LAYOUT_OPTIONS, loadLayout, NODE_COUNTS, type LayoutName } from "../../src/data";
+import { GRAPH_ARGS, graphArgTypes, renderGraph, type GraphArgs } from "../../src/graphStory";
+import { showReadout } from "../../src/readout";
 
 interface Args extends GraphArgs {
   layout: LayoutName;
 }
 
 const meta: Meta<Args> = {
-  title: "Large graph",
+  title: "Showcase/Large graph",
   render: renderGraph<Args>({
     describe: (a) => `Large graph · ${a.layout}`,
     load: (a) => loadLayout(a.layout, a.nodes, a.seed),

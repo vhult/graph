@@ -28,8 +28,7 @@ const preview: Preview = {
         order: [
           "Welcome",
           "Showcase",
-          ["Small graph", "Galaxy", "Black hole"],
-          "Large graph",
+          ["Small graph", "Large graph", "Galaxy", "Black hole"],
           "Nodes",
           ["Shapes"],
           "Edges",
