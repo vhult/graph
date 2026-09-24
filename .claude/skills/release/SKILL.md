@@ -11,6 +11,11 @@ This skill helps, it does not automate. It proposes and the user decides. It nev
 
 - `git log main..dev` with full bodies.
 - Skip merge commits and earlier release commits.
+- The release is the `@vhult/graph` library only, not the tooling around it. Keep a commit only when it changes the library:
+  `git diff-tree --no-commit-id --name-only -r <sha> -- packages/graph/src packages/graph/scripts packages/graph/package.json`
+  Skip it when that prints nothing.
+- Skip every `docs` commit.
+- Every later step uses only the kept commits, including the version bump.
 
 ## 2. Find each author's GitHub login
 
@@ -58,7 +63,7 @@ Entry format:
 ```
 
 - Sections always come in this order: Breaking, Features, Performance, Fixes, Other. Leave out empty ones.
-- `refactor`, `test`, `docs` and `chore` go in Other.
+- `refactor`, `test` and `chore` go in Other.
 - One line per commit: `- scope: summary (short sha) @login`. Without a scope, drop the `scope: ` part. Without an author (maintainer), drop the ` @login` part.
 - A performance line carries the frame and p95 numbers from the commit's `Perf` block.
 - Rewrite a summary only to make it clear. Never change what it says.
