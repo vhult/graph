@@ -11,7 +11,7 @@ import { GraphError } from "../api/errors";
 import type { BenchmarkOptions, BenchmarkResult, CameraView, GraphCaps, LabelSnapshot, RGBA } from "../api/types";
 import { INPUT, type InputRing, type InputRecord } from "../bridge/InputRing";
 import type { PositionStream } from "../bridge/PositionStream";
-import type { InitOptions } from "../bridge/protocol";
+import type { DragEventName, InitOptions } from "../bridge/protocol";
 import { STATE_SLOT } from "../bridge/SharedState";
 import { Camera2D } from "../camera/Camera2D";
 import { CameraPath } from "../camera/CameraPath";
@@ -39,6 +39,7 @@ import { TransformCullPass } from "../passes/TransformCullPass";
 import { UploadPass } from "../passes/UploadPass";
 import { Benchmark } from "./Benchmark";
 import { Dirty } from "./Dirty";
+import { Press } from "./Press";
 import { CPU, Probe, type ProbeSink } from "./Probe";
 import { Telemetry } from "./Telemetry";
 
@@ -56,6 +57,8 @@ export interface EngineInit {
   onBenchmark: (id: number, result: BenchmarkResult, transfer: ArrayBuffer[]) => void;
   onLabelSnapshot: (id: number, snapshot: LabelSnapshot, transfer: ArrayBuffer[]) => void;
   onHover: (node: number | undefined, edge: number | undefined) => void;
+  onClick: (node: number | undefined, edge: number | undefined) => void;
+  onDrag: (event: DragEventName, index: number, x: number, y: number) => void;
   probeSink: ProbeSink;
 }
 
@@ -72,7 +75,8 @@ const DEFAULT_WARMUP_FRAMES = 10;
 const FIT_PADDING_CSS_PX = 24;
 const BENCH_TIMING = { off: 0, passes: 1, full: 2 } as const;
 const CAMERA_SETTLE_MS = 50;
-const PICK_DIRTY = Dirty.TOPOLOGY | Dirty.POSITIONS | Dirty.CAMERA | Dirty.STYLE | Dirty.STATE | Dirty.RESIZE | Dirty.EDGES | Dirty.LABELLED;
+const CLICK_SLOP_CSS_PX = 3;
+const PICK_DIRTY = Dirty.TOPOLOGY | Dirty.POSITIONS | Dirty.MOVED | Dirty.CAMERA | Dirty.STYLE | Dirty.STATE | Dirty.RESIZE | Dirty.EDGES | Dirty.LABELLED;
 
 /** Straight-alpha RGBA in 0..1 to an rgba8unorm word (R in the low byte). */
 function packRgbaTuple(c: RGBA): number {
@@ -118,8 +122,25 @@ export class Engine {
   private pick: PickPass | null = null;
   private hover: HoverPass | null = null;
   private pickLoading = false;
-  private pickNodes = false;
   private pickEdges = false;
+  private hoverKinds = 0;
+  private clickKinds = 0;
+  private dragEvents = false;
+  private nodeDrag = false;
+  private dragNode = -1;
+  private pressEngine = -1;
+  private grabX = 0;
+  private grabY = 0;
+  private dragX = 0;
+  private dragY = 0;
+  private readonly dragPos = new Float32Array(2);
+  private readonly world = { x: 0, y: 0 };
+  private readonly press = new Press({
+    startDrag: (node, nodeScale) => this.startDrag(node, nodeScale),
+    endDrag: () => this.endDrag(),
+    stopHold: (pan) => this.stopHold(pan),
+    click: (node, edge) => this.emitClick(node, edge),
+  });
   private pickWanted = false;
   private pickDue = 0;
   private pickTimer: ReturnType<typeof setTimeout> | undefined;
@@ -203,6 +224,7 @@ export class Engine {
 
     this.setBackground(init.options.background);
     this.resize(init.width, init.height, init.pixelRatio);
+    if (init.options.nodeDrag) this.setNodeDrag(true);
 
     device.lost.then((info) => {
       if (this.destroyed) return;
@@ -270,6 +292,7 @@ export class Engine {
   }
 
   setNodes(count: number, arrays: NodeArrays): void {
+    this.press.cancel();
     if (!arrays.positions) this.syncStreamed();
     this.streamed = null;
     this.store.setNodes(count, arrays);
@@ -279,6 +302,7 @@ export class Engine {
   }
 
   setEdges(count: number, arrays: EdgeArrays): void {
+    this.press.cancel();
     this.store.setEdges(count, arrays);
     this.labels.setEdgeCount(count);
     this.newData();
@@ -312,13 +336,29 @@ export class Engine {
     }
   }
 
-  setPicking(nodes: boolean, edges: boolean): void {
-    if (!nodes) this.hoverNode = -1;
-    if (!edges) this.hoverEdge = -1;
-    if (!nodes && this.hover?.setNode(-1, 0, false)) this.markDirty(Dirty.HOVER);
-    if (!edges && this.hover?.setEdge(-1, 0, 0, 0)) this.markDirty(Dirty.HOVER);
+  setPicking(hover: number, click: number, drag: boolean): void {
+    this.hoverKinds = hover;
+    this.clickKinds = click;
+    this.dragEvents = drag;
+    this.syncPick();
+  }
+
+  setNodeDrag(on: boolean): void {
+    if (!on) this.press.cancel();
+    this.nodeDrag = on;
+    this.syncPick();
+  }
+
+  private syncPick(): void {
+    const hoverNodes = (this.hoverKinds & PICKED_NODES) !== 0;
+    const hoverEdges = (this.hoverKinds & PICKED_EDGES) !== 0;
+    if (!hoverNodes) this.hoverNode = -1;
+    if (!hoverEdges) this.hoverEdge = -1;
+    if (!hoverNodes && this.hover?.setNode(-1, 0, false)) this.markDirty(Dirty.HOVER);
+    if (!hoverEdges && this.hover?.setEdge(-1, 0, 0, 0)) this.markDirty(Dirty.HOVER);
+    const edges = hoverEdges || (this.clickKinds & PICKED_EDGES) !== 0;
+    const any = this.hoverKinds !== 0 || this.clickKinds !== 0 || this.nodeDrag;
     const edgesChanged = edges !== this.pickEdges;
-    this.pickNodes = nodes;
     this.pickEdges = edges;
     this.pickSeq++;
     if (edgesChanged) {
@@ -326,7 +366,7 @@ export class Engine {
       this.syncEdgeOrder();
       this.markDirty(Dirty.STYLE);
     }
-    if ((nodes || edges) && !this.pick && !this.pickLoading) {
+    if (any && !this.pick && !this.pickLoading) {
       this.pickLoading = true;
       const o = this.init.options;
       const edgeOpts = {
@@ -356,13 +396,13 @@ export class Engine {
           this.hover = hover;
           this.passes.nodes.hover = hover;
           this.passes.edges.hover = hover;
-          this.pickWanted = this.pickNodes || this.pickEdges;
+          this.pickWanted = this.hoverKinds !== 0;
           this.wake();
         },
         (e) => this.init.onError(e instanceof GraphError ? e : new GraphError("internal", String(e)), false),
       );
     }
-    this.pickWanted = nodes || edges;
+    this.pickWanted = this.hoverKinds !== 0;
     this.wake();
   }
 
@@ -377,7 +417,7 @@ export class Engine {
   }
 
   private maybePick(now: number): void {
-    if (!this.pickWanted || this.bench) return;
+    if (!this.pickWanted || this.bench || this.press.waiting || this.dragNode >= 0) return;
     const x = this.controls.pointerX;
     const y = this.controls.pointerY;
     if (x < 0 || y < 0) {
@@ -393,23 +433,42 @@ export class Engine {
       if (this.pickTimer === undefined) this.pickTimer = setTimeout(this.pickWake, due - now);
       return;
     }
+    if (this.submitPick(pick, x, y, (this.hoverKinds & PICKED_NODES) !== 0, (this.hoverKinds & PICKED_EDGES) !== 0, this.pickSeq) === 0) return;
+    this.pickWanted = false;
+    this.pickDue = now + this.pickInterval;
+  }
+
+  private pressPick(): void {
+    const pick = this.pick;
+    if (!pick || this.frameGen !== this.dataGen || !pick.free) return;
+    const p = this.press;
+    const seq = this.pickSeq + 1;
+    if (this.submitPick(pick, p.x, p.y, true, (this.clickKinds & PICKED_EDGES) !== 0, seq) === 0) {
+      p.resolve(-1, -1, 1, this.nodeDrag);
+      return;
+    }
+    this.pickSeq = seq;
+    p.seq = seq;
+  }
+
+  private submitPick(pick: PickPass, x: number, y: number, nodes: boolean, edges: boolean, token: number): number {
     const req = this.pickRequest;
     req.x = x;
     req.y = y;
     req.radiusPx = this.init.options.pickRadius * this.pixelRatio;
     req.edgeRadiusPx = this.init.options.edgePickRadius * this.pixelRatio;
-    req.nodes = this.pickNodes;
-    req.edges = this.pickEdges;
+    req.nodes = nodes;
+    req.edges = edges;
     req.shapes = this.store.hasNodeShapes;
     req.edgeColors = this.store.hasEdgeColors;
-    req.token = this.pickSeq;
+    req.token = token;
     const device = this.gpu.device;
     const encoder = device.createCommandEncoder();
-    if (pick.encode(encoder, this.frameCtx, this.graph, this.passes.cull, this.passes.edgeCull, req) === 0) return;
+    const picked = pick.encode(encoder, this.frameCtx, this.graph, this.passes.cull, this.passes.edgeCull, req);
+    if (picked === 0) return 0;
     device.queue.submit([encoder.finish()]);
     pick.afterSubmit();
-    this.pickWanted = false;
-    this.pickDue = now + this.pickInterval;
+    return picked;
   }
 
   private readonly pickWake = (): void => {
@@ -417,23 +476,91 @@ export class Engine {
     this.wake();
   };
 
-  private readonly onPick = (node: number, edge: number, nodeScale: number, token: number): void => {
+  private readonly onPick = (node: number, edge: number, nodeScale: number, engine: number, token: number): void => {
     if (this.destroyed) return;
-    if (Math.floor(token / 4) === this.pickSeq) this.emitHover(node, edge, token % 4, nodeScale);
-    if (this.pickWanted) this.wake();
+    const seq = Math.floor(token / 4);
+    const picked = token % 4;
+    const p = this.press;
+    if (p.waiting && p.seq !== 0 && seq === p.seq) {
+      this.pressEngine = engine;
+      p.resolve((picked & PICKED_NODES) !== 0 ? node : -1, (picked & PICKED_EDGES) !== 0 ? edge : -1, nodeScale, this.nodeDrag);
+    } else if (seq === this.pickSeq) this.emitHover(node, edge, picked, nodeScale);
+    if (this.pickWanted || p.waiting) this.wake();
   };
+
+  private startDrag(node: number, nodeScale: number): void {
+    const pos = this.streamed ?? (this.store.channels.nodePos.data as Float32Array);
+    const x = pos[node * 2]!;
+    const y = pos[node * 2 + 1]!;
+    this.camera.screenToWorld(this.press.x, this.press.y, this.world);
+    this.grabX = x - this.world.x;
+    this.grabY = y - this.world.y;
+    this.dragNode = node;
+    this.dragX = x;
+    this.dragY = y;
+    this.passes.cull.moveNode(this.pressEngine);
+    this.passes.edgeCull.moveNode(this.pressEngine, this.store.edgeCount);
+    if (this.dragEvents) this.init.onDrag("nodeDragStart", node, x, y);
+    this.emitHover(node, -1, PICKED_NODES | PICKED_EDGES, nodeScale);
+    this.moveDragged();
+    this.wake();
+  }
+
+  private moveDragged(): void {
+    const i = this.dragNode;
+    const px = this.controls.pointerX;
+    const py = this.controls.pointerY;
+    if (i < 0 || i >= this.store.nodeCount || px < 0 || py < 0) return;
+    this.camera.screenToWorld(px, py, this.world);
+    const d = this.dragPos;
+    d[0] = this.world.x + this.grabX;
+    d[1] = this.world.y + this.grabY;
+    const x = d[0]!;
+    const y = d[1]!;
+    if (x === this.dragX && y === this.dragY) return;
+    this.dragX = x;
+    this.dragY = y;
+    this.store.updatePositions(i, d);
+    this.store.growBounds(x, y);
+    this.dirty |= Dirty.MOVED;
+    if (this.dragEvents) this.init.onDrag("nodeDrag", i, x, y);
+  }
+
+  private endDrag(): void {
+    const i = this.dragNode;
+    if (i < 0) return;
+    this.moveDragged();
+    this.dragNode = -1;
+    this.controls.hold = false;
+    if (this.dragEvents) this.init.onDrag("nodeDragEnd", i, this.dragX, this.dragY);
+    if (this.hoverKinds !== 0) this.pickWanted = true;
+    this.wake();
+  }
+
+  private stopHold(pan: boolean): void {
+    if (!pan) this.controls.hold = false;
+    else if (this.controls.release(this.press.x, this.press.y, this.camera)) this.markDirty(Dirty.CAMERA);
+  }
+
+  private emitClick(node: number, edge: number): void {
+    const n = (this.clickKinds & PICKED_NODES) !== 0 ? node : undefined;
+    const e = (this.clickKinds & PICKED_EDGES) !== 0 ? edge : undefined;
+    if (n !== undefined || e !== undefined) this.init.onClick(n, e);
+  }
 
   private emitHover(node: number, edge: number, picked: number, nodeScale: number): void {
     let n: number | undefined;
     let e: number | undefined;
-    if ((picked & PICKED_NODES) !== 0 && this.pickNodes && node !== this.hoverNode) n = this.hoverNode = node;
-    if ((picked & PICKED_EDGES) !== 0 && this.pickEdges && edge !== this.hoverEdge) e = this.hoverEdge = edge;
+    const hoverNodes = (picked & PICKED_NODES) !== 0 && (this.hoverKinds & PICKED_NODES) !== 0;
+    const hoverEdges = (picked & PICKED_EDGES) !== 0 && (this.hoverKinds & PICKED_EDGES) !== 0;
+    if (hoverNodes && node !== this.hoverNode) n = this.hoverNode = node;
+    if (hoverEdges && edge !== this.hoverEdge) e = this.hoverEdge = edge;
     if (n !== undefined || e !== undefined) this.init.onHover(n, e);
     const hover = this.hover;
     if (!hover) return;
     let changed = false;
-    if ((picked & PICKED_NODES) !== 0 && this.pickNodes) changed = hover.setNode(node, nodeScale, this.store.hasNodeShapes) || changed;
-    if ((picked & PICKED_EDGES) !== 0 && this.pickEdges) {
+    if (hoverNodes) changed = hover.setNode(node, nodeScale, this.store.hasNodeShapes) || changed;
+    if (hoverEdges) {
       const ch = this.store.channels;
       const ends = ch.edgeIdx.data as Uint32Array;
       const style = edge >= 0 && this.store.hasEdgeStyles ? ch.edgeStyle.data[edge]! : 0;
@@ -516,11 +643,21 @@ export class Engine {
   /** Apply one input record (from the ring or the postMessage fallback). */
   input(rec: InputRecord): void {
     if (this.probe.full) this.probe.input(rec.t);
+    const handoff = this.controls.pinching;
     if (this.controls.apply(rec, this.camera)) this.dirty |= Dirty.CAMERA;
+    const p = this.press;
+    if (rec.type === INPUT.POINTER_DOWN) {
+      if (!handoff && (rec.buttons & 1) !== 0 && (this.nodeDrag || this.clickKinds !== 0)) {
+        p.down(rec.x, rec.y, this.nodeDrag);
+        this.controls.hold = this.nodeDrag;
+      } else p.cancel();
+    } else if (rec.type === INPUT.POINTER_MOVE) p.move(rec.x, rec.y, CLICK_SLOP_CSS_PX * this.pixelRatio);
+    else if (rec.type === INPUT.POINTER_UP) p.up();
+    else if (rec.type === INPUT.PINCH) p.cancel();
     if (rec.type === INPUT.POINTER_MOVE || rec.type === INPUT.POINTER_LEAVE || rec.type === INPUT.POINTER_DOWN) {
       this.frameInputs.pointerX = this.controls.pointerX;
       this.frameInputs.pointerY = this.controls.pointerY;
-      if (this.pickNodes || this.pickEdges) this.pickWanted = true;
+      if (this.hoverKinds !== 0) this.pickWanted = true;
     }
   }
 
@@ -577,6 +714,8 @@ export class Engine {
     const dt = this.lastTickMs === 0 ? 0 : (t0 - this.lastTickMs) / 1000;
     this.lastTickMs = t0;
     if (dt > 0 && this.controls.advance(dt, this.camera)) this.dirty |= Dirty.CAMERA;
+    if (this.dragNode >= 0) this.moveDragged();
+    if (this.press.active && this.press.seq === 0) this.pressPick();
     if (full) probe.mark(CPU.INPUT);
     const now = this.clock();
     if (this.labels.stepWidths()) this.dirty |= Dirty.LABEL_QUERY;
@@ -593,7 +732,7 @@ export class Engine {
 
     if ((this.dirty & (Dirty.CAMERA | Dirty.RESIZE)) !== 0) {
       this.cameraMs = t0;
-      if (this.hoverNode !== -1 || this.hoverEdge !== -1) {
+      if (this.dragNode < 0 && (this.hoverNode !== -1 || this.hoverEdge !== -1)) {
         this.clearHover();
         this.pickWanted = true;
       }
@@ -683,7 +822,7 @@ export class Engine {
     this.publishState(cpuMs, (uploaded ? this.graph.lastUploadBytes : 0) + streamedBytes);
     if (bench && !bench.driving) this.scheduleBenchCheck();
     this.frameGen = this.dataGen;
-    if ((frameDirty & PICK_DIRTY) !== 0 && (this.pickNodes || this.pickEdges)) this.pickWanted = true;
+    if ((frameDirty & PICK_DIRTY) !== 0 && this.hoverKinds !== 0) this.pickWanted = true;
 
     // One more tick to pick up input that arrived during this frame; it sleeps if there is none.
     this.wake();

@@ -60,6 +60,11 @@ var<workgroup> wgMid : array<vec4<f32>, WORKGROUP_SIZE>;
 /** (longest edge, widest style, total length, -) */
 var<workgroup> wgLen : array<vec4<f32>, WORKGROUP_SIZE>;
 
+@group(2) @binding(2) var<storage, read_write> touchScratch : array<atomic<u32>>;
+
+var<workgroup> wgTouch : atomic<u32>;
+var<workgroup> wgMove : u32;
+
 @compute @workgroup_size(WORKGROUP_SIZE)
 fn edge_bounds(
   @builtin(workgroup_id) wid : vec3<u32>,
@@ -71,6 +76,68 @@ fn edge_bounds(
   if (c >= chunks) {
     return; // uniform per workgroup
   }
+  edgeBoundsOf(c, chunks, lid);
+}
+
+@compute @workgroup_size(WORKGROUP_SIZE)
+fn edge_bounds_list(
+  @builtin(workgroup_id) wid : vec3<u32>,
+  @builtin(num_workgroups) nwg : vec3<u32>,
+  @builtin(local_invocation_index) lid : u32,
+) {
+  let chunks = numEdgeChunks();
+  let m = edgeMoveAt(chunks);
+  if (lid == 0u) {
+    wgMove = edgeScratch[m + MOVE_COUNT];
+  }
+  let n = workgroupUniformLoad(&wgMove);
+  for (var i = wid.x; i < n; i += nwg.x) {
+    if (lid == 0u) {
+      wgMove = edgeScratch[m + MOVE_LIST + i];
+    }
+    let c = workgroupUniformLoad(&wgMove);
+    if (c < chunks) {
+      edgeBoundsOf(c, chunks, lid);
+    }
+    workgroupBarrier();
+  }
+}
+
+@compute @workgroup_size(WORKGROUP_SIZE)
+fn edge_touch(
+  @builtin(workgroup_id) wid : vec3<u32>,
+  @builtin(num_workgroups) nwg : vec3<u32>,
+  @builtin(local_invocation_index) lid : u32,
+) {
+  let chunks = numEdgeChunks();
+  let c = wid.x + wid.y * nwg.x;
+  if (c >= chunks) {
+    return; // uniform per workgroup
+  }
+  if (lid == 0u) {
+    atomicStore(&wgTouch, 0u);
+  }
+  workgroupBarrier();
+  let m = edgeMoveAt(chunks);
+  let v = atomicLoad(&touchScratch[m + MOVE_NODE]);
+  for (var k = 0u; k < ITEMS_PER_THREAD; k++) {
+    let e = c * EDGE_CHUNK_SIZE + k * WORKGROUP_SIZE + lid;
+    if (e < frame.edgeCount) {
+      let ij = edgeIdx[e];
+      if (ij.x == v || ij.y == v) {
+        atomicStore(&wgTouch, 1u);
+      }
+    }
+  }
+  workgroupBarrier();
+  if (lid == 0u && atomicLoad(&wgTouch) != 0u) {
+    let at = atomicAdd(&touchScratch[m + MOVE_COUNT], 1u);
+    atomicStore(&touchScratch[m + MOVE_LIST + at], c);
+  }
+}
+
+fn edgeBoundsOf(c : u32, chunks : u32, lid : u32) {
+  workgroupBarrier();
   // Without per-edge styles the style buffer is a 16-byte placeholder of
   // zeros (= global width), so reading inside its length is always right.
   let styles = arrayLength(&edgeStyle);

@@ -18,7 +18,7 @@ export interface PickRequest {
   token: number;
 }
 
-export type PickResult = (node: number, edge: number, nodeScale: number, token: number) => void;
+export type PickResult = (node: number, edge: number, nodeScale: number, engine: number, token: number) => void;
 
 interface Slot {
   buffer: GPUBuffer;
@@ -50,6 +50,7 @@ interface Groups {
 const C = PICK_CONSTANTS;
 const SLOTS = 3;
 const KEY_SIZE = 14;
+const READBACK_BYTES = 20;
 
 export const PICKED_NODES = 1;
 export const PICKED_EDGES = 2;
@@ -78,7 +79,7 @@ export class PickPass {
     this.empty = device.createBindGroup({ label: "pick/empty", layout: layouts.empty, entries: [] });
     for (let k = 0; k < SLOTS; k++) {
       const slot: Slot = {
-        buffer: device.createBuffer({ label: `pick/readback${k}`, size: 16, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST }),
+        buffer: device.createBuffer({ label: `pick/readback${k}`, size: READBACK_BYTES, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST }),
         busy: false,
         token: 0,
         read: () => {
@@ -87,9 +88,10 @@ export class PickPass {
           const node = w[0]! - 1;
           const edge = w[1]! - 1;
           const scale = new Float32Array(range)[3]!;
+          const engine = w[4]!;
           slot.buffer.unmap();
           slot.busy = false;
-          this.onResult?.(node, edge, scale, slot.token);
+          this.onResult?.(node, edge, scale, engine, slot.token);
         },
       };
       this.slots.push(slot);
@@ -204,7 +206,7 @@ export class PickPass {
       pass.dispatchWorkgroups(1);
     }
     pass.end();
-    encoder.copyBufferToBuffer(this.out, C.PICK_NODE_RESULT * 4, slot.buffer, 0, 16);
+    encoder.copyBufferToBuffer(this.out, C.PICK_NODE_RESULT * 4, slot.buffer, 0, READBACK_BYTES);
     const picked = (nodes ? PICKED_NODES : 0) | (edges ? PICKED_EDGES : 0);
     slot.busy = true;
     slot.token = req.token * 4 + picked;

@@ -31,6 +31,8 @@ const MAX_STEP_S = 0.1;
 
 export class Controls {
   enabled = true;
+  hold = false;
+  pinching = false;
   /** Last pointer position, device px; -1 when outside the canvas. */
   pointerX = -1;
   pointerY = -1;
@@ -39,7 +41,6 @@ export class Controls {
   private pendingZoomLog = 0;
   private anchorX = 0;
   private anchorY = 0;
-  private pinching = false;
   private pinchX = 0;
   private pinchY = 0;
   private pinchDist = 0;
@@ -60,7 +61,7 @@ export class Controls {
         const wasInside = this.pointerX >= 0;
         this.pointerX = rec.x;
         this.pointerY = rec.y;
-        if (!this.dragging || !wasInside || (rec.buttons & 1) === 0) {
+        if (this.hold || !this.dragging || !wasInside || (rec.buttons & 1) === 0) {
           if ((rec.buttons & 1) === 0) this.dragging = false;
           return false;
         }
@@ -134,6 +135,16 @@ export class Controls {
       return false;
     }
     this.pendingZoomLog = pending - step;
+    return true;
+  }
+
+  release(fromX: number, fromY: number, camera: Camera2D): boolean {
+    this.hold = false;
+    if (!this.dragging) return false;
+    const dx = this.pointerX - fromX;
+    const dy = this.pointerY - fromY;
+    if (dx === 0 && dy === 0) return false;
+    camera.panByScreen(dx, dy);
     return true;
   }
 

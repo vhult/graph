@@ -8,6 +8,8 @@ import type { BenchmarkOptions, BenchmarkResult, CameraView, EdgeDebugMode, Grap
 
 export type DebugLevel = 0 | 1 | 2;
 
+export type DragEventName = "nodeDragStart" | "nodeDrag" | "nodeDragEnd";
+
 export type MessageTotals = Record<string, [count: number, totalMs: number, maxMs: number]>;
 
 export interface InitOptions {
@@ -36,6 +38,7 @@ export interface InitOptions {
   pickRadius: number;
   edgePickRadius: number;
   hoverStyle: Required<HoverStyle> | null;
+  nodeDrag: boolean;
   timeOrigin: number;
 }
 
@@ -70,7 +73,8 @@ export type ToWorker =
   | { t: "render" }
   | { t: "benchmark"; id: number; options: BenchmarkOptions }
   | { t: "labelSnapshot"; id: number }
-  | { t: "pick"; nodes: boolean; edges: boolean }
+  | { t: "pick"; hover: number; click: number; drag: boolean }
+  | { t: "nodeDrag"; on: boolean }
   | { t: "debug"; level: DebugLevel }
   | { t: "debugRecord"; on: boolean }
   | { t: "destroy" };
@@ -83,6 +87,8 @@ export type FromWorker =
   | { t: "benchmark"; id: number; result: BenchmarkResult }
   | { t: "labelSnapshot"; id: number; snapshot: LabelSnapshot }
   | { t: "hover"; node?: number; edge?: number }
+  | { t: "click"; node?: number; edge?: number }
+  | { t: "drag"; event: DragEventName; index: number; x: number; y: number }
   | { t: "debugRing"; columns: string[]; gpuGroups: string[]; frames: number; buffer: SharedArrayBuffer | null }
   | { t: "debugRows"; data: Float64Array }
   | { t: "debugTotals"; messages: MessageTotals }

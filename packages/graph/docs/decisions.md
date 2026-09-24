@@ -8,6 +8,49 @@ bandwidth), Edge 153, 1M nodes / 3M edges at fit unless stated.
 
 ---
 
+## 0045 — Node drag moves one node in the worker and rebuilds only the chunks it touches
+
+`nodeDrag` (option and `setNodeDrag`) lets a left press drag a node.
+`nodeClick` / `edgeClick` report a press released within 3 CSS px, and
+`nodeDragStart` / `nodeDrag` / `nodeDragEnd` report the move as `{ index, x, y }`.
+
+**Press.** A left press runs a pick at once, skipping the 50 ms settle and
+`pickRate`. With drag on, the pan waits for it; a miss catches the pan up to
+the pointer in one step. A hit starts the drag once the pointer passes the
+3 px slop. The worker writes the node's position once per tick, keeping the
+grab offset, so the node moves in the same frame as the pointer. A host that
+pushes its own positions handles the dragged node itself.
+
+**Bounds.** A drag frame marks `Dirty.MOVED`, not `POSITIONS`. `cull.bounds`
+then rebuilds only the node's chunk (the pick now also returns the engine
+index). `edge.bounds` rebuilds only the edge chunks holding the node's edges,
+which `edge_touch` lists once when the drag starts, in a section at the end of
+the edge state buffer (a separate buffer would pass the 10 storage buffers per
+dispatch).
+
+**Drag end.** No extra step. The list stays set after the drag, so a last move
+that arrives with the release still rebuilds its chunks; only a drag marks
+`MOVED`, and the next drag replaces the list. Before this, a node dropped in the
+same frame as the release sat outside its chunk box and was culled once that box
+left the screen (from zoom 3.4 at 100k). A re-sort at drag end was measured and
+rejected: GPU 16 ms at 1M and 136 ms at 10M (node and edge sort), and when the
+drag grows the bounds every Morton key changes, so the zoomed-out sample changes
+everywhere. Skipping it leaves one stretched chunk until the next bulk position
+load: at 1M, fit, a far drag draws 801 more nodes (+0.3%) with no visible
+difference.
+
+**Measurements.** AMD Radeon 890M, Edge 145, Linux, headless, a 3 s drag at
+60 Hz, per frame:
+- communities 10M, rebuilding everything: GPU 26.38 ms, interval p50 30.1 ms.
+  `cull.bounds` 2.03 ms, `edge.bounds` 14.88 ms.
+- communities 10M, chunks touched only: GPU 9.30 ms, interval p50 16.2 ms,
+  against 9.20 ms for a pan. `cull.bounds` 0.023 ms, `edge.bounds` 0.030 ms;
+  `edge_touch` costs 1.7 ms once at drag start.
+- communities 1M: drag 3.64 ms, pan 3.59 ms.
+- Drag off, bench `large`, alternated with `dev`, 2 runs each: frame 5.80 /
+  5.87 → 5.87 / 6.13 ms, p95 12.03 / 11.46 → 11.08 / 11.89 ms. Within
+  run-to-run spread.
+
 ## 0044 — The hover highlight is one extra draw, fed by the host's index
 
 While a hover handler is set, the engine draws the hovered item again, in
