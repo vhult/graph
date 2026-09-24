@@ -4,7 +4,7 @@
  * and never produce a message in steady state.
  */
 import type { GraphErrorCode } from "../api/errors";
-import type { BenchmarkOptions, BenchmarkResult, CameraView, EdgeDebugMode, GraphCaps, LabelSnapshot, RGBA } from "../api/types";
+import type { BenchmarkOptions, BenchmarkResult, CameraView, EdgeDebugMode, GraphCaps, HoverStyle, LabelSnapshot, RGBA } from "../api/types";
 
 export type DebugLevel = 0 | 1 | 2;
 
@@ -35,6 +35,7 @@ export interface InitOptions {
   pickRate: number;
   pickRadius: number;
   edgePickRadius: number;
+  hoverStyle: Required<HoverStyle> | null;
   timeOrigin: number;
 }
 

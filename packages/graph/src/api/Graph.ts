@@ -41,6 +41,7 @@ const DEFAULT_LABEL_FONT = "system-ui, -apple-system, 'Segoe UI', sans-serif";
 const DEFAULT_FIT_PADDING = 24;
 const DEFAULT_PICK_RATE = 60;
 const DEFAULT_EDGE_PICK_RADIUS = 4;
+const HOVER_WHITE: RGBA = [1, 1, 1, 1];
 
 type Listener<K extends keyof GraphEvents> = (payload: GraphEvents[K]) => void;
 
@@ -91,6 +92,15 @@ export class Graph {
         pickRate: Math.max(1, options.pickRate ?? DEFAULT_PICK_RATE),
         pickRadius: Math.max(0, options.pickRadius ?? 0),
         edgePickRadius: Math.max(0, options.edgePickRadius ?? DEFAULT_EDGE_PICK_RADIUS),
+        hoverStyle:
+          options.hoverStyle === false
+            ? null
+            : {
+                nodeColor: options.hoverStyle?.nodeColor ?? HOVER_WHITE,
+                nodeScale: Math.max(0, options.hoverStyle?.nodeScale ?? 1.25),
+                edgeColor: options.hoverStyle?.edgeColor ?? HOVER_WHITE,
+                edgeWidth: Math.max(0, options.hoverStyle?.edgeWidth ?? 2),
+              },
         timeOrigin: performance.timeOrigin,
       },
     };

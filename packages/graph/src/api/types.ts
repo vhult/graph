@@ -64,6 +64,14 @@ export interface GraphOptions {
   pickRate?: number;
   pickRadius?: number;
   edgePickRadius?: number;
+  hoverStyle?: HoverStyle | false;
+}
+
+export interface HoverStyle {
+  nodeColor?: RGBA;
+  nodeScale?: number;
+  edgeColor?: RGBA;
+  edgeWidth?: number;
 }
 
 export type EdgeDebugMode = "off" | "length" | "thinning" | "chunk";

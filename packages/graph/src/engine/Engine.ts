@@ -29,6 +29,7 @@ import { Labels } from "../labels/Labels";
 import { EDGE_DEBUG_MODES, EdgeCullPass } from "../passes/EdgeCullPass";
 import { LabelDrawPass } from "../passes/LabelDrawPass";
 import { LabelPass } from "../passes/LabelPass";
+import { HoverPass } from "../passes/HoverPass";
 import { PICKED_EDGES, PICKED_NODES, PickPass, type PickRequest } from "../passes/PickPass";
 import { EdgeGeometryPass } from "../passes/EdgeGeometryPass";
 import { EdgeSortPass } from "../passes/EdgeSortPass";
@@ -115,6 +116,7 @@ export class Engine {
   private labelSolves = 0;
   private benchTimer: ReturnType<typeof setTimeout> | undefined;
   private pick: PickPass | null = null;
+  private hover: HoverPass | null = null;
   private pickLoading = false;
   private pickNodes = false;
   private pickEdges = false;
@@ -313,6 +315,8 @@ export class Engine {
   setPicking(nodes: boolean, edges: boolean): void {
     if (!nodes) this.hoverNode = -1;
     if (!edges) this.hoverEdge = -1;
+    if (!nodes && this.hover?.setNode(-1, 0, false)) this.markDirty(Dirty.HOVER);
+    if (!edges && this.hover?.setEdge(-1, 0, 0, 0)) this.markDirty(Dirty.HOVER);
     const edgesChanged = edges !== this.pickEdges;
     this.pickNodes = nodes;
     this.pickEdges = edges;
@@ -331,14 +335,27 @@ export class Engine {
         minLengthPx: o.edgeMinLengthPx,
         debug: Math.max(0, EDGE_DEBUG_MODES.indexOf(o.edgeDebug)),
       };
-      PickPass.create(this.gpu.device, this.layouts, o.lodTargetPx, edgeOpts).then(
-        (pick) => {
+      const style = o.hoverStyle;
+      const hover = style
+        ? HoverPass.create(this.gpu.device, this.gpu.format, this.layouts, this.graph, o.directedEdges, {
+            nodeColor: packRgbaTuple(style.nodeColor),
+            nodeScale: style.nodeScale,
+            edgeColor: packRgbaTuple(style.edgeColor),
+            edgeWidth: style.edgeWidth,
+          })
+        : Promise.resolve(null);
+      Promise.all([PickPass.create(this.gpu.device, this.layouts, o.lodTargetPx, edgeOpts), hover]).then(
+        ([pick, hover]) => {
           if (this.destroyed) {
             pick.destroy();
+            hover?.destroy();
             return;
           }
           pick.onResult = this.onPick;
           this.pick = pick;
+          this.hover = hover;
+          this.passes.nodes.hover = hover;
+          this.passes.edges.hover = hover;
           this.pickWanted = this.pickNodes || this.pickEdges;
           this.wake();
         },
@@ -351,7 +368,12 @@ export class Engine {
 
   private newData(): void {
     this.dataGen++;
+    this.clearHover();
+  }
+
+  private clearHover(): void {
     this.pickSeq++;
+    if (this.hoverNode !== -1 || this.hoverEdge !== -1) this.emitHover(-1, -1, PICKED_NODES | PICKED_EDGES, 1);
   }
 
   private maybePick(now: number): void {
@@ -361,7 +383,7 @@ export class Engine {
     if (x < 0 || y < 0) {
       this.pickWanted = false;
       this.pickSeq++;
-      this.emitHover(-1, -1, (this.pickNodes ? PICKED_NODES : 0) | (this.pickEdges ? PICKED_EDGES : 0));
+      this.emitHover(-1, -1, PICKED_NODES | PICKED_EDGES, 1);
       return;
     }
     const pick = this.pick;
@@ -395,18 +417,29 @@ export class Engine {
     this.wake();
   };
 
-  private readonly onPick = (node: number, edge: number, token: number): void => {
+  private readonly onPick = (node: number, edge: number, nodeScale: number, token: number): void => {
     if (this.destroyed) return;
-    if (Math.floor(token / 4) === this.pickSeq) this.emitHover(node, edge, token % 4);
+    if (Math.floor(token / 4) === this.pickSeq) this.emitHover(node, edge, token % 4, nodeScale);
     if (this.pickWanted) this.wake();
   };
 
-  private emitHover(node: number, edge: number, picked: number): void {
+  private emitHover(node: number, edge: number, picked: number, nodeScale: number): void {
     let n: number | undefined;
     let e: number | undefined;
-    if ((picked & PICKED_NODES) !== 0 && node !== this.hoverNode) n = this.hoverNode = node;
-    if ((picked & PICKED_EDGES) !== 0 && edge !== this.hoverEdge) e = this.hoverEdge = edge;
+    if ((picked & PICKED_NODES) !== 0 && this.pickNodes && node !== this.hoverNode) n = this.hoverNode = node;
+    if ((picked & PICKED_EDGES) !== 0 && this.pickEdges && edge !== this.hoverEdge) e = this.hoverEdge = edge;
     if (n !== undefined || e !== undefined) this.init.onHover(n, e);
+    const hover = this.hover;
+    if (!hover) return;
+    let changed = false;
+    if ((picked & PICKED_NODES) !== 0 && this.pickNodes) changed = hover.setNode(node, nodeScale, this.store.hasNodeShapes) || changed;
+    if ((picked & PICKED_EDGES) !== 0 && this.pickEdges) {
+      const ch = this.store.channels;
+      const ends = ch.edgeIdx.data as Uint32Array;
+      const style = edge >= 0 && this.store.hasEdgeStyles ? ch.edgeStyle.data[edge]! : 0;
+      changed = hover.setEdge(edge, edge >= 0 ? ends[edge * 2]! : 0, edge >= 0 ? ends[edge * 2 + 1]! : 0, style) || changed;
+    }
+    if (changed) this.markDirty(Dirty.HOVER);
   }
 
   updatePositions(start: number, data: Float32Array): void {
@@ -502,6 +535,7 @@ export class Engine {
     clearTimeout(this.benchTimer);
     clearTimeout(this.pickTimer);
     this.pick?.destroy();
+    this.hover?.destroy();
     this.probe.destroy();
     this.passes.cull.destroy();
     this.passes.edgeCull.destroy();
@@ -557,7 +591,13 @@ export class Engine {
       this.dirty |= Dirty.CAMERA;
     }
 
-    if ((this.dirty & (Dirty.CAMERA | Dirty.RESIZE)) !== 0) this.cameraMs = t0;
+    if ((this.dirty & (Dirty.CAMERA | Dirty.RESIZE)) !== 0) {
+      this.cameraMs = t0;
+      if (this.hoverNode !== -1 || this.hoverEdge !== -1) {
+        this.clearHover();
+        this.pickWanted = true;
+      }
+    }
     if (this.pickWanted) this.maybePick(t0);
 
     if (this.dirty === 0) {

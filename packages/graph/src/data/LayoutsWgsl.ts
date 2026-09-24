@@ -14,6 +14,7 @@ import {
   GRAPH_BINDINGS,
   GROUP_FRAME,
   GROUP_GRAPH,
+  HOVER_PARAMS,
   LABEL_CANDIDATE,
   LABEL_CONSTANTS,
   LABEL_PARAMS,
@@ -97,6 +98,8 @@ export function emitLayoutsWgsl(): string {
     emitStruct(PICK_PARAMS),
     "",
     ...Object.entries(PICK_CONSTANTS).map(([k, v]) => `const ${k} : u32 = ${u32Literal(k, v)};`),
+    "",
+    emitStruct(HOVER_PARAMS),
     "",
   ];
   return out.join("\n");

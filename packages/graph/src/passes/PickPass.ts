@@ -18,7 +18,7 @@ export interface PickRequest {
   token: number;
 }
 
-export type PickResult = (node: number, edge: number, token: number) => void;
+export type PickResult = (node: number, edge: number, nodeScale: number, token: number) => void;
 
 interface Slot {
   buffer: GPUBuffer;
@@ -78,16 +78,18 @@ export class PickPass {
     this.empty = device.createBindGroup({ label: "pick/empty", layout: layouts.empty, entries: [] });
     for (let k = 0; k < SLOTS; k++) {
       const slot: Slot = {
-        buffer: device.createBuffer({ label: `pick/readback${k}`, size: 8, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST }),
+        buffer: device.createBuffer({ label: `pick/readback${k}`, size: 16, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST }),
         busy: false,
         token: 0,
         read: () => {
-          const w = new Uint32Array(slot.buffer.getMappedRange());
+          const range = slot.buffer.getMappedRange();
+          const w = new Uint32Array(range);
           const node = w[0]! - 1;
           const edge = w[1]! - 1;
+          const scale = new Float32Array(range)[3]!;
           slot.buffer.unmap();
           slot.busy = false;
-          this.onResult?.(node, edge, slot.token);
+          this.onResult?.(node, edge, scale, slot.token);
         },
       };
       this.slots.push(slot);
@@ -127,7 +129,7 @@ export class PickPass {
     const [nodeSelect, nodeTest, nodeResolve, edgeSelect, edgeTest, edgeResolve] = await Promise.all([
       make(nodeModule, "pick_nodes_select", [layouts.nodeGraph, layouts.nodeState, layouts.select], nodeConstants),
       make(nodeModule, "pick_nodes_test", [layouts.nodeGraph, layouts.nodeState, layouts.test], nodeConstants),
-      make(nodeModule, "pick_nodes_resolve", [layouts.empty, layouts.empty, layouts.resolve], nodeConstants),
+      make(nodeModule, "pick_nodes_resolve", [layouts.empty, layouts.nodeState, layouts.resolve], nodeConstants),
       make(edgeModule, "pick_edges_select", [layouts.edgeGraph, layouts.edgeState, layouts.select], edgeConstants),
       make(edgeModule, "pick_edges_test", [layouts.edgeGraph, layouts.edgeState, layouts.test], edgeConstants),
       make(edgeModule, "pick_edges_resolve", [layouts.empty, layouts.empty, layouts.resolve], edgeConstants),
@@ -182,7 +184,6 @@ export class PickPass {
       pass.setPipeline(p.nodeTest);
       pass.dispatchWorkgroupsIndirect(this.args, 0);
       pass.setBindGroup(1, this.empty);
-      pass.setBindGroup(2, this.empty);
       pass.setBindGroup(3, groups.nodeResolve);
       pass.setPipeline(p.nodeResolve);
       pass.dispatchWorkgroups(1);
@@ -203,7 +204,7 @@ export class PickPass {
       pass.dispatchWorkgroups(1);
     }
     pass.end();
-    encoder.copyBufferToBuffer(this.out, C.PICK_NODE_RESULT * 4, slot.buffer, 0, 8);
+    encoder.copyBufferToBuffer(this.out, C.PICK_NODE_RESULT * 4, slot.buffer, 0, 16);
     const picked = (nodes ? PICKED_NODES : 0) | (edges ? PICKED_EDGES : 0);
     slot.busy = true;
     slot.token = req.token * 4 + picked;

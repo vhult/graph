@@ -8,6 +8,38 @@ bandwidth), Edge 153, 1M nodes / 3M edges at fit unless stated.
 
 ---
 
+## 0044 — The hover highlight is one extra draw, fed by the host's index
+
+While a hover handler is set, the engine draws the hovered item again, in
+`hoverStyle`:
+- The hovered node goes on top of all nodes, at its drawn size ×
+  `nodeScale` (default 1.25).
+- The hovered edge goes after all edges and under the nodes, at ×
+  `edgeWidth` (default 2), arrowhead included.
+- Default colour is white. `hoverStyle: false` turns it off.
+
+**Inputs.** The draw takes the host's index and maps it through `rank[]`, and
+edge endpoints come from the CPU mirror. It follows moving nodes and survives a
+re-sort. The pick returns the node's LOD scale, so the highlight matches the
+node as drawn.
+- Setting `STATE_HOVERED` was rejected: it flags the whole chunk as foreground,
+  which draws all 1024 nodes unsampled and shows as a patch at fit.
+- A hover change is one render-only frame, with no compute.
+- Hover clears when the camera moves (nothing is picked then) and is picked
+  again after it settles.
+
+**Measurements.** GPU per render-only frame, mean, camera still.
+- communities 1M: none 3.40 ms, node hovered 3.38, edge hovered 3.34; node
+  draw 1.453 → 1.461 ms.
+- communities 10M: 7.14 / 6.64 / 6.65; node draw 1.058 → 1.070.
+- 30 hover changes gave exactly 30 frames.
+
+**Bench, no handler set,** alternated with the previous commit, 2 runs each:
+- GPU mean: large 4.28 / 4.06 against 4.16 / 4.26 ms; xlarge 11.20 / 11.35
+  against 11.22 / 11.12 ms.
+- The xlarge frame interval is 0.13–0.42 ms higher in both pairs, unexplained
+  by GPU or CPU time.
+
 ## 0043 — Picking is a compute pass over the cull's chunks, not an ID buffer
 
 `on("nodeHover")` and `on("edgeHover")` report the item under the pointer as the

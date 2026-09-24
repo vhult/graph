@@ -133,5 +133,8 @@ fn pick_nodes_resolve(@builtin(local_invocation_index) lid : u32) {
   if (lid == 0u) {
     let r = wgPickBest[0];
     atomicStore(&pickOut[PICK_NODE_RESULT], select(0u, pickOrder[r.y] + 1u, r.x != 0u));
+    let chunks = numChunks();
+    let c = min(r.y / CHUNK_SIZE, max(chunks, 1u) - 1u);
+    atomicStore(&pickOut[PICK_NODE_SCALE], bitcast<u32>(lodScale(lodCount(loadChunkBounds(c, chunks)))));
   }
 }

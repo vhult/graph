@@ -219,8 +219,24 @@ const PICK_EDGE_BEST : u32 = 1u;
 const PICK_NODE_RESULT : u32 = 2u;
 const PICK_EDGE_RESULT : u32 = 3u;
 const PICK_EDGE_COUNT : u32 = 4u;
+const PICK_NODE_SCALE : u32 = 5u;
 const PICK_LIST : u32 = 8u;
 const PICK_FLAG_NODES : u32 = 0x1u;
 const PICK_FLAG_EDGES : u32 = 0x2u;
 const PICK_FLAG_SHAPES : u32 = 0x4u;
 const PICK_FLAG_EDGE_COLORS : u32 = 0x8u;
+const HOVER_FLAG_SHAPES : u32 = 0x1u;
+
+// size 40, align 4
+struct HoverParams {
+  node : u32,                     // @0
+  lodScale : f32,                 // @4
+  nodeGrow : f32,                 // @8
+  nodeColor : u32,                // @12
+  edgeA : u32,                    // @16
+  edgeB : u32,                    // @20
+  edgeStyle : u32,                // @24
+  edgeColor : u32,                // @28
+  edgeWidth : f32,                // @32
+  flags : u32,                    // @36
+}

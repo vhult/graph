@@ -13,6 +13,7 @@ export type {
   GraphEvents,
   GraphOptions,
   GraphStats,
+  HoverStyle,
   LabelSnapshot,
   EdgeData,
   EdgeDebugMode,
