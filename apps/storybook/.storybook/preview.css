@@ -170,3 +170,81 @@ body,
   opacity: 0.6;
   cursor: default;
 }
+
+.doom-panel {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(520px, calc(100% - 32px));
+  max-height: calc(100% - 32px);
+  overflow: auto;
+  padding: 18px 20px;
+  border: 1px solid #5a2a1a;
+  border-radius: 6px;
+  background: rgba(20, 10, 8, 0.95);
+  color: #e8d9cf;
+  font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.doom-panel p {
+  margin: 8px 0;
+}
+
+.doom-panel a {
+  color: #ff9a5a;
+}
+
+.doom-title {
+  color: #ff5a1f;
+  font-size: 22px;
+  font-weight: bold;
+  letter-spacing: 0.2em;
+}
+
+.doom-panel button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 8px 16px;
+  border: 1px solid #ff5a1f;
+  border-radius: 4px;
+  background: #a8300c;
+  color: #fff;
+  font: inherit;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.doom-panel button:disabled {
+  cursor: default;
+}
+
+.doom-spinner {
+  display: none;
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: doom-spin 0.8s linear infinite;
+}
+
+.doom-busy .doom-spinner {
+  display: inline-block;
+}
+
+.doom-status:empty {
+  display: none;
+}
+
+.doom-status {
+  color: #ff8a8a;
+}
+
+@keyframes doom-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

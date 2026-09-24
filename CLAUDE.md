@@ -16,7 +16,7 @@
   - `src/shaders` holds the WGSL sources, grouped by pass, plus the preprocessor.
   - `test` is the Vitest suite. `docs/decisions.md` is the decision log. `scripts` is the build.
 - `packages/bench` has the shared benchmark fixtures (seeded datasets, camera paths, stats). Saved runs go in `results`.
-- `apps/storybook` has the welcome page and the stories (showcase, nodes, edges, stress, developer with the sandbox and the bench, experiments with the galaxy, black hole and ripples), and the HUD.
+- `apps/storybook` has the welcome page and the stories (showcase, nodes, edges, stress, developer with the sandbox and the bench, experiments with the galaxy, black hole, ripples and Doom), and the HUD.
 - `scripts` has the dev server and the GPU, input and image diff tooling.
 
 ## Commands

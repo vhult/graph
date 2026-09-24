@@ -38,7 +38,7 @@ const preview: Preview = {
           "Developer",
           ["Sandbox", "Benchmark", "GPU correctness", "Label correctness", "Label flicker"],
           "Experiments",
-          ["Galaxy", "Black hole", "Ripples"],
+          ["Galaxy", "Black hole", "Ripples", "Doom"],
         ],
       },
     },
