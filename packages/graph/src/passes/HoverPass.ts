@@ -32,6 +32,7 @@ export class HoverPass {
     private readonly layout: GPUBindGroupLayout,
     private readonly nodePipe: GPURenderPipeline,
     private readonly edgePipe: GPURenderPipeline,
+    private readonly edgeVertices: number,
     style: HoverStyleWords,
   ) {
     this.params = device.createBuffer({ label: "hover/params", size: Math.ceil(HOVER_PARAMS.size / 16) * 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
@@ -66,7 +67,7 @@ export class HoverPass {
         primitive: { topology: "triangle-strip" },
       });
     const [nodePipe, edgePipe] = await Promise.all([make("node_vs", "node_fs"), make("edge_vs", "edge_fs")]);
-    return new HoverPass(device, graph, layout, nodePipe, edgePipe, style);
+    return new HoverPass(device, graph, layout, nodePipe, edgePipe, directed ? 10 : 4, style);
   }
 
   setNode(node: number, lodScale: number, shapes: boolean): boolean {
@@ -97,15 +98,15 @@ export class HoverPass {
 
   encodeNode(pass: GPURenderPassEncoder, ctx: FrameContext): void {
     if (this.node < 0 || this.node >= ctx.nodeCount) return;
-    this.draw(pass, ctx, this.nodePipe);
+    this.draw(pass, ctx, this.nodePipe, 4);
   }
 
   encodeEdge(pass: GPURenderPassEncoder, ctx: FrameContext): void {
     if (this.edge < 0 || this.edge >= ctx.edgeCount) return;
-    this.draw(pass, ctx, this.edgePipe);
+    this.draw(pass, ctx, this.edgePipe, this.edgeVertices);
   }
 
-  private draw(pass: GPURenderPassEncoder, ctx: FrameContext, pipe: GPURenderPipeline): void {
+  private draw(pass: GPURenderPassEncoder, ctx: FrameContext, pipe: GPURenderPipeline, vertices: number): void {
     const rank = this.graph.rank;
     if (rank !== this.rank || !this.group) {
       this.rank = rank;
@@ -122,7 +123,7 @@ export class HoverPass {
     pass.setBindGroup(0, ctx.frameBindGroup);
     pass.setBindGroup(1, ctx.graphBindGroup);
     pass.setBindGroup(2, this.group);
-    pass.draw(4);
+    pass.draw(vertices);
   }
 
   destroy(): void {

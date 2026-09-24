@@ -43,6 +43,27 @@ fn arrowFitPx(arrowLen : f32, edgeLenPx : f32) -> f32 {
   return arrowLen * clamp(t, 0.0, 1.0);
 }
 
+fn edgeStripVertices(arrows : bool) -> u32 {
+  return select(4u, 10u, arrows);
+}
+
+fn edgeStripCorner(vi : u32, halfLen : f32, halfWidth : f32, arrowLen : f32) -> vec2<f32> {
+  let capX = halfLen + halfWidth + EDGE_AA_PAD_PX;
+  let lineY = halfWidth + EDGE_AA_PAD_PX;
+  let arrow = arrowLen > 0.0;
+  if (vi >= 4u && !arrow) {
+    return vec2<f32>(capX, lineY);
+  }
+  let baseX = select(capX, halfLen - arrowLen, arrow);
+  if (vi < 5u) {
+    let k = min(vi, 3u);
+    return vec2<f32>(select(-capX, baseX, (k & 1u) != 0u), select(-lineY, lineY, (k >> 1u) != 0u));
+  }
+  let k = select(vi - 6u, 0u, vi == 5u);
+  let boxY = max(lineY, arrowLen * ARROW_HALF_MUL / ARROW_LEN_MUL + EDGE_AA_PAD_PX);
+  return vec2<f32>(select(baseX, halfLen + EDGE_AA_PAD_PX, (k & 1u) != 0u), select(-boxY, boxY, (k >> 1u) != 0u));
+}
+
 /** Farthest an edge of this width draws from its centreline, arrowhead and AA ramp included. */
 fn edgeReachPx(widthPx : f32, arrows : bool) -> f32 {
   let half = max(widthPx, EDGE_MIN_DRAW_WIDTH_PX) * 0.5;
