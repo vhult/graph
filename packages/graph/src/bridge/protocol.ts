@@ -32,6 +32,9 @@ export interface InitOptions {
   labelSize: number;
   labelPadding: number;
   labelFont: string;
+  pickRate: number;
+  pickRadius: number;
+  edgePickRadius: number;
   timeOrigin: number;
 }
 
@@ -66,6 +69,7 @@ export type ToWorker =
   | { t: "render" }
   | { t: "benchmark"; id: number; options: BenchmarkOptions }
   | { t: "labelSnapshot"; id: number }
+  | { t: "pick"; nodes: boolean; edges: boolean }
   | { t: "debug"; level: DebugLevel }
   | { t: "debugRecord"; on: boolean }
   | { t: "destroy" };
@@ -77,6 +81,7 @@ export type FromWorker =
   | { t: "state"; data: Float64Array }
   | { t: "benchmark"; id: number; result: BenchmarkResult }
   | { t: "labelSnapshot"; id: number; snapshot: LabelSnapshot }
+  | { t: "hover"; node?: number; edge?: number }
   | { t: "debugRing"; columns: string[]; gpuGroups: string[]; frames: number; buffer: SharedArrayBuffer | null }
   | { t: "debugRows"; data: Float64Array }
   | { t: "debugTotals"; messages: MessageTotals }

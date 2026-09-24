@@ -205,3 +205,22 @@ const SCRATCH_LIST_COUNT : u32 = 20u;
 const SCRATCH_CHUNKS : u32 = 32u;
 const RADIX_BITS : u32 = 4u;
 const RADIX_BINS : u32 = 16u;
+
+// size 24, align 8
+struct PickParams {
+  pointer : vec2<f32>,            // @0
+  radiusPx : f32,                 // @8
+  flags : u32,                    // @12
+  edgeRadiusPx : f32,             // @16
+}
+
+const PICK_NODE_COUNT : u32 = 0u;
+const PICK_EDGE_BEST : u32 = 1u;
+const PICK_NODE_RESULT : u32 = 2u;
+const PICK_EDGE_RESULT : u32 = 3u;
+const PICK_EDGE_COUNT : u32 = 4u;
+const PICK_LIST : u32 = 8u;
+const PICK_FLAG_NODES : u32 = 0x1u;
+const PICK_FLAG_EDGES : u32 = 0x2u;
+const PICK_FLAG_SHAPES : u32 = 0x4u;
+const PICK_FLAG_EDGE_COLORS : u32 = 0x8u;

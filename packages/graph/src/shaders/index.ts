@@ -9,6 +9,7 @@ import labels from "./common/labels.wgsl";
 import layouts from "./common/layouts.wgsl";
 import morton from "./common/morton.wgsl";
 import nodes from "./common/nodes.wgsl";
+import pick from "./common/pick.wgsl";
 import scan from "./common/scan.wgsl";
 import sdf from "./common/sdf.wgsl";
 import chunkBounds from "./passes/chunk_bounds.wgsl";
@@ -22,6 +23,8 @@ import labelMark from "./passes/label_mark.wgsl";
 import labelPlace from "./passes/label_place.wgsl";
 import labelTree from "./passes/label_tree.wgsl";
 import nodeGeometry from "./passes/node_geometry.wgsl";
+import pickEdges from "./passes/pick_edges.wgsl";
+import pickNodes from "./passes/pick_nodes.wgsl";
 import scatterUpdate from "./passes/scatter_update.wgsl";
 import shuffleChunks from "./passes/shuffle_chunks.wgsl";
 import sort from "./passes/sort.wgsl";
@@ -38,6 +41,7 @@ export const SHADERS: ShaderFs = {
   "common/morton.wgsl": morton,
   "common/scan.wgsl": scan,
   "common/cull_state.wgsl": cullState,
+  "common/pick.wgsl": pick,
   "passes/chunk_bounds.wgsl": chunkBounds,
   "passes/edge_cull.wgsl": edgeCull,
   "passes/edge_expand.wgsl": edgeExpand,
@@ -49,6 +53,8 @@ export const SHADERS: ShaderFs = {
   "passes/label_place.wgsl": labelPlace,
   "passes/label_tree.wgsl": labelTree,
   "passes/node_geometry.wgsl": nodeGeometry,
+  "passes/pick_edges.wgsl": pickEdges,
+  "passes/pick_nodes.wgsl": pickNodes,
   "passes/scatter_update.wgsl": scatterUpdate,
   "passes/shuffle_chunks.wgsl": shuffleChunks,
   "passes/sort.wgsl": sort,

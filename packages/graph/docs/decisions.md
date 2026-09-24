@@ -8,6 +8,54 @@ bandwidth), Edge 153, 1M nodes / 3M edges at fit unless stated.
 
 ---
 
+## 0043 — Picking is a compute pass over the cull's chunks, not an ID buffer
+
+`on("nodeHover")` and `on("edgeHover")` report the item under the pointer as the
+host's own index, mapped through `order[]` / `edgeOrder[]` on the GPU. Each kind
+runs only while it has a handler.
+
+**Nodes.** One workgroup walks the cull's list of visible chunks and keeps those
+whose box contains the pointer. An indirect dispatch then tests the candidates
+with the cull's own `classify`, LOD prefix and labelled rule, the draw's alpha
+and SDF, and the draw-order key.
+
+**Edges.** The same shape over the edge cull's list and keep counts. Before any
+endpoint gather, an 8 B line record per edge (packed normal + offset from the
+chunk centre) rejects the edge. The record is written by `edge_bounds`, and only
+while an edge handler is set.
+
+**Scheduling.**
+- Picks run in their own submission, before the frame.
+- Only once the camera has not changed for 50 ms.
+- At most `pickRate` per second (default 60), again whenever the data changes.
+- An edge is hit within its drawn half-width plus `edgePickRadius` (default
+  4 CSS px, as sigma v4's `edgePickingPadding`); a 1 px edge was impractical to
+  hover. Nodes use `pickRadius` (default 0).
+
+**Measurements.** Radeon 890M, Edge 145, 9 pointers at fit / x10 / x70.
+- GPU per pick at communities 1M: nodes 8–16 µs, edges 6.5–21 µs.
+- At 10M: nodes 11–34 µs, edges 8.6–28 µs.
+- An ID-buffer render into a 1×1 target costs 60 µs – 3.2 ms per pick.
+  - It must redo the vertex work of every drawn item.
+- Scanning the drawn instances needs node ids from the cull: +1–19% on
+  `cull.scatter` every frame.
+- Without the line test, edges cost up to 193 µs at 10M x70: long-edge chunk
+  boxes all contain the pointer.
+- The 8 B record is as fast as 16 B (25 vs 33 µs, fuzzball 201 vs 318) at half
+  the memory, with no miss in 1,800 checks against a full scan and the ID buffer.
+- Latency from pointer event to handler: 4.3 ms p50, 6.2 ms p95. The readback
+  floor is 2.5–3.5 ms; `mapSync` does not lower it.
+  - Submitting behind a frame instead of before it adds 4–8 ms.
+- With no handler set, bench `large` frame 5.10 / 5.14 → 5.04 / 4.77 ms, p95
+  10.08 / 10.50 → 9.83 / 11.44. `xlarge` 12.32 / 12.39 → 12.78 / 12.57, p95
+  19.41 / 19.56 → 20.27 / 19.53. Within run-to-run spread.
+
+**Two bugs the many-pointer runs caught.**
+1. The hit test must use the draw's alpha. Faint sub-pixel nodes were hit but
+   put no pixel there.
+2. The candidate list must be sized to the chunk count. Fuzzball puts 6,000
+   chunks under the pointer.
+
 ## 0042 — Streamed positions upload straight from shared memory
 
 `streamNodePositions()` hands the caller a triple-buffered shared slot; the

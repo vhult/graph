@@ -50,19 +50,26 @@ export class EdgeCullPass implements ComputeNode {
 
   /** Null before the first reserve. */
   outputs: EdgeCullOutputs | null = null;
-  private groups: { state: GPUBindGroup; expand: GPUBindGroup } | null = null;
+  lines: GPUBuffer | null = null;
+  linesReady = false;
+  private linesOn = false;
+  private groups: { state: GPUBindGroup; bounds: GPUBindGroup; expand: GPUBindGroup } | null = null;
   private boundsStale = true;
   private capacity = 0;
   private gx = 0;
   private gy = 0;
+  private readonly dummy: GPUBuffer;
 
   private constructor(
     private readonly device: GPUDevice,
-    private readonly layouts: { state: GPUBindGroupLayout; expand: GPUBindGroupLayout },
+    private readonly layouts: { state: GPUBindGroupLayout; bounds: GPUBindGroupLayout; expand: GPUBindGroupLayout },
     private readonly bounds: GPUComputePipeline,
+    private readonly boundsLines: GPUComputePipeline,
     private readonly cull: GPUComputePipeline,
     private readonly expand: GPUComputePipeline,
-  ) {}
+  ) {
+    this.dummy = device.createBuffer({ label: "edge/lines-dummy", size: 16, usage: GPUBufferUsage.STORAGE });
+  }
 
   static async create(device: GPUDevice, layouts: ContractLayouts, opts: EdgeCullOptions): Promise<EdgeCullPass> {
     const [module, expandModule] = await Promise.all([
@@ -72,6 +79,7 @@ export class EdgeCullPass implements ComputeNode {
     const e = (binding: number, type: GPUBufferBindingType): GPUBindGroupLayoutEntry => ({ binding, visibility: GPUShaderStage.COMPUTE, buffer: { type } });
     const phase = {
       state: device.createBindGroupLayout({ label: "group2/edge-state", entries: [e(0, "storage")] }),
+      bounds: device.createBindGroupLayout({ label: "group2/edge-bounds", entries: [e(0, "storage"), e(1, "storage")] }),
       // Read-only: the same buffer holds the dispatch args this phase runs from.
       expand: device.createBindGroupLayout({ label: "group2/edge-expand", entries: [e(0, "read-only-storage"), e(1, "storage")] }),
     };
@@ -81,8 +89,9 @@ export class EdgeCullPass implements ComputeNode {
         layout: device.createPipelineLayout({ bindGroupLayouts: [layouts.frame, layouts.graph, layout] }),
         compute: { module: m, entryPoint, constants },
       });
-    const [bounds, cull, expand] = await Promise.all([
-      make(module, "edge_bounds", phase.state),
+    const [bounds, boundsLines, cull, expand] = await Promise.all([
+      make(module, "edge_bounds", phase.bounds, { EDGE_LINES: 0 }),
+      make(module, "edge_bounds", phase.bounds, { EDGE_LINES: 1 }),
       make(module, "edge_cull", phase.state, {
         EDGE_ARROWS: opts.directed ? 1 : 0,
         EDGE_MAX_OVERDRAW: opts.maxOverdraw,
@@ -91,7 +100,7 @@ export class EdgeCullPass implements ComputeNode {
       }),
       make(expandModule, "edge_expand", phase.expand),
     ]);
-    return new EdgeCullPass(device, phase, bounds, cull, expand);
+    return new EdgeCullPass(device, phase, bounds, boundsLines, cull, expand);
   }
 
   /** Ensure the buffers fit `edgeCount` edges. Old ones go to `retire`. */
@@ -113,12 +122,42 @@ export class EdgeCullPass implements ComputeNode {
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.INDIRECT | GPUBufferUsage.COPY_SRC,
     });
     const list = this.device.createBuffer({ label: "edge/list", size: listBytes, usage: GPUBufferUsage.STORAGE });
+    this.outputs = { scratch, list };
+    this.capacity = cap;
+    if (this.linesOn) this.allocLines(retire);
+    this.buildGroups();
+    this.boundsStale = true;
+  }
+
+  setLines(on: boolean, retire: (b: GPUBuffer) => void): void {
+    if (on === this.linesOn) return;
+    this.linesOn = on;
+    if (on) this.allocLines(retire);
+    else if (this.lines) {
+      retire(this.lines);
+      this.lines = null;
+      this.linesReady = false;
+    }
+    this.buildGroups();
+    this.boundsStale = true;
+  }
+
+  private allocLines(retire: (b: GPUBuffer) => void): void {
+    if (this.lines) retire(this.lines);
+    this.lines = this.capacity > 0 ? this.device.createBuffer({ label: "edge/lines", size: this.capacity * 8, usage: GPUBufferUsage.STORAGE }) : null;
+    this.linesReady = false;
+  }
+
+  private buildGroups(): void {
+    const out = this.outputs;
+    if (!out) return;
     const group = (layout: GPUBindGroupLayout, buffers: GPUBuffer[]) =>
       this.device.createBindGroup({ layout, entries: buffers.map((buffer, binding) => ({ binding, resource: { buffer } })) });
-    this.outputs = { scratch, list };
-    this.groups = { state: group(this.layouts.state, [scratch]), expand: group(this.layouts.expand, [scratch, list]) };
-    this.capacity = cap;
-    this.boundsStale = true;
+    this.groups = {
+      state: group(this.layouts.state, [out.scratch]),
+      bounds: group(this.layouts.bounds, [out.scratch, this.lines ?? this.dummy]),
+      expand: group(this.layouts.expand, [out.scratch, out.list]),
+    };
   }
 
   phaseActive(phase: number, ctx: FrameContext): boolean {
@@ -138,10 +177,11 @@ export class EdgeCullPass implements ComputeNode {
     pass.setBindGroup(1, ctx.graphBindGroup);
     switch (phase) {
       case 0:
-        pass.setPipeline(this.bounds);
-        pass.setBindGroup(2, g.state);
+        pass.setPipeline(this.lines ? this.boundsLines : this.bounds);
+        pass.setBindGroup(2, g.bounds);
         pass.dispatchWorkgroups(this.gx, this.gy);
         this.boundsStale = false;
+        this.linesReady = this.lines !== null;
         return;
       case 1:
         pass.setPipeline(this.cull);
@@ -159,5 +199,7 @@ export class EdgeCullPass implements ComputeNode {
   destroy(): void {
     this.outputs?.scratch.destroy();
     this.outputs?.list.destroy();
+    this.lines?.destroy();
+    this.dummy.destroy();
   }
 }

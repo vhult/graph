@@ -56,6 +56,7 @@ async function init(msg: Extract<ToWorker, { t: "init" }>): Promise<void> {
       onError: fail,
       onBenchmark: (id, result, transfer) => post({ t: "benchmark", id, result }, transfer),
       onLabelSnapshot: (id, snapshot, transfer) => post({ t: "labelSnapshot", id, snapshot }, transfer),
+      onHover: (node, edge) => post({ t: "hover", node, edge }),
       probeSink: {
         ring: (layout, frames, buffer) => post({ t: "debugRing", columns: layout.columns, gpuGroups: layout.gpuGroups, frames, buffer }),
         rows: (data) => post({ t: "debugRows", data }, [data.buffer as ArrayBuffer]),
@@ -123,6 +124,8 @@ function dispatch(msg: ToWorker): void {
       return e.benchmark(msg.id, msg.options);
     case "labelSnapshot":
       return e.labelSnapshot(msg.id);
+    case "pick":
+      return e.setPicking(msg.nodes, msg.edges);
     case "debug":
       return e.probe.setLevel(msg.level);
     case "debugRecord":

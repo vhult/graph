@@ -13,6 +13,9 @@
 #include "common/scan.wgsl"
 
 @group(2) @binding(0) var<storage, read_write> edgeScratch : array<u32>;
+@group(2) @binding(1) var<storage, read_write> edgeLines : array<vec2<u32>>;
+
+override EDGE_LINES : bool = false;
 
 /** Arrowheads reach past the edge's width; the margin has to cover them. */
 override EDGE_ARROWS : bool = false;
@@ -74,6 +77,8 @@ fn edge_bounds(
   var box = vec4<f32>(vec2<f32>(BIG), vec2<f32>(-BIG));
   var mid = box;
   var len = vec4<f32>(0.0);
+  var lineN : array<vec2<f32>, ITEMS_PER_THREAD>;
+  var lineA : array<vec2<f32>, ITEMS_PER_THREAD>;
   for (var k = 0u; k < ITEMS_PER_THREAD; k++) {
     let e = c * EDGE_CHUNK_SIZE + k * WORKGROUP_SIZE + lid;
     if (e < frame.edgeCount) {
@@ -86,6 +91,11 @@ fn edge_bounds(
       let style = select(0u, edgeStyle[e], e < styles);
       let d = distance(pa, pb);
       len = vec4<f32>(max(len.x, d), max(len.y, f32(style & EDGE_WIDTH_MASK) / f32(EDGE_WIDTH_SCALE)), len.z + d, 0.0);
+      if (EDGE_LINES) {
+        let dir = pb - pa;
+        lineN[k] = select(vec2<f32>(0.0), vec2<f32>(-dir.y, dir.x) / max(d, 1e-30), d > 0.0);
+        lineA[k] = pa;
+      }
     }
   }
   wgBox[lid] = box;
@@ -102,6 +112,16 @@ fn edge_bounds(
       wgLen[lid] = vec4<f32>(max(wgLen[lid].xy, l.xy), wgLen[lid].z + l.z, 0.0);
     }
     workgroupBarrier();
+  }
+  if (EDGE_LINES) {
+    let center = (wgMid[0].xy + wgMid[0].zw) * 0.5;
+    for (var k = 0u; k < ITEMS_PER_THREAD; k++) {
+      let e = c * EDGE_CHUNK_SIZE + k * WORKGROUP_SIZE + lid;
+      if (e < frame.edgeCount) {
+        let packed = pack2x16snorm(lineN[k]);
+        edgeLines[e] = vec2<u32>(packed, bitcast<u32>(dot(unpack2x16snorm(packed), lineA[k] - center)));
+      }
+    }
   }
   if (lid == 0u) {
     // Density of the chunk's length level where it lies: its total length over

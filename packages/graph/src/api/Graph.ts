@@ -39,6 +39,8 @@ const DEFAULT_LABEL_SIZE = 12;
 const DEFAULT_LABEL_PADDING = 2;
 const DEFAULT_LABEL_FONT = "system-ui, -apple-system, 'Segoe UI', sans-serif";
 const DEFAULT_FIT_PADDING = 24;
+const DEFAULT_PICK_RATE = 60;
+const DEFAULT_EDGE_PICK_RADIUS = 4;
 
 type Listener<K extends keyof GraphEvents> = (payload: GraphEvents[K]) => void;
 
@@ -86,6 +88,9 @@ export class Graph {
         labelPadding: Math.max(0, options.labelPadding ?? DEFAULT_LABEL_PADDING),
         labelFont: options.labelFont ?? DEFAULT_LABEL_FONT,
         lodTargetPx: Math.max(0, options.lodTargetPx ?? DEFAULT_LOD_TARGET_PX),
+        pickRate: Math.max(1, options.pickRate ?? DEFAULT_PICK_RATE),
+        pickRadius: Math.max(0, options.pickRadius ?? 0),
+        edgePickRadius: Math.max(0, options.edgePickRadius ?? DEFAULT_EDGE_PICK_RADIUS),
         timeOrigin: performance.timeOrigin,
       },
     };
@@ -140,7 +145,9 @@ export class Graph {
   private benchSeq = 0;
   private benchPending: { id: number; resolve: (r: BenchmarkResult) => void; reject: (e: Error) => void } | null = null;
   private readonly snapshotPending = new Map<number, { resolve: (s: LabelSnapshot) => void; reject: (e: Error) => void }>();
-  private readonly listeners: { [K in keyof GraphEvents]: Set<Listener<K>> } = { error: new Set() };
+  private readonly listeners: { [K in keyof GraphEvents]: Set<Listener<K>> } = { error: new Set(), nodeHover: new Set(), edgeHover: new Set() };
+  private pickingNodes = false;
+  private pickingEdges = false;
   private readonly pointer: PointerInput;
   private readonly resizeObserver: ResizeObserver | null = null;
 
@@ -374,7 +381,20 @@ export class Graph {
 
   on<K extends keyof GraphEvents>(event: K, fn: Listener<K>): () => void {
     this.listeners[event].add(fn);
-    return () => this.listeners[event].delete(fn);
+    this.syncPicking();
+    return () => {
+      this.listeners[event].delete(fn);
+      this.syncPicking();
+    };
+  }
+
+  private syncPicking(): void {
+    const nodes = this.listeners.nodeHover.size > 0;
+    const edges = this.listeners.edgeHover.size > 0;
+    if (this.destroyed || (nodes === this.pickingNodes && edges === this.pickingEdges)) return;
+    this.pickingNodes = nodes;
+    this.pickingEdges = edges;
+    this.send({ t: "pick", nodes, edges });
   }
 
   /** Release the worker, the GPU device and all listeners. Idempotent. */
@@ -452,6 +472,10 @@ export class Graph {
         return;
       case "debugRecording":
         this.debugOverlay?.onRecording(m.columns, m.gpuGroups, m.data, m.rows, m.durationMs, m.messages);
+        return;
+      case "hover":
+        if (m.node !== undefined) for (const fn of this.listeners.nodeHover) fn(m.node < 0 ? null : m.node);
+        if (m.edge !== undefined) for (const fn of this.listeners.edgeHover) fn(m.edge < 0 ? null : m.edge);
         return;
       case "labelSnapshot": {
         const p = this.snapshotPending.get(m.id);

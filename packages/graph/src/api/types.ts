@@ -61,6 +61,9 @@ export interface GraphOptions {
    * sooner (faster, coarser); `0` disables LOD and draws every node. Default: 2.5.
    */
   lodTargetPx?: number;
+  pickRate?: number;
+  pickRadius?: number;
+  edgePickRadius?: number;
 }
 
 export type EdgeDebugMode = "off" | "length" | "thinning" | "chunk";
@@ -287,4 +290,6 @@ export interface DebugRecording {
 
 export interface GraphEvents {
   error: Error;
+  nodeHover: number | null;
+  edgeHover: number | null;
 }
