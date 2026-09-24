@@ -14,9 +14,13 @@ fn pickChunk(c : u32, chunks : u32) -> u32 {
   return bitcast<u32>(count);
 }
 
-fn pickKey(b : u32, c : u32, t : u32, chunks : u32) -> u32 {
+fn pickKey(b : u32, c : u32, t : u32, chunks : u32, i : u32) -> u32 {
   if (b == BUCKET_NORMAL) {
-    return drawIndex(t / DRAW_SEGMENT, c, chunks) * DRAW_SEGMENT + (t % DRAW_SEGMENT) + 1u;
+    let key = drawIndex(t / DRAW_SEGMENT, c, chunks) * DRAW_SEGMENT + (t % DRAW_SEGMENT) + 1u;
+    if ((pick.flags & PICK_FLAG_LAYERS) != 0u) {
+      return key | (nodeLayer(i) << PICK_LAYER_SHIFT);
+    }
+    return key;
   }
   return 0x80000000u | (c * CHUNK_SIZE + t + 1u);
 }
@@ -49,7 +53,7 @@ fn pickNode(c : u32, t : u32, count : f32, chunks : u32) -> vec2<u32> {
   if (base * clamp(0.5 + pick.radiusPx - sd, 0.0, 1.0) < 0.002) {
     return vec2<u32>(0u);
   }
-  return vec2<u32>(pickKey(b, c, t, chunks), i);
+  return vec2<u32>(pickKey(b, c, t, chunks, i), i);
 }
 
 fn pickBetter(a : vec2<u32>, b : vec2<u32>) -> vec2<u32> {

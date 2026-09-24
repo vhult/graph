@@ -3,7 +3,7 @@
  * the render worker and returns. The main thread never touches the GPU.
  */
 import { InputRing } from "../bridge/InputRing";
-import { PositionStream } from "../bridge/PositionStream";
+import { StreamSlots } from "../bridge/StreamSlots";
 import type { FromWorker, ToWorker } from "../bridge/protocol";
 import { createStateBuffer, STATE_SLOT } from "../bridge/SharedState";
 import { DebugOverlay } from "./DebugOverlay";
@@ -22,7 +22,8 @@ import type {
   LabelSnapshot,
   EdgeData,
   NodeData,
-  NodePositionStream,
+  NodeStream,
+  NodeStreamChannels,
   RGBA,
 } from "./types";
 
@@ -214,8 +215,9 @@ export class Graph {
     const colors = data.colors && take(asWords(data.colors), n, "colors", opts, transfer);
     const sizes = data.sizes && take(data.sizes, n, "sizes", opts, transfer);
     const shapes = data.shapes && take(data.shapes, n, "shapes", opts, transfer);
+    const zIndex = data.zIndex && take(data.zIndex, n, "zIndex", opts, transfer);
     this.nodeCount = n;
-    this.send({ t: "nodes", count: n, positions, colors, sizes, shapes }, transfer);
+    this.send({ t: "nodes", count: n, positions, colors, sizes, shapes, zIndex }, transfer);
     if (t0) this.apiEnd("setNodes", t0);
   }
 
@@ -282,21 +284,41 @@ export class Graph {
     this.setNodes({ count: this.nodeCount, shapes }, opts);
   }
 
-  streamNodePositions(): NodePositionStream {
+  setNodeZIndex(zIndex: Uint8Array, opts?: CopyOption): void {
+    this.setNodes({ count: this.nodeCount, zIndex }, opts);
+  }
+
+  streamNodes(channels: NodeStreamChannels): NodeStream {
     const count = this.nodeCount;
+    const positions = channels.positions === true;
+    const colors = channels.colors === true;
+    const zIndex = channels.zIndex === true;
     const ring = this.ring;
     if (!ring) {
-      const positions = new Float32Array(count * 2);
-      return { positions, commit: () => this.updateNodePositions(0, positions, { copy: true }) };
+      const p = new Float32Array(positions ? count * 2 : 0);
+      const c = new Uint32Array(colors ? count : 0);
+      const z = new Uint8Array(zIndex ? count : 0);
+      const commit = (): void => {
+        if (positions) this.updateNodePositions(0, p, { copy: true });
+        if (colors) this.setNodeColors(c, { copy: true });
+        if (zIndex) this.setNodeZIndex(z, { copy: true });
+      };
+      return { positions: p, colors: c, zIndex: z, commit };
     }
-    const stream = PositionStream.create(count);
-    this.send({ t: "positionStream", buffer: stream.buffer, count });
+    const slots = StreamSlots.create(count, positions, colors, zIndex);
+    this.send({ t: "nodeStream", buffer: slots.buffer, count, positions, colors, zIndex });
     return {
       get positions() {
-        return stream.positions;
+        return slots.data.positions;
+      },
+      get colors() {
+        return slots.data.colors;
+      },
+      get zIndex() {
+        return slots.data.zIndex;
       },
       commit: () => {
-        stream.commit();
+        slots.commit();
         if (ring.claimWake()) this.worker.postMessage({ t: "wake" } satisfies ToWorker);
       },
     };

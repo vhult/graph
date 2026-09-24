@@ -14,6 +14,7 @@ export interface PickRequest {
   nodes: boolean;
   edges: boolean;
   shapes: boolean;
+  layers: boolean;
   edgeColors: boolean;
   token: number;
 }
@@ -170,7 +171,7 @@ export class PickPass {
     this.paramF32[2] = req.radiusPx;
     this.paramF32[4] = req.edgeRadiusPx;
     this.paramU32[3] =
-      (nodes ? C.PICK_FLAG_NODES : 0) | (edges ? C.PICK_FLAG_EDGES : 0) | (req.shapes ? C.PICK_FLAG_SHAPES : 0) | (req.edgeColors ? C.PICK_FLAG_EDGE_COLORS : 0);
+      (nodes ? C.PICK_FLAG_NODES : 0) | (edges ? C.PICK_FLAG_EDGES : 0) | (req.shapes ? C.PICK_FLAG_SHAPES : 0) | (req.layers ? C.PICK_FLAG_LAYERS : 0) | (req.edgeColors ? C.PICK_FLAG_EDGE_COLORS : 0);
     this.device.queue.writeBuffer(this.params, 0, this.paramData);
 
     const p = this.pipelines;

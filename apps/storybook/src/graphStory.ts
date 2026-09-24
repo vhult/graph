@@ -16,7 +16,7 @@ import type { EdgeDebugMode, Graph, GraphOptions } from "@vhult/graph";
 import type { GraphDataset } from "@vhult/graph-bench";
 import type { Loaded } from "./data";
 import type { Hud } from "./hud";
-import { stage, type StoryContext } from "./stage";
+import { stage, toggles, type StoryContext } from "./stage";
 
 export interface GraphArgs {
   nodes: number;
@@ -104,7 +104,7 @@ export function graphArgTypes<A extends GraphArgs>(sizes: readonly number[], own
     nodes: countControl(sizes),
     ...own,
     seed: { control: { type: "number", min: 1, step: 1 } },
-    edges: { control: "boolean" },
+    edges: { table: { disable: true } },
     edgeColor: { control: "inline-radio", options: ["tint", "nodes"] },
     edgeWidth: { control: { type: "range", min: 0.25, max: 6, step: 0.25 } },
     edgeAlpha: { control: { type: "range", min: 0.01, max: 1, step: 0.01 } },
@@ -113,7 +113,7 @@ export function graphArgTypes<A extends GraphArgs>(sizes: readonly number[], own
     edgeDebug: { control: "inline-radio", options: ["off", "length", "thinning", "chunk"] },
     nodeScale: { control: { type: "range", min: 0.1, max: 4, step: 0.1 } },
     lodTargetPx: { control: { type: "range", min: 0, max: 8, step: 0.5 } },
-    labels: { control: "boolean" },
+    labels: { table: { disable: true } },
   } as Partial<ArgTypes<A>>;
 }
 
@@ -129,8 +129,10 @@ export function renderGraph<A extends GraphArgs>(spec: GraphStory<A>) {
     if (!spec.gate) return load(a);
     void spec.gate(graph, a, root!).then((b) => b && load(b));
   };
-  return (args: A, ctx: StoryContext): HTMLElement =>
-    stage(args, ctx, {
+  return (story: A, ctx: StoryContext): HTMLElement => {
+    const t = toggles(ctx);
+    const args: A = { ...story, labels: t.labels, edges: t.edges && story.edges };
+    return stage(args, ctx, {
       options: (a) => ({
         edgeWidth: a.edgeWidth,
         edgeColor: [...EDGE_TINT, a.edgeAlpha],
@@ -156,6 +158,7 @@ export function renderGraph<A extends GraphArgs>(spec: GraphStory<A>) {
       },
       dispose: spec.dispose,
     });
+  };
 }
 
 function upload<A extends GraphArgs>(graph: Graph, a: A, hud: Hud, spec: GraphStory<A>, withNodes: boolean, root: HTMLElement): void {

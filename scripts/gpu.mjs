@@ -13,7 +13,10 @@ const DEFAULT_WINDOW = "2418x1112";
 const EDGE_CANDIDATES = [
   "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
   "C:/Program Files/Microsoft/Edge/Application/msedge.exe",
+  "/usr/bin/microsoft-edge",
 ];
+
+const PLATFORM_FLAGS = process.platform === "linux" ? ["--enable-features=Vulkan", "--use-angle=vulkan"] : [];
 
 const STORY = {
   bench: "developer-benchmark--benchmark",
@@ -132,6 +135,7 @@ async function launchEdge(windowSize) {
       "--no-first-run",
       "--no-default-browser-check",
       "--disable-extensions",
+      ...PLATFORM_FLAGS,
       "about:blank",
     ],
     { stdio: "ignore" },
@@ -183,6 +187,7 @@ class Cdp {
     const target = await r.json();
     const cdp = new Cdp();
     await cdp.#connect(target.webSocketDebuggerUrl, verbose);
+    await cdp.send("Page.navigate", { url });
     return cdp;
   }
 
@@ -420,10 +425,10 @@ async function cmdCorrectness(opts) {
 
 async function cmdEval(opts) {
   const file = opts._[1];
-  if (!file) throw new Error("usage: node scripts/gpu.mjs eval <file.js> [--story <id>]");
+  if (!file) throw new Error("usage: node scripts/gpu.mjs eval <file.js> [--story <id>] [--args ...]");
   const { readFileSync } = await import("node:fs");
   const source = readFileSync(resolve(file), "utf8");
-  const path = typeof opts.story === "string" ? storyPath(opts.story) : BLANK_PATH;
+  const path = typeof opts.story === "string" ? storyPath(opts.story, typeof opts.args === "string" ? opts.args : null) : BLANK_PATH;
   return withPage(path, opts, (cdp, timeout) => cdp.evaluate(`(async () => {\n${source}\n})()`, timeout));
 }
 

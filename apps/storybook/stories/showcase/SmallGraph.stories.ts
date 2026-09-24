@@ -93,7 +93,7 @@ const meta: Meta<Args> = {
     load: () => ({ data: DEMO.graph, genMs: 0 }),
     labels: () => DEMO.labels,
     // Arrowheads are compiled into the edge shader, so this is an engine option.
-    options: (a) => ({ directedEdges: a.directed, nodeDrag: true }),
+    options: (a) => ({ directedEdges: a.directed }),
     edgeStyle: (a) => (a.directed ? EDGE_DIRECTED : undefined),
     onLoad: (graph, _g, _a, root) =>
       showReadout(graph, root, {
@@ -102,8 +102,8 @@ const meta: Meta<Args> = {
       }),
   }),
   argTypes: graphArgTypes<Args>([NODES], { directed: { control: "boolean" } }),
-  args: { nodes: NODES, directed: true, ...GRAPH_ARGS, edgeColor: "nodes", edgeWidth: 1.5, edgeAlpha: 0.8, labels: true },
-  parameters: { controls: { include: ["directed", "labels"] } },
+  args: { nodes: NODES, directed: true, ...GRAPH_ARGS, edgeColor: "nodes", edgeWidth: 1.5, edgeAlpha: 0.8 },
+  parameters: { controls: { include: ["directed"] } },
 };
 
 export default meta;

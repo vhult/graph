@@ -101,9 +101,9 @@ Everything is typed; the `.d.ts` files document each option and method.
 |---|---|
 | `Graph.create(canvas, options?)` | Start the engine. Rejects with `UnsupportedError` when WebGPU or `OffscreenCanvas` is missing |
 | `setNodes`, `setEdges` | Bulk-load typed arrays (set nodes first, then edges) |
-| `setNodePositions`, `setNodeColors`, `setNodeSizes`, `setNodeShapes`, `setNodeCount` | Replace one node channel. Shapes are `NodeShape.circle`, `square` or `hexagon` |
+| `setNodePositions`, `setNodeColors`, `setNodeSizes`, `setNodeShapes`, `setNodeZIndex`, `setNodeCount` | Replace one node channel. Shapes are `NodeShape.circle`, `square` or `hexagon`; z-index goes from 0 (bottom) to 15 (top) |
 | `updateNodePositions`, `updateNodeColor` | Partial updates |
-| `streamNodePositions()` | Write every position each frame from your own loop, then `commit()` |
+| `streamNodes({ positions, colors, zIndex })` | Write every position, colour and/or z-index each frame from your own loop, then `commit()`; they arrive in the same frame |
 | `setNodeLabels`, `setEdgeLabels` | Label text, placed without overlap |
 | `setBackground`, `setNodeScale` | Style |
 | `setNodeDrag(enabled)` | Turn node dragging on or off (also the `nodeDrag` option) |

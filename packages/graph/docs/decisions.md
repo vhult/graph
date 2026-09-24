@@ -8,6 +8,66 @@ bandwidth), Edge 153, 1M nodes / 3M edges at fit unless stated.
 
 ---
 
+## 0049 — Streamed z-index is merged into the style words on the GPU
+
+`streamNodes({ zIndex })` carries one byte per node in the shared slot. The
+worker uploads the bytes as they are (1 MB at 1M nodes) and one kernel writes
+each layer into the style word of its node in engine order; the store copy is
+brought up to date only when a later `setNodes` needs it. Packing the bytes
+into the style words in the worker first cost 1.8–2.1 ms of worker CPU a frame
+at 1M. 1M communities, a new z-index every frame, AMD Radeon 890M, Edge 145
+headless, three runs: worker CPU 0.21–0.24 ms streamed against 0.41–0.43 ms
+through `setNodeZIndex` (whose packing also runs in the message handler,
+outside the frame, and allocates 1 MB on the main thread each frame); GPU
+5.55–5.68 ms against 4.97–5.08 ms, the merge's scattered reads. The galaxy's
+position stream is unchanged: GPU 4.69–4.75 → 4.65–4.74 ms.
+
+---
+
+## 0048 — Z-index is a counting sort of the visible nodes by layer
+
+Nodes take a z-index from 0 to 15 in the 4 layer bits the style word already
+reserved. The cull packs the layer into bits 4–7 of the instance radius, next to
+the shape. When any node has a layer, NODE_ORDER sorts the NORMAL bucket with a
+16-bin counting sort sized by the visible count the cull left on the GPU: count
+per block, one scan, then each instance is written straight into a second
+buffer that the NORMAL draw reads. Blocks past the visible count exit at once.
+It is stable, so equal layers keep the draw order of 0020. Picking puts the
+layer above the draw position in its key. With no layer set nothing runs and
+nothing is allocated. AMD Radeon 890M, Edge 145 headless, 1M communities, a
+random layer on every node, median of 3. Fit (280k visible): order 0.24 ms,
+GPU 2.95 → 4.19 ms. Zoomed (499 visible): order 0.05 ms, GPU 0.60 → 0.65 ms.
+The draw itself costs ~1 ms more at fit in every variant tried: it comes from
+the layer order, not the extra buffer. Rejected, same runs: the shared radix
+sort over all nodes with a key pass and a gather (order 1.04 ms fit, 0.54 ms
+zoomed, GPU 5.12 / 1.16 ms); the layer as a cull cell, which made the count
+step write 16 × 64 far-apart cells per chunk even for hidden chunks (cull
+0.38 → 1.88 ms fit, 0.08 → 1.07 ms zoomed); a depth buffer, as soft edges and
+see-through nodes would cut holes in what is behind them. Bench large /
+large-zoom without z-index, GPU mean 3.90 → 3.75 ms and 6.08 → 6.19 ms.
+
+---
+
+## 0047 — One node stream, and each node channel marks only what it changes
+
+`setNodes` builds its dirty flags from a table, one row per channel: a new
+count, positions, sizes or shapes rebuild the nodes; colours only mark the
+style. Only a rebuild counts as new data, so colour updates no longer clear the
+hover or throw away the pick in flight: sending colours every frame had stopped
+hover entirely. `streamNodes({ positions, colors })` replaces
+`streamNodePositions`: one triple-buffered shared slot (0042) holds the channels
+asked for, so they arrive in the same frame, each through the same scatter
+upload as before. A stream is taken only when none of its channels has a
+pending partial update, so the two never share a staging buffer in one frame.
+AMD Radeon 890M, Edge 145 headless, 8 s runs. Hover events with the pointer
+moving over Ripples 100k, one run each: 0 before, 130 after. Galaxy 1M
+positions, median of 3, worker CPU mean / p95 0.65 / 0.87 → 0.67 / 0.94 ms, GPU
+5.11 → 5.11 ms. Ripples 1M colours, median of 3, frame mean / p95 22.02 / 30.23
+ms (`setNodeColors` every frame) → 20.84 / 26.93 ms; that frame is bound by the
+story's own simulation on the main thread.
+
+---
+
 ## 0046 — Arrowheads shrink away on short edges
 
 An arrowhead used to shrink to half the visible edge, so at fit every short

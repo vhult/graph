@@ -10,7 +10,7 @@
 import { GraphError } from "../api/errors";
 import type { BenchmarkOptions, BenchmarkResult, CameraView, GraphCaps, LabelSnapshot, RGBA } from "../api/types";
 import { INPUT, type InputRing, type InputRecord } from "../bridge/InputRing";
-import type { PositionStream } from "../bridge/PositionStream";
+import type { StreamSlots } from "../bridge/StreamSlots";
 import type { DragEventName, InitOptions } from "../bridge/protocol";
 import { STATE_SLOT } from "../bridge/SharedState";
 import { Camera2D } from "../camera/Camera2D";
@@ -34,6 +34,7 @@ import { PICKED_EDGES, PICKED_NODES, PickPass, type PickRequest } from "../passe
 import { EdgeGeometryPass } from "../passes/EdgeGeometryPass";
 import { EdgeSortPass } from "../passes/EdgeSortPass";
 import { NodeGeometryPass } from "../passes/NodeGeometryPass";
+import { NodeOrderPass } from "../passes/NodeOrderPass";
 import { SortPass } from "../passes/SortPass";
 import { TransformCullPass } from "../passes/TransformCullPass";
 import { UploadPass } from "../passes/UploadPass";
@@ -64,6 +65,7 @@ export interface EngineInit {
 
 interface Passes {
   cull: TransformCullPass;
+  order: NodeOrderPass;
   nodes: NodeGeometryPass;
   edges: EdgeGeometryPass;
   edgeCull: EdgeCullPass;
@@ -76,6 +78,13 @@ const FIT_PADDING_CSS_PX = 24;
 const BENCH_TIMING = { off: 0, passes: 1, full: 2 } as const;
 const CAMERA_SETTLE_MS = 50;
 const CLICK_SLOP_CSS_PX = 3;
+const NODE_DIRTY = [
+  ["positions", Dirty.TOPOLOGY],
+  ["sizes", Dirty.TOPOLOGY],
+  ["shapes", Dirty.TOPOLOGY],
+  ["colors", Dirty.STYLE],
+  ["zIndex", Dirty.STYLE],
+] as const satisfies readonly (readonly [keyof NodeArrays, number])[];
 const PICK_DIRTY = Dirty.TOPOLOGY | Dirty.POSITIONS | Dirty.MOVED | Dirty.CAMERA | Dirty.STYLE | Dirty.STATE | Dirty.RESIZE | Dirty.EDGES | Dirty.LABELLED;
 
 /** Straight-alpha RGBA in 0..1 to an rgba8unorm word (R in the low byte). */
@@ -103,8 +112,10 @@ export class Engine {
 
   private dirty = Dirty.RESIZE;
   private framePending = false;
-  private stream: PositionStream | null = null;
-  private streamed: Float32Array | null = null;
+  private stream: StreamSlots | null = null;
+  private streamedPositions: Float32Array | null = null;
+  private streamedColors: Uint32Array | null = null;
+  private streamedZIndex: Uint8Array | null = null;
   /** performance.now() of the previous tick, for the zoom glide. */
   private lastTickMs = 0;
   private frameIndex = 0;
@@ -151,7 +162,7 @@ export class Engine {
   private frameGen = -1;
   private hoverNode = -1;
   private hoverEdge = -1;
-  private readonly pickRequest: PickRequest = { x: 0, y: 0, radiusPx: 0, edgeRadiusPx: 0, nodes: false, edges: false, shapes: false, edgeColors: false, token: 0 };
+  private readonly pickRequest: PickRequest = { x: 0, y: 0, radiusPx: 0, edgeRadiusPx: 0, nodes: false, edges: false, shapes: false, layers: false, edgeColors: false, token: 0 };
 
   private constructor(
     private readonly gpu: Gpu,
@@ -258,11 +269,14 @@ export class Engine {
       EdgeCullPass.create(device, layouts, edgeOpts),
       EdgeGeometryPass.create(device, format, layouts, edgeOpts),
     ]);
+    const order = await NodeOrderPass.create(device, cull, (b) => graph.retireAfterSubmit(b));
+    nodes.order = order;
     // Compute runs in stage order: upload, node sort, edge sort, node cull, edge cull.
     frameGraph.addCompute(new UploadPass(graph));
     frameGraph.addCompute(sort);
     frameGraph.addCompute(edgeSort);
     frameGraph.addCompute(cull);
+    frameGraph.addCompute(order);
     frameGraph.addCompute(edgeCull);
     const labelState = new Labels(device, { sizeCssPx: init.options.labelSize, paddingCssPx: init.options.labelPadding, font: init.options.labelFont });
     const [labels, labelDraw] = await Promise.all([
@@ -273,7 +287,7 @@ export class Engine {
     frameGraph.addRender(edges);
     frameGraph.addRender(nodes);
     frameGraph.addRender(labelDraw);
-    return new Engine(gpu, store, graph, profiler, frameGraph, { cull, nodes, edges, edgeCull, labels }, layouts, init, labelState);
+    return new Engine(gpu, store, graph, profiler, frameGraph, { cull, order, nodes, edges, edgeCull, labels }, layouts, init, labelState);
   }
 
   // ---- API (called from worker message dispatch) ----------------------------
@@ -292,13 +306,17 @@ export class Engine {
   }
 
   setNodes(count: number, arrays: NodeArrays): void {
-    this.press.cancel();
-    if (!arrays.positions) this.syncStreamed();
-    this.streamed = null;
+    let dirty = count !== this.store.nodeCount ? Dirty.TOPOLOGY : 0;
+    for (const [k, flag] of NODE_DIRTY) if (arrays[k]) dirty |= flag;
+    const topology = (dirty & Dirty.TOPOLOGY) !== 0;
+    if (topology) this.press.cancel();
+    this.syncStreamed(arrays);
     this.store.setNodes(count, arrays);
-    this.labels.setNodeCount(count);
-    this.newData();
-    this.markDirty(Dirty.TOPOLOGY);
+    if (topology) {
+      this.labels.setNodeCount(count);
+      this.newData();
+    }
+    this.markDirty(dirty);
   }
 
   setEdges(count: number, arrays: EdgeArrays): void {
@@ -460,6 +478,7 @@ export class Engine {
     req.nodes = nodes;
     req.edges = edges;
     req.shapes = this.store.hasNodeShapes;
+    req.layers = this.store.hasZLayers;
     req.edgeColors = this.store.hasEdgeColors;
     req.token = token;
     const device = this.gpu.device;
@@ -489,7 +508,7 @@ export class Engine {
   };
 
   private startDrag(node: number, nodeScale: number): void {
-    const pos = this.streamed ?? (this.store.channels.nodePos.data as Float32Array);
+    const pos = this.streamedPositions ?? (this.store.channels.nodePos.data as Float32Array);
     const x = pos[node * 2]!;
     const y = pos[node * 2 + 1]!;
     this.camera.screenToWorld(this.press.x, this.press.y, this.world);
@@ -574,24 +593,49 @@ export class Engine {
     this.markDirty(Dirty.POSITIONS);
   }
 
-  setPositionStream(stream: PositionStream): void {
+  setStream(stream: StreamSlots): void {
     this.stream = stream;
     this.wake();
   }
 
   private takeStream(): number {
     const s = this.stream;
-    if (!s || !s.pending || s.count !== this.store.nodeCount || !this.graph.canStream(s.count)) return 0;
-    const data = s.take()!;
-    this.streamed = data;
-    this.dirty |= Dirty.POSITIONS;
-    return this.graph.streamPositions(data);
+    const n = this.store.nodeCount;
+    if (!s || !s.pending || s.count !== n) return 0;
+    if ((s.positions && !this.graph.canStream("nodePos", n)) || (s.colors && !this.graph.canStream("nodeColor", n))) return 0;
+    if (s.zIndex && !this.graph.canStream("nodeStyle", n)) return 0;
+    const slot = s.take()!;
+    let bytes = 0;
+    if (s.positions) {
+      this.streamedPositions = slot.positions;
+      this.dirty |= Dirty.POSITIONS;
+      bytes += this.graph.streamChannel("nodePos", slot.positions);
+    }
+    if (s.colors) {
+      this.streamedColors = slot.colors;
+      this.dirty |= Dirty.STYLE;
+      bytes += this.graph.streamChannel("nodeColor", slot.colors);
+    }
+    if (s.zIndex) {
+      this.streamedZIndex = slot.zIndex;
+      this.store.hasZLayers = true;
+      this.dirty |= Dirty.STYLE;
+      bytes += this.graph.streamLayers(slot.zWords);
+    }
+    return bytes;
   }
 
-  private syncStreamed(): void {
-    if (!this.streamed) return;
-    if (this.streamed.length === this.store.nodeCount * 2) this.store.updatePositions(0, this.streamed);
-    this.streamed = null;
+  private syncStreamed(arrays: NodeArrays): void {
+    const n = this.store.nodeCount;
+    const p = this.streamedPositions;
+    if (p && !arrays.positions && p.length === n * 2) this.store.updatePositions(0, p);
+    const c = this.streamedColors;
+    if (c && !arrays.colors && c.length === n) this.store.updateColors(0, c);
+    const z = this.streamedZIndex;
+    if (z && !arrays.zIndex && z.length === n) this.store.syncZIndex(z);
+    this.streamedPositions = null;
+    this.streamedColors = null;
+    this.streamedZIndex = null;
   }
 
   updateColor(index: number, rgba: number): void {
@@ -675,6 +719,7 @@ export class Engine {
     this.hover?.destroy();
     this.probe.destroy();
     this.passes.cull.destroy();
+    this.passes.order.destroy();
     this.passes.edgeCull.destroy();
     this.passes.labels.destroy();
     this.labels.destroy();
@@ -776,6 +821,9 @@ export class Engine {
     this.passes.edges.perEdgeStyle = this.store.hasEdgeStyles;
     this.passes.edges.perEdgeColor = this.store.hasEdgeColors;
     this.passes.cull.shapes = this.store.hasNodeShapes;
+    this.passes.cull.layers = this.store.hasZLayers;
+    this.passes.order.layers = this.store.hasZLayers;
+    this.passes.nodes.layers = this.store.hasZLayers;
     this.passes.nodes.shapes = this.store.hasNodeShapes;
     this.passes.edges.shapes = this.store.hasNodeShapes;
 

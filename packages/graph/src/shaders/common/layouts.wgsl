@@ -48,6 +48,8 @@ const STYLE_SHAPE_MASK : u32 = 0xFFu;
 const STYLE_ICON_SHIFT : u32 = 8u;
 const STYLE_ICON_MASK : u32 = 0xFFFFu;
 const STYLE_ZLAYER_SHIFT : u32 = 24u;
+const STYLE_ZLAYER_MASK : u32 = 0xFu;
+const Z_LAYERS : u32 = 16u;
 const STYLE_FLAGS_SHIFT : u32 = 28u;
 const STYLE_FLAG_RING : u32 = 0x10000000u;
 const STYLE_FLAG_LABEL : u32 = 0x20000000u;
@@ -57,6 +59,8 @@ const SHAPE_CIRCLE : u32 = 0u;
 const SHAPE_SQUARE : u32 = 1u;
 const SHAPE_HEXAGON : u32 = 2u;
 const INSTANCE_SHAPE_BITS : u32 = 15u;
+const INSTANCE_LAYER_SHIFT : u32 = 4u;
+const INSTANCE_LAYER_BITS : u32 = 240u;
 const EDGE_WIDTH_MASK : u32 = 0xFFu;
 const EDGE_CURVE_SHIFT : u32 = 8u;
 const EDGE_CURVE_MASK : u32 = 0xFu;
@@ -84,7 +88,7 @@ override USER_WORDS : u32 = 0u;
 // size 16, align 8
 struct NodeInstance {
   screenPos : vec2<f32>,          // @0  device px
-  radiusPx : f32,                 // @8  projected radius, device px; low INSTANCE_SHAPE_BITS mantissa bits hold the shape
+  radiusPx : f32,                 // @8  projected radius, device px; low INSTANCE_SHAPE_BITS mantissa bits hold the shape, INSTANCE_LAYER_BITS the z layer
   color : u32,                    // @12  rgba8unorm
 }
 
@@ -230,6 +234,8 @@ const PICK_FLAG_NODES : u32 = 0x1u;
 const PICK_FLAG_EDGES : u32 = 0x2u;
 const PICK_FLAG_SHAPES : u32 = 0x4u;
 const PICK_FLAG_EDGE_COLORS : u32 = 0x8u;
+const PICK_FLAG_LAYERS : u32 = 0x10u;
+const PICK_LAYER_SHIFT : u32 = 27u;
 const HOVER_FLAG_SHAPES : u32 = 0x1u;
 
 // size 40, align 4

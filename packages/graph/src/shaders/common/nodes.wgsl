@@ -30,3 +30,11 @@ fn packInstanceShape(radiusPx : f32, shape : u32) -> f32 {
 fn instanceShape(radiusPx : f32) -> u32 {
   return bitcast<u32>(radiusPx) & INSTANCE_SHAPE_BITS;
 }
+
+fn nodeLayer(i : u32) -> u32 {
+  return (nodeStyle[i] >> STYLE_ZLAYER_SHIFT) & STYLE_ZLAYER_MASK;
+}
+
+fn packInstanceLayer(radiusPx : f32, layer : u32) -> f32 {
+  return bitcast<f32>((bitcast<u32>(radiusPx) & ~INSTANCE_LAYER_BITS) | ((layer << INSTANCE_LAYER_SHIFT) & INSTANCE_LAYER_BITS));
+}

@@ -6,8 +6,8 @@
  * strings or objects; node identity is the index.
  */
 import { DirtyRanges } from "./DirtyRanges";
-import { DEFAULT_NODE_STYLE, GRAPH_BINDINGS, GRAPH_BUFFER_WORDS, type GraphBufferName } from "./Layouts";
-import { packNodeShapes, packNodeSizes, toHalfBits } from "./Pack";
+import { CONSTANTS, DEFAULT_NODE_STYLE, GRAPH_BINDINGS, GRAPH_BUFFER_WORDS, type GraphBufferName } from "./Layouts";
+import { packNodeSizes, packNodeStyle, toHalfBits } from "./Pack";
 
 export interface Channel {
   /** CPU mirror, `elementCount * words` 32-bit words. */
@@ -32,6 +32,7 @@ export interface NodeArrays {
   colors?: Uint32Array;
   sizes?: Float32Array;
   shapes?: Uint8Array;
+  zIndex?: Uint8Array;
 }
 
 export interface EdgeArrays {
@@ -51,6 +52,7 @@ export class GraphStore {
   /** Per-edge colours were supplied; otherwise every edge uses the global tint. */
   hasEdgeColors = false;
   hasNodeShapes = false;
+  hasZLayers = false;
   maxNodeSize = 0;
   /** Label text per node / edge, in the user's order; null when none were set. */
   nodeLabels: readonly string[] | null = null;
@@ -104,9 +106,10 @@ export class GraphStore {
       if (grown) this.maxNodeSize = Math.max(this.maxNodeSize, DEFAULT_NODE_SIZE);
     }
 
-    if (arrays.shapes) {
-      this.replace(ch.nodeStyle, packNodeShapes(arrays.shapes, new Uint32Array(count)));
-      this.hasNodeShapes = arrays.shapes.some((s) => s !== 0);
+    if (arrays.shapes || arrays.zIndex) {
+      this.replace(ch.nodeStyle, packNodeStyle(count, ch.nodeStyle.data as Uint32Array, arrays.shapes, arrays.zIndex));
+      if (arrays.shapes) this.hasNodeShapes = arrays.shapes.some((s) => s !== 0);
+      if (arrays.zIndex) this.hasZLayers = arrays.zIndex.some((z) => z !== 0);
     } else if (resized) this.replace(ch.nodeStyle, resizeU32(ch.nodeStyle.data as Uint32Array, count, DEFAULT_NODE_STYLE));
 
     if (resized) this.replace(ch.nodeState, resizeU32(ch.nodeState.data as Uint32Array, count, 0));
@@ -162,6 +165,27 @@ export class GraphStore {
     if (start + count > this.nodeCount) throw new RangeError("updatePositions: range exceeds node count");
     (pos.data as Float32Array).set(data, start * 2);
     this.markRange(pos, start, start + count);
+  }
+
+  syncZIndex(zIndex: Uint8Array): void {
+    const { STYLE_ZLAYER_SHIFT, STYLE_ZLAYER_MASK } = CONSTANTS;
+    const style = this.channels.nodeStyle.data as Uint32Array;
+    const keep = ~(STYLE_ZLAYER_MASK << STYLE_ZLAYER_SHIFT);
+    let any = 0;
+    for (let i = 0; i < style.length; i++) {
+      const z = zIndex[i]!;
+      const layer = z > STYLE_ZLAYER_MASK ? STYLE_ZLAYER_MASK : z;
+      any |= layer;
+      style[i] = (style[i]! & keep) | (layer << STYLE_ZLAYER_SHIFT);
+    }
+    this.hasZLayers = any !== 0;
+  }
+
+  updateColors(start: number, data: Uint32Array): void {
+    const ch = this.channels.nodeColor;
+    if (start + data.length > this.nodeCount) throw new RangeError("updateColors: range exceeds node count");
+    (ch.data as Uint32Array).set(data, start);
+    this.markRange(ch, start, start + data.length);
   }
 
   growBounds(x: number, y: number): void {

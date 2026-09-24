@@ -26,7 +26,19 @@ export interface StageSpec<A> {
 export interface StoryContext {
   id: string;
   viewMode?: string;
-  globals?: { hud?: string };
+  globals?: { hud?: string; drag?: string; hover?: string; labels?: string; edges?: string };
+}
+
+export interface Toggles {
+  drag: boolean;
+  hover: boolean;
+  labels: boolean;
+  edges: boolean;
+}
+
+export function toggles(context: StoryContext): Toggles {
+  const g = context.globals ?? {};
+  return { drag: g.drag === "on", hover: g.hover !== "off", labels: g.labels === "on", edges: g.edges !== "off" };
 }
 
 interface Current {
@@ -38,6 +50,7 @@ interface Current {
   ready: Promise<Graph | null>;
   hud: Hud;
   hudOn: boolean;
+  drag: boolean;
   dispose?: () => void;
 }
 
@@ -50,8 +63,11 @@ let current: Current | null = null;
 
 /** `context` is the Storybook story context; only its id and globals are used. */
 export function stage<A>(args: A, context: StoryContext, spec: StageSpec<A>): HTMLElement {
-  const options = spec.options?.(args) ?? {};
-  const optionsKey = JSON.stringify(options);
+  const own = spec.options?.(args) ?? {};
+  const t = toggles(context);
+  const drag = own.nodeDrag ?? t.drag;
+  const options: GraphOptions = { ...own, nodeDrag: drag, hoverStyle: t.hover ? own.hoverStyle : false };
+  const optionsKey = JSON.stringify({ ...options, nodeDrag: undefined });
   const embed = context.viewMode === "docs";
   const hudOn = !embed && context.globals?.hud !== "off";
 
@@ -61,6 +77,8 @@ export function stage<A>(args: A, context: StoryContext, spec: StageSpec<A>): HT
     cur.args = args;
     cur.hudOn = hudOn;
     if (cur.graph) setDebug(cur.graph, hudOn);
+    if (cur.graph && cur.drag !== drag) cur.graph.setNodeDrag(drag);
+    cur.drag = drag;
     void cur.ready.then((g) => g && cur === current && spec.update?.(g, args, prev, cur.hud));
     return cur.root;
   }
@@ -74,7 +92,7 @@ export function stage<A>(args: A, context: StoryContext, spec: StageSpec<A>): HT
   const hud = new Hud(root);
 
   const errors: string[] = [];
-  const cur: Current = { storyId: context.id, root, optionsKey, args, graph: null, ready: Promise.resolve(null), hud, hudOn, dispose: spec.dispose };
+  const cur: Current = { storyId: context.id, root, optionsKey, args, graph: null, ready: Promise.resolve(null), hud, hudOn, drag, dispose: spec.dispose };
   current = cur;
 
   // Create after the element is in the DOM so the canvas has a real size.

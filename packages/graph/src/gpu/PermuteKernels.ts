@@ -20,8 +20,16 @@ export interface ScatterSlot {
   key: readonly GPUBuffer[];
 }
 
+export interface LayerSlot {
+  params: GPUBuffer;
+  upload: GPUBuffer | null;
+  bindGroup: GPUBindGroup | null;
+  key: readonly GPUBuffer[];
+}
+
 export class PermuteKernels {
   private readonly gatherLayout: GPUBindGroupLayout;
+  private readonly mergeLayout: GPUBindGroupLayout;
   private readonly composeLayout: GPUBindGroupLayout;
   private readonly scatterLayout: GPUBindGroupLayout;
   private readonly params = new Uint32Array(4);
@@ -32,7 +40,10 @@ export class PermuteKernels {
     private readonly gatherPipe: GPUComputePipeline,
     private readonly composePipe: GPUComputePipeline,
     private readonly scatterPipe: GPUComputePipeline,
+    private readonly mergePipe: GPUComputePipeline,
+    private readonly empty: GPUBindGroup,
   ) {
+    this.mergeLayout = mergePipe.getBindGroupLayout(2);
     this.gatherLayout = gatherPipe.getBindGroupLayout(0);
     this.composeLayout = composePipe.getBindGroupLayout(0);
     this.scatterLayout = scatterPipe.getBindGroupLayout(0);
@@ -40,9 +51,10 @@ export class PermuteKernels {
   }
 
   static async create(device: GPUDevice): Promise<PermuteKernels> {
-    const [gatherModule, scatterModule] = await Promise.all([
+    const [gatherModule, scatterModule, mergeModule] = await Promise.all([
       createShaderModule(device, "passes/gather.wgsl"),
       createShaderModule(device, "passes/scatter_update.wgsl"),
+      createShaderModule(device, "passes/merge_layers.wgsl"),
     ]);
     const storage = (type: GPUBufferBindingType) => ({ visibility: GPUShaderStage.COMPUTE, buffer: { type } });
     const uniform = { binding: 0, ...storage("uniform") };
@@ -76,12 +88,27 @@ export class PermuteKernels {
         layout: device.createPipelineLayout({ bindGroupLayouts: [layout] }),
         compute: { module, entryPoint },
       });
-    const [g, c, s] = await Promise.all([
+    const mergeLayout = device.createBindGroupLayout({
+      label: "merge_layers",
+      entries: [
+        uniform,
+        { binding: 1, ...storage("read-only-storage") },
+        { binding: 2, ...storage("read-only-storage") },
+        { binding: 3, ...storage("storage") },
+      ],
+    });
+    const emptyLayout = device.createBindGroupLayout({ label: "empty", entries: [] });
+    const [g, c, s, m] = await Promise.all([
       pipe(gatherModule, "gather", gatherLayout),
       pipe(gatherModule, "compose", composeLayout),
       pipe(scatterModule, "scatter_update", scatterLayout),
+      device.createComputePipelineAsync({
+        label: "merge_layers",
+        layout: device.createPipelineLayout({ bindGroupLayouts: [emptyLayout, emptyLayout, mergeLayout] }),
+        compute: { module: mergeModule, entryPoint: "merge_layers" },
+      }),
     ]);
-    return new PermuteKernels(device, g, c, s);
+    return new PermuteKernels(device, g, c, s, m, device.createBindGroup({ layout: emptyLayout, entries: [] }));
   }
 
   /** dst[e] = src[perm[e]] for `n` nodes of `words` u32 each. */
@@ -132,6 +159,34 @@ export class PermuteKernels {
     }
     pass.setPipeline(this.scatterPipe);
     pass.setBindGroup(0, slot.bindGroup!);
+    pass.dispatchWorkgroups(gx, gy);
+  }
+
+  createLayerSlot(): LayerSlot {
+    return {
+      params: this.device.createBuffer({ label: "layers/params", size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST }),
+      upload: null,
+      bindGroup: null,
+      key: [],
+    };
+  }
+
+  mergeLayers(pass: GPUComputePassEncoder, slot: LayerSlot, order: GPUBuffer, style: GPUBuffer, n: number): void {
+    const [gx, gy] = this.grid(n);
+    this.params[0] = n;
+    this.params[1] = gx;
+    this.params[2] = 0;
+    this.params[3] = 0;
+    this.device.queue.writeBuffer(slot.params, 0, this.params);
+    const upload = slot.upload!;
+    if (slot.key[0] !== upload || slot.key[1] !== order || slot.key[2] !== style) {
+      slot.bindGroup = this.device.createBindGroup({ layout: this.mergeLayout, entries: entries([slot.params, order, upload, style]) });
+      slot.key = [upload, order, style];
+    }
+    pass.setPipeline(this.mergePipe);
+    pass.setBindGroup(0, this.empty);
+    pass.setBindGroup(1, this.empty);
+    pass.setBindGroup(2, slot.bindGroup!);
     pass.dispatchWorkgroups(gx, gy);
   }
 

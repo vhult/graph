@@ -18,12 +18,14 @@ import edgeExpand from "./passes/edge_expand.wgsl";
 import edgeGeometry from "./passes/edge_geometry.wgsl";
 import edgeSort from "./passes/edge_sort.wgsl";
 import gather from "./passes/gather.wgsl";
+import mergeLayers from "./passes/merge_layers.wgsl";
 import hover from "./passes/hover.wgsl";
 import labelDraw from "./passes/label_draw.wgsl";
 import labelMark from "./passes/label_mark.wgsl";
 import labelPlace from "./passes/label_place.wgsl";
 import labelTree from "./passes/label_tree.wgsl";
 import nodeGeometry from "./passes/node_geometry.wgsl";
+import nodeOrder from "./passes/node_order.wgsl";
 import pickEdges from "./passes/pick_edges.wgsl";
 import pickNodes from "./passes/pick_nodes.wgsl";
 import scatterUpdate from "./passes/scatter_update.wgsl";
@@ -49,12 +51,14 @@ export const SHADERS: ShaderFs = {
   "passes/edge_geometry.wgsl": edgeGeometry,
   "passes/edge_sort.wgsl": edgeSort,
   "passes/gather.wgsl": gather,
+  "passes/merge_layers.wgsl": mergeLayers,
   "passes/hover.wgsl": hover,
   "passes/label_draw.wgsl": labelDraw,
   "passes/label_mark.wgsl": labelMark,
   "passes/label_place.wgsl": labelPlace,
   "passes/label_tree.wgsl": labelTree,
   "passes/node_geometry.wgsl": nodeGeometry,
+  "passes/node_order.wgsl": nodeOrder,
   "passes/pick_edges.wgsl": pickEdges,
   "passes/pick_nodes.wgsl": pickNodes,
   "passes/scatter_update.wgsl": scatterUpdate,

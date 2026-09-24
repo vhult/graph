@@ -27,6 +27,20 @@ describe("GraphStore", () => {
     const s = new GraphStore();
     s.setNodes(4, {});
     expect(() => s.updatePositions(3, new Float32Array(4))).toThrow(RangeError);
+    expect(() => s.updateColors(3, new Uint32Array(2))).toThrow(RangeError);
+  });
+
+  it("colour updates write the mirror and produce a dirty range", () => {
+    const s = new GraphStore();
+    s.setNodes(10, {});
+    for (const ch of Object.values(s.channels)) ch.realloc = false;
+    s.markClean();
+    s.updateColors(4, new Uint32Array([7, 8]));
+    expect(s.dirty).toBe(true);
+    expect(s.channels.nodeColor.realloc).toBe(false);
+    expect(Array.from(s.channels.nodeColor.data.slice(4, 6))).toEqual([7, 8]);
+    expect(s.channels.nodeColor.dirty.start(0)).toBe(4);
+    expect(s.channels.nodeColor.dirty.end(0)).toBe(6);
   });
 
   it("shapes go in the low byte of the node style and flag the store", () => {
@@ -41,6 +55,33 @@ describe("GraphStore", () => {
     expect(s.channels.nodeStyle.data[2]! & ~CONSTANTS.STYLE_SHAPE_MASK).toBe(DEFAULT_NODE_STYLE);
     s.setNodes(3, { shapes: new Uint8Array(3) });
     expect(s.hasNodeShapes).toBe(false);
+  });
+
+  it("z-index goes in the layer bits of the node style, keeps the shape and flags the store", () => {
+    const s = new GraphStore();
+    const layer = (w: number) => (w >>> CONSTANTS.STYLE_ZLAYER_SHIFT) & CONSTANTS.STYLE_ZLAYER_MASK;
+    s.setNodes(3, { shapes: new Uint8Array([1, 2, 0]) });
+    expect(s.hasZLayers).toBe(false);
+    s.setNodes(3, { zIndex: new Uint8Array([0, 5, 40]) });
+    expect(s.hasZLayers).toBe(true);
+    expect(Array.from(s.channels.nodeStyle.data, layer)).toEqual([0, 5, 15]);
+    expect(Array.from(s.channels.nodeStyle.data, (w) => w & CONSTANTS.STYLE_SHAPE_MASK)).toEqual([1, 2, 0]);
+    s.setNodes(3, { shapes: new Uint8Array([2, 2, 2]) });
+    expect(Array.from(s.channels.nodeStyle.data, layer)).toEqual([0, 5, 15]);
+    s.setNodes(3, { zIndex: new Uint8Array(3) });
+    expect(s.hasZLayers).toBe(false);
+  });
+
+  it("streamed z-index syncs into the layer bits and keeps the shape", () => {
+    const s = new GraphStore();
+    s.setNodes(3, { shapes: new Uint8Array([1, 2, 0]) });
+    s.syncZIndex(new Uint8Array([3, 0, 99]));
+    const words = s.channels.nodeStyle.data;
+    expect(s.hasZLayers).toBe(true);
+    expect(Array.from(words, (w) => (w >>> CONSTANTS.STYLE_ZLAYER_SHIFT) & CONSTANTS.STYLE_ZLAYER_MASK)).toEqual([3, 0, 15]);
+    expect(Array.from(words, (w) => w & CONSTANTS.STYLE_SHAPE_MASK)).toEqual([1, 2, 0]);
+    s.syncZIndex(new Uint8Array(3));
+    expect(s.hasZLayers).toBe(false);
   });
 
   it("drawn bounds grow the node centres by the largest radius", () => {

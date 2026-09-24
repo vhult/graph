@@ -25,6 +25,7 @@
 @group(2) @binding(3) var<storage, read_write> instances : array<NodeInstance>; // cull_scatter
 
 override NODE_SHAPES : bool = false;
+override NODE_LAYERS : bool = false;
 
 var<workgroup> wgFlag : u32;
 var<workgroup> wgCells : array<atomic<u32>, CELLS_PER_CHUNK>;
@@ -399,6 +400,9 @@ fn cull_scatter(
       var r = nodeRadiusPx(i) * p.x;
       if (NODE_SHAPES) {
         r = packInstanceShape(r, nodeShape(i));
+      }
+      if (NODE_LAYERS) {
+        r = packInstanceLayer(r, nodeLayer(i));
       }
       instances[slot] = NodeInstance(worldToScreen(nodePos[i]), r, lodFade(nodeColor[i], p.y));
     }

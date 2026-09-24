@@ -48,6 +48,7 @@ export class TransformCullPass implements ComputeNode {
 
   outputs: CullOutputs | null = null;
   shapes = false;
+  layers = false;
   private dispatchArgs: GPUBuffer;
   private groups: { state: GPUBindGroup; scan: GPUBindGroup; scatter: GPUBindGroup; list: GPUBindGroup } | null = null;
   private readonly moveList: GPUBuffer;
@@ -110,17 +111,21 @@ export class TransformCullPass implements ComputeNode {
         layout: device.createPipelineLayout({ bindGroupLayouts: [layouts.frame, layouts.graph, layout] }),
         compute: { module: m, entryPoint, constants },
       });
-    const [bounds, boundsList, count, reduce, scan, down, scatter, scatterShapes] = await Promise.all([
+    const scatterVariant = (shapes: number, layers: number) =>
+      make(module, "cull_scatter", phase.scatter, { LOD_TARGET_PX: lodTargetPx, NODE_SHAPES: shapes, NODE_LAYERS: layers });
+    const [bounds, boundsList, count, reduce, scan, down, ...scatter] = await Promise.all([
       make(boundsModule, "chunk_bounds", phase.state),
       make(boundsModule, "chunk_bounds_list", phase.list),
       make(module, "cull_count", phase.state, { LOD_TARGET_PX: lodTargetPx }),
       make(module, "scan_reduce", phase.state),
       make(module, "scan_blocks", phase.scan),
       make(module, "scan_down", phase.state),
-      make(module, "cull_scatter", phase.scatter, { LOD_TARGET_PX: lodTargetPx }),
-      make(module, "cull_scatter", phase.scatter, { LOD_TARGET_PX: lodTargetPx, NODE_SHAPES: 1 }),
+      scatterVariant(0, 0),
+      scatterVariant(1, 0),
+      scatterVariant(0, 1),
+      scatterVariant(1, 1),
     ]);
-    return new TransformCullPass(device, phase, bounds, boundsList, count, reduce, scan, down, [scatter, scatterShapes]);
+    return new TransformCullPass(device, phase, bounds, boundsList, count, reduce, scan, down, scatter);
   }
 
   /** Ensure buffers fit `nodeCount`. Old buffers go to `retire`. */
@@ -221,7 +226,7 @@ export class TransformCullPass implements ComputeNode {
         pass.dispatchWorkgroups(this.sx, this.sy);
         return;
       case 5:
-        pass.setPipeline(this.scatter[this.shapes ? 1 : 0]!);
+        pass.setPipeline(this.scatter[(this.shapes ? 1 : 0) + (this.layers ? 2 : 0)]!);
         pass.setBindGroup(2, g.scatter);
         pass.dispatchWorkgroupsIndirect(this.dispatchArgs, 0);
         return;

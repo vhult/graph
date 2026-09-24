@@ -8,6 +8,7 @@ import type { ContractLayouts } from "../gpu/BindLayouts";
 import { Stage, type FrameContext, type RenderNode } from "../gpu/FrameGraph";
 import { createShaderModule } from "../gpu/ShaderModules";
 import type { HoverPass } from "./HoverPass";
+import type { NodeOrderPass } from "./NodeOrderPass";
 import type { CullOutputs } from "./TransformCullPass";
 
 const DRAW_ARGS_BYTES = 16;
@@ -18,9 +19,13 @@ export class NodeGeometryPass implements RenderNode {
   readonly name = "nodes";
 
   shapes = false;
+  layers = false;
   hover: HoverPass | null = null;
+  order: NodeOrderPass | null = null;
 
   private bindGroup: GPUBindGroup | null = null;
+  private layeredGroup: GPUBindGroup | null = null;
+  private layeredVersion = -1;
   private scratch: GPUBuffer | null = null;
   private boundVersion = -1;
 
@@ -83,11 +88,30 @@ export class NodeGeometryPass implements RenderNode {
     pass.setBindGroup(1, ctx.graphBindGroup);
     pass.setBindGroup(2, this.bindGroup);
     const pipelines = this.pipelines[this.shapes ? 1 : 0]!;
+    const layered = this.layers ? this.layeredBindGroup() : null;
     for (let k = 0; k < BUCKETS.length; k++) {
       const b = BUCKETS[k]!;
+      pass.setBindGroup(2, layered && b === ENGINE_CONSTANTS.BUCKET_NORMAL ? layered : this.bindGroup);
       pass.setPipeline(pipelines[b]!);
       pass.drawIndirect(this.scratch, ENGINE_CONSTANTS.SCRATCH_DRAW_ARGS * 4 + b * DRAW_ARGS_BYTES);
     }
     this.hover?.encodeNode(pass, ctx);
+  }
+
+  private layeredBindGroup(): GPUBindGroup | null {
+    const order = this.order;
+    if (!order?.layered || !this.scratch) return null;
+    if (order.version !== this.layeredVersion || !this.layeredGroup) {
+      this.layeredVersion = order.version;
+      this.layeredGroup = this.device.createBindGroup({
+        label: "group2/nodes.layered",
+        layout: this.layout,
+        entries: [
+          { binding: 0, resource: { buffer: this.scratch } },
+          { binding: 1, resource: { buffer: order.layered } },
+        ],
+      });
+    }
+    return this.layeredGroup;
   }
 }

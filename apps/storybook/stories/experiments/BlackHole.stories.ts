@@ -24,10 +24,10 @@ function stop(): void {
 }
 
 const meta: Meta<Args> = {
-  title: "Showcase/Black hole",
+  title: "Experiments/Black hole",
   render: renderGraph<Args>({
     describe: () => "Black hole · lensed accretion disk, positions computed on the GPU and streamed",
-    options: () => ({ controls: false, transparent: true }),
+    options: () => ({ controls: false, transparent: true, nodeDrag: false }),
     backdrop: "radial-gradient(ellipse at center, #5a4744 0%, #33282a 22%, #1a1517 48%, #0b090a 80%)",
     load: (a) => {
       const l = hole(a);
