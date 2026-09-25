@@ -3,6 +3,7 @@ export * from "./cosmic";
 export * from "./datasets";
 export * from "./deep";
 export * from "./graphs";
+export * from "./icons";
 export * from "./paths";
 export * from "./reference";
 export * from "./rivers";

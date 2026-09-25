@@ -63,6 +63,16 @@ export const PATHS = {
       { x: 0.45, y: 0.55, zoom: 70 },
     ],
   },
+  iconZoom: {
+    frames: 200,
+    keys: [
+      { x: 0.5, y: 0.5, zoom: 20 },
+      { x: 0.5, y: 0.5, zoom: 120 },
+      { x: 0.51, y: 0.5, zoom: 600 },
+      { x: 0.51, y: 0.51, zoom: 2500 },
+      { x: 0.5, y: 0.5, zoom: 20 },
+    ],
+  },
 } as const satisfies Record<string, CameraPathSpec>;
 
 export type PathName = keyof typeof PATHS;
