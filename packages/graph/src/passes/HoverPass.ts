@@ -2,7 +2,10 @@ import { HOVER_PARAMS, PICK_CONSTANTS } from "../data/Layouts";
 import type { ContractLayouts } from "../gpu/BindLayouts";
 import type { FrameContext } from "../gpu/FrameGraph";
 import type { GraphBuffers } from "../gpu/GraphBuffers";
+import { Lazy } from "../gpu/Lazy";
 import { createShaderModule } from "../gpu/ShaderModules";
+import type { IconAtlas } from "../icons/IconAtlas";
+import type { IconOptions } from "./TransformCullPass";
 
 export interface HoverStyleWords {
   nodeColor: number;
@@ -17,6 +20,10 @@ const F = (byteOffset: number) => byteOffset >> 2;
 export class HoverPass {
   node = -1;
   edge = -1;
+  readonly iconPipe: Lazy<GPURenderPipeline>;
+  private iconGroup: GPUBindGroup | null = null;
+  private iconRank: GPUBuffer | null = null;
+  private iconVersion = -1;
   private readonly params: GPUBuffer;
   private readonly data = new ArrayBuffer(HOVER_PARAMS.size);
   private readonly f32 = new Float32Array(this.data);
@@ -30,11 +37,14 @@ export class HoverPass {
     private readonly device: GPUDevice,
     private readonly graph: GraphBuffers,
     private readonly layout: GPUBindGroupLayout,
+    private readonly iconLayout: GPUBindGroupLayout,
+    makeIconPipe: () => Promise<GPURenderPipeline>,
     private readonly nodePipe: GPURenderPipeline,
     private readonly edgePipe: GPURenderPipeline,
     private readonly edgeVertices: number,
     style: HoverStyleWords,
   ) {
+    this.iconPipe = new Lazy(makeIconPipe);
     this.params = device.createBuffer({ label: "hover/params", size: Math.ceil(HOVER_PARAMS.size / 16) * 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.f32[F(O.nodeGrow)] = style.nodeScale;
     this.u32[F(O.nodeColor)] = style.nodeColor;
@@ -42,7 +52,7 @@ export class HoverPass {
     this.f32[F(O.edgeWidth)] = style.edgeWidth;
   }
 
-  static async create(device: GPUDevice, format: GPUTextureFormat, contract: ContractLayouts, graph: GraphBuffers, directed: boolean, style: HoverStyleWords): Promise<HoverPass> {
+  static async create(device: GPUDevice, format: GPUTextureFormat, contract: ContractLayouts, graph: GraphBuffers, directed: boolean, style: HoverStyleWords, icon: IconOptions): Promise<HoverPass> {
     const module = await createShaderModule(device, "passes/hover.wgsl");
     const VF = GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT;
     const layout = device.createBindGroupLayout({
@@ -52,22 +62,35 @@ export class HoverPass {
         { binding: 1, visibility: GPUShaderStage.VERTEX, buffer: { type: "read-only-storage" } },
       ],
     });
+    const iconLayout = device.createBindGroupLayout({
+      label: "group2/hover.icons",
+      entries: [
+        { binding: 0, visibility: VF, buffer: { type: "uniform" } },
+        { binding: 1, visibility: GPUShaderStage.VERTEX, buffer: { type: "read-only-storage" } },
+        { binding: 8, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "float", viewDimension: "2d-array" } },
+        { binding: 9, visibility: GPUShaderStage.VERTEX, texture: { sampleType: "float" } },
+        { binding: 10, visibility: VF, buffer: { type: "read-only-storage" } },
+      ],
+    });
     const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [contract.frame, contract.graph, layout] });
+    const iconPipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [contract.frame, contract.graph, iconLayout] });
     const blend: GPUBlendState = {
       color: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
       alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
     };
-    const constants = { EDGE_ARROWS: directed ? 1 : 0 };
-    const make = (vs: string, fs: string) =>
-      device.createRenderPipelineAsync({
+    const make = (vs: string, fs: string, layout = pipelineLayout, extra: Record<string, number> = {}) => {
+      const constants = { EDGE_ARROWS: directed ? 1 : 0, ...extra };
+      return device.createRenderPipelineAsync({
         label: `hover/${vs}`,
-        layout: pipelineLayout,
+        layout,
         vertex: { module, entryPoint: vs, constants },
         fragment: { module, entryPoint: fs, targets: [{ format, blend }], constants },
         primitive: { topology: "triangle-strip" },
       });
+    };
+    const makeIconPipe = () => make("node_vs_icons", "node_fs_icons", iconPipelineLayout, { ICON_SCALE: icon.scale, ICON_MIN_PX: icon.minPx });
     const [nodePipe, edgePipe] = await Promise.all([make("node_vs", "node_fs"), make("edge_vs", "edge_fs")]);
-    return new HoverPass(device, graph, layout, nodePipe, edgePipe, directed ? 10 : 4, style);
+    return new HoverPass(device, graph, layout, iconLayout, makeIconPipe, nodePipe, edgePipe, directed ? 10 : 4, style);
   }
 
   setNode(node: number, lodScale: number, shapes: boolean): boolean {
@@ -98,15 +121,18 @@ export class HoverPass {
 
   encodeNode(pass: GPURenderPassEncoder, ctx: FrameContext): void {
     if (this.node < 0 || this.node >= ctx.nodeCount) return;
-    this.draw(pass, ctx, this.nodePipe, 4);
+    const icons = ctx.icons;
+    const iconPipe = icons ? this.iconPipe.value : null;
+    if (icons && iconPipe) this.draw(pass, ctx, iconPipe, 4, this.iconBindGroup(icons));
+    else this.draw(pass, ctx, this.nodePipe, 4, this.bindGroup());
   }
 
   encodeEdge(pass: GPURenderPassEncoder, ctx: FrameContext): void {
     if (this.edge < 0 || this.edge >= ctx.edgeCount) return;
-    this.draw(pass, ctx, this.edgePipe, this.edgeVertices);
+    this.draw(pass, ctx, this.edgePipe, this.edgeVertices, this.bindGroup());
   }
 
-  private draw(pass: GPURenderPassEncoder, ctx: FrameContext, pipe: GPURenderPipeline, vertices: number): void {
+  private bindGroup(): GPUBindGroup {
     const rank = this.graph.rank;
     if (rank !== this.rank || !this.group) {
       this.rank = rank;
@@ -119,10 +145,34 @@ export class HoverPass {
         ],
       });
     }
+    return this.group;
+  }
+
+  private iconBindGroup(atlas: IconAtlas): GPUBindGroup {
+    const rank = this.graph.rank;
+    if (!this.iconGroup || rank !== this.iconRank || atlas.version !== this.iconVersion) {
+      this.iconRank = rank;
+      this.iconVersion = atlas.version;
+      this.iconGroup = this.device.createBindGroup({
+        label: "group2/hover.icons",
+        layout: this.iconLayout,
+        entries: [
+          { binding: 0, resource: { buffer: this.params } },
+          { binding: 1, resource: { buffer: rank } },
+          { binding: 8, resource: atlas.sdfView },
+          { binding: 9, resource: atlas.paletteView },
+          { binding: 10, resource: { buffer: atlas.data } },
+        ],
+      });
+    }
+    return this.iconGroup;
+  }
+
+  private draw(pass: GPURenderPassEncoder, ctx: FrameContext, pipe: GPURenderPipeline, vertices: number, group: GPUBindGroup): void {
     pass.setPipeline(pipe);
     pass.setBindGroup(0, ctx.frameBindGroup);
     pass.setBindGroup(1, ctx.graphBindGroup);
-    pass.setBindGroup(2, this.group);
+    pass.setBindGroup(2, group);
     pass.draw(vertices);
   }
 

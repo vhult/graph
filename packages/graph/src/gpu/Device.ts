@@ -19,6 +19,7 @@ const WANTED_LIMITS = [
   "maxBindGroups",
   "maxColorAttachmentBytesPerSample",
   "maxTextureDimension2D",
+  "maxTextureArrayLayers",
 ] as const;
 
 export interface Gpu {

@@ -87,8 +87,8 @@ export const FRAME = defineStruct("Frame", [
 // Binding contract — PUBLIC API, versioned
 // ---------------------------------------------------------------------------
 
-/** 2: the trailing `_pad` word became `globalEdgeColor` (same offset, same size). */
-export const BINDING_CONTRACT_VERSION = 2;
+/** 3: the high half of `nodeSize` holds the icon colour index instead of a ring width. */
+export const BINDING_CONTRACT_VERSION = 3;
 
 export const GROUP_FRAME = 0;
 export const GROUP_GRAPH = 1;
@@ -116,7 +116,7 @@ export const FRAME_BINDINGS = [
 export const GRAPH_BINDINGS = [
   { binding: 0, name: "nodePos", kind: "storage-read", wgslType: "array<vec2<f32>>" },
   { binding: 1, name: "nodeStyle", kind: "storage-read", wgslType: "array<u32>" },
-  { binding: 2, name: "nodeSize", kind: "storage-read", wgslType: "array<u32>", doc: "2 x f16 packed (size, ringWidth)" },
+  { binding: 2, name: "nodeSize", kind: "storage-read", wgslType: "array<u32>", doc: "size f16 low half, icon colour index high half" },
   { binding: 3, name: "nodeColor", kind: "storage-read", wgslType: "array<u32>", doc: "rgba8unorm" },
   { binding: 4, name: "nodeState", kind: "storage-read", wgslType: "array<u32>", doc: "STATE_* bits" },
   { binding: 5, name: "edgeIdx", kind: "storage-read", wgslType: "array<vec2<u32>>" },
@@ -164,6 +164,7 @@ export const CONSTANTS = {
   STYLE_FLAG_LABEL: 1 << 29,
   STYLE_FLAG_PINNED: 1 << 30,
   NO_ICON: 0xffff,
+  SIZE_ICON_COLOR_SHIFT: 16,
   SHAPE_CIRCLE: 0,
   SHAPE_SQUARE: 1,
   SHAPE_HEXAGON: 2,
@@ -420,6 +421,8 @@ export const ENGINE_CONSTANTS = {
   SCRATCH_DRAW_ARGS: 0,
   SCRATCH_BUCKET_BASE: 16,
   SCRATCH_LIST_COUNT: 20,
+  SCRATCH_ICON_BASE: 21,
+  SCRATCH_ICON_COUNT: 22,
   SCRATCH_CHUNKS: 32,
   /** Radix sort digit width and bin count. */
   RADIX_BITS: 4,
@@ -428,6 +431,18 @@ export const ENGINE_CONSTANTS = {
   MOVE_NODE: 1,
   MOVE_LIST: 2,
   MOVE_GROUPS: 256,
+} as const;
+
+export const ICON_CONSTANTS = {
+  ICON_TILE: 64,
+  ICON_HEADER_WORDS: 4,
+  ICON_RECORD_WORDS: 4,
+  ICON_CURVE_WORDS: 6,
+  ICON_BANDS_MASK: 0xffff,
+  ICON_FLAG_EVEN_ODD: 1 << 16,
+  ICON_PALETTE_WIDTH: 256,
+  ICON_WORD_ID_MASK: 0xffff,
+  ICON_WORD_COLOR_SHIFT: 16,
 } as const;
 
 /** Workgroup size used by every engine compute pass (matches the WORKGROUP_SIZE override default). */
@@ -505,7 +520,6 @@ export const OVERRIDES = [
   { name: "WORKGROUP_SIZE", type: "u32", value: "256u" },
   { name: "RASTER_TILE_X", type: "u32", value: "1u" },
   { name: "RASTER_TILE_Y", type: "u32", value: "1u" },
-  { name: "ENABLE_ICONS", type: "bool", value: "true" },
   { name: "ENABLE_RINGS", type: "bool", value: "true" },
   { name: "ENABLE_GRADIENT_EDGES", type: "bool", value: "true" },
   { name: "SMALL_NODE_PX", type: "f32", value: "3.0" },

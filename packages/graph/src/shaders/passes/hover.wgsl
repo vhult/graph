@@ -1,6 +1,7 @@
 #include "common/nodes.wgsl"
 #include "common/edges.wgsl"
 #include "common/sdf.wgsl"
+#include "common/icons.wgsl"
 
 @group(2) @binding(0) var<uniform> hover : HoverParams;
 @group(2) @binding(1) var<storage, read> hoverRank : array<u32>;
@@ -12,6 +13,16 @@ struct NodeOut {
   @location(0) uv : vec2<f32>,
   @location(1) @interpolate(flat) radiusPx : f32,
   @location(2) @interpolate(flat) shape : u32,
+}
+
+struct IconNodeOut {
+  @builtin(position) pos : vec4<f32>,
+  @location(0) uv : vec2<f32>,
+  @location(1) @interpolate(flat) radiusPx : f32,
+  @location(2) @interpolate(flat) shape : u32,
+  @location(3) @interpolate(flat) icon : u32,
+  @location(4) @interpolate(flat) tint : vec4<f32>,
+  @location(5) @interpolate(flat) iconSize : vec2<f32>,
 }
 
 struct EdgeOut {
@@ -32,9 +43,7 @@ fn premultiplied(color : u32, a : f32) -> vec4<f32> {
   return vec4<f32>(c.rgb * alpha, alpha);
 }
 
-@vertex
-fn node_vs(@builtin(vertex_index) vi : u32) -> NodeOut {
-  let i = hoverRank[hover.node];
+fn hoverNode(vi : u32, i : u32) -> NodeOut {
   let rDraw = max(nodeRadiusPx(i) * hover.lodScale, NODE_MIN_DRAW_RADIUS_PX) * hover.nodeGrow;
   let corner = stripCorner(vi);
   let ext = rDraw + NODE_AA_PAD_PX;
@@ -46,6 +55,11 @@ fn node_vs(@builtin(vertex_index) vi : u32) -> NodeOut {
   return o;
 }
 
+@vertex
+fn node_vs(@builtin(vertex_index) vi : u32) -> NodeOut {
+  return hoverNode(vi, hoverRank[hover.node]);
+}
+
 @fragment
 fn node_fs(in : NodeOut) -> @location(0) vec4<f32> {
   let a = clamp(0.5 - sdShape(in.uv, in.shape) * in.radiusPx, 0.0, 1.0);
@@ -53,6 +67,34 @@ fn node_fs(in : NodeOut) -> @location(0) vec4<f32> {
     discard;
   }
   return premultiplied(hover.nodeColor, a);
+}
+
+@vertex
+fn node_vs_icons(@builtin(vertex_index) vi : u32) -> IconNodeOut {
+  let i = hoverRank[hover.node];
+  let v = hoverNode(vi, i);
+  var o : IconNodeOut;
+  o.pos = v.pos;
+  o.uv = v.uv;
+  o.radiusPx = v.radiusPx;
+  o.shape = v.shape;
+  let a = iconAttrs(nodeIconWord(i, iconData[0]), v.radiusPx);
+  o.icon = a.icon;
+  o.tint = a.tint;
+  o.iconSize = a.size;
+  return o;
+}
+
+@fragment
+fn node_fs_icons(in : IconNodeOut) -> @location(0) vec4<f32> {
+  let a = clamp(0.5 - sdShape(in.uv, in.shape) * in.radiusPx, 0.0, 1.0);
+  if (a < 0.002) {
+    discard;
+  }
+  let c = unpack4x8unorm(hover.nodeColor);
+  let rgb = applyIcon(c.rgb, in.uv, in.icon, in.tint, in.iconSize);
+  let alpha = c.a * a;
+  return vec4<f32>(rgb * alpha, alpha);
 }
 
 @vertex

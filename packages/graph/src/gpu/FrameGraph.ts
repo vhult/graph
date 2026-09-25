@@ -7,6 +7,7 @@
  * - Render nodes share ONE render pass — `beginRenderPass` is a real cost on
  *   tiled GPUs. The render pass is timed as a whole ("render").
  */
+import type { IconAtlas } from "../icons/IconAtlas";
 import type { Profiler } from "./Profiler";
 
 export const Stage = {
@@ -39,6 +40,7 @@ export interface FrameContext {
   edgeCount: number;
   /** Dirty flags that triggered this frame (see engine/Dirty.ts). */
   dirty: number;
+  icons: IconAtlas | null;
 }
 
 export interface ComputeNode {

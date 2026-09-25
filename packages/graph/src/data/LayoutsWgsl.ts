@@ -15,6 +15,7 @@ import {
   GROUP_FRAME,
   GROUP_GRAPH,
   HOVER_PARAMS,
+  ICON_CONSTANTS,
   LABEL_CANDIDATE,
   LABEL_CONSTANTS,
   LABEL_PARAMS,
@@ -100,6 +101,8 @@ export function emitLayoutsWgsl(): string {
     ...Object.entries(PICK_CONSTANTS).map(([k, v]) => `const ${k} : u32 = ${u32Literal(k, v)};`),
     "",
     emitStruct(HOVER_PARAMS),
+    "",
+    ...Object.entries(ICON_CONSTANTS).map(([k, v]) => `const ${k} : u32 = ${u32Literal(k, v)};`),
     "",
   ];
   return out.join("\n");

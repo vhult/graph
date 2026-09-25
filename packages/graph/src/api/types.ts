@@ -1,4 +1,5 @@
 /** Public types. */
+import { CONSTANTS } from "../data/Layouts";
 
 export type RGBA = readonly [r: number, g: number, b: number, a: number];
 
@@ -67,6 +68,8 @@ export interface GraphOptions {
   edgePickRadius?: number;
   hoverStyle?: HoverStyle | false;
   nodeDrag?: boolean;
+  iconScale?: number;
+  iconMinPx?: number;
 }
 
 export interface NodeDragEvent {
@@ -103,7 +106,25 @@ export interface NodeData {
   /** Shape per node, one of `NodeShape`. */
   shapes?: Uint8Array;
   zIndex?: Uint8Array;
+  icons?: Uint16Array;
+  iconColors?: Uint32Array | Uint8Array;
 }
+
+export type NodeUpdate = Omit<NodeData, "count">;
+
+export interface IconPath {
+  path: string | readonly string[];
+  viewBox?: readonly [x: number, y: number, width: number, height: number];
+  fillRule?: "nonzero" | "evenodd";
+}
+
+export interface IconSvg {
+  svg: string;
+}
+
+export type IconSource = IconPath | IconSvg;
+
+export const NO_ICON: number = CONSTANTS.NO_ICON;
 
 export interface NodeStreamChannels {
   positions?: boolean;
@@ -228,6 +249,7 @@ export interface GraphCaps {
   maxStorageBufferBindingSize: number;
   maxTextureDimension2D: number;
   maxStorageBuffersPerShaderStage: number;
+  maxIcons: number;
   /** True when the input ring / stats use SharedArrayBuffer (cross-origin isolated). */
   sharedMemory: boolean;
   /** Human-readable adapter description, e.g. "nvidia ampere". */

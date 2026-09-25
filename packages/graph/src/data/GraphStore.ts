@@ -5,9 +5,10 @@
  * double as the source for device-lost recovery (M9). The GPU never sees
  * strings or objects; node identity is the index.
  */
+import { GraphError } from "../api/errors";
 import { DirtyRanges } from "./DirtyRanges";
 import { CONSTANTS, DEFAULT_NODE_STYLE, GRAPH_BINDINGS, GRAPH_BUFFER_WORDS, type GraphBufferName } from "./Layouts";
-import { packNodeSizes, packNodeStyle, toHalfBits } from "./Pack";
+import { ICON_PALETTE_MAX, packIconColors, packNodeSizes, packNodeStyle, paletteIndices, toHalfBits, type PaletteIndices } from "./Pack";
 
 export interface Channel {
   /** CPU mirror, `elementCount * words` 32-bit words. */
@@ -33,6 +34,8 @@ export interface NodeArrays {
   sizes?: Float32Array;
   shapes?: Uint8Array;
   zIndex?: Uint8Array;
+  icons?: Uint16Array;
+  iconColors?: Uint32Array;
 }
 
 export interface EdgeArrays {
@@ -53,6 +56,9 @@ export class GraphStore {
   hasEdgeColors = false;
   hasNodeShapes = false;
   hasZLayers = false;
+  hasIcons = false;
+  iconPalette: Uint32Array = new Uint32Array([0xffffffff]);
+  paletteVersion = 0;
   maxNodeSize = 0;
   /** Label text per node / edge, in the user's order; null when none were set. */
   nodeLabels: readonly string[] | null = null;
@@ -87,6 +93,7 @@ export class GraphStore {
    * with defaults (or preserved prefix-wise when the count is unchanged).
    */
   setNodes(count: number, arrays: NodeArrays): void {
+    const palette = arrays.iconColors ? this.palette(arrays.iconColors, new Uint32Array(0)) : null;
     const resized = count !== this.nodeCount;
     const grown = count > this.nodeCount;
     this.nodeCount = count;
@@ -98,23 +105,73 @@ export class GraphStore {
     if (arrays.colors) this.replace(ch.nodeColor, arrays.colors);
     else if (resized) this.replace(ch.nodeColor, resizeU32(ch.nodeColor.data as Uint32Array, count, DEFAULT_NODE_COLOR));
 
+    let size = ch.nodeSize.data as Uint32Array;
     if (arrays.sizes) {
-      this.replace(ch.nodeSize, packNodeSizes(arrays.sizes, new Uint32Array(count)));
+      size = packNodeSizes(arrays.sizes, size);
       this.maxNodeSize = arrays.sizes.reduce((m, s) => Math.max(m, s), 0);
     } else if (resized) {
-      this.replace(ch.nodeSize, resizeU32(ch.nodeSize.data as Uint32Array, count, toHalfBits(DEFAULT_NODE_SIZE)));
+      size = resizeU32(size, count, toHalfBits(DEFAULT_NODE_SIZE));
       if (grown) this.maxNodeSize = Math.max(this.maxNodeSize, DEFAULT_NODE_SIZE);
     }
+    if (palette) {
+      size = packIconColors(size, palette.indices);
+      this.setPalette(palette.palette);
+    }
+    if (size !== ch.nodeSize.data) this.replace(ch.nodeSize, size);
 
-    if (arrays.shapes || arrays.zIndex) {
-      this.replace(ch.nodeStyle, packNodeStyle(count, ch.nodeStyle.data as Uint32Array, arrays.shapes, arrays.zIndex));
+    if (arrays.shapes || arrays.zIndex || arrays.icons) {
+      this.replace(ch.nodeStyle, packNodeStyle(count, ch.nodeStyle.data as Uint32Array, arrays.shapes, arrays.zIndex, arrays.icons));
       if (arrays.shapes) this.hasNodeShapes = arrays.shapes.some((s) => s !== 0);
       if (arrays.zIndex) this.hasZLayers = arrays.zIndex.some((z) => z !== 0);
+      if (arrays.icons) this.hasIcons = arrays.icons.some((v) => v !== CONSTANTS.NO_ICON);
     } else if (resized) this.replace(ch.nodeStyle, resizeU32(ch.nodeStyle.data as Uint32Array, count, DEFAULT_NODE_STYLE));
 
     if (resized) this.replace(ch.nodeState, resizeU32(ch.nodeState.data as Uint32Array, count, 0));
 
     if (arrays.positions || resized) this.computeBounds();
+  }
+
+  updateNodes(start: number, arrays: NodeArrays): void {
+    const n = arrays.positions ? arrays.positions.length / 2 : (arrays.colors ?? arrays.sizes ?? arrays.shapes ?? arrays.zIndex ?? arrays.icons ?? arrays.iconColors)?.length ?? 0;
+    if (start + n > this.nodeCount) throw new RangeError("updateNodes: range exceeds node count");
+    const palette = arrays.iconColors ? this.palette(arrays.iconColors, this.iconPalette) : null;
+    const ch = this.channels;
+    if (arrays.positions) this.updatePositions(start, arrays.positions);
+    if (arrays.colors) this.updateColors(start, arrays.colors);
+    const sizeWords = ch.nodeSize.data as Uint32Array;
+    let size: Uint32Array | null = null;
+    if (arrays.sizes) {
+      size = packNodeSizes(arrays.sizes, sizeWords, start);
+      this.maxNodeSize = arrays.sizes.reduce((m, s) => Math.max(m, s), this.maxNodeSize);
+    }
+    if (palette) {
+      size = packIconColors(size ?? sizeWords.subarray(start, start + n), palette.indices);
+      this.setPalette(palette.palette);
+    }
+    if (size) this.writeRange(ch.nodeSize, start, size);
+    if (arrays.shapes || arrays.zIndex || arrays.icons) {
+      this.writeRange(ch.nodeStyle, start, packNodeStyle(n, ch.nodeStyle.data as Uint32Array, arrays.shapes, arrays.zIndex, arrays.icons, start));
+      if (arrays.shapes) this.hasNodeShapes ||= arrays.shapes.some((s) => s !== 0);
+      if (arrays.zIndex) this.hasZLayers ||= arrays.zIndex.some((z) => z !== 0);
+      if (arrays.icons) this.hasIcons ||= arrays.icons.some((v) => v !== CONSTANTS.NO_ICON);
+    }
+  }
+
+  private palette(colors: Uint32Array, from: Uint32Array): PaletteIndices {
+    const p = paletteIndices(colors, from);
+    if (!p) throw new GraphError("invalid-argument", `iconColors: at most ${ICON_PALETTE_MAX} different colours`);
+    return p;
+  }
+
+  private setPalette(palette: Uint32Array): void {
+    if (palette === this.iconPalette) return;
+    this.iconPalette = palette;
+    this.paletteVersion++;
+  }
+
+  private writeRange(ch: Channel, start: number, words: Uint32Array): void {
+    (ch.data as Uint32Array).set(words, start);
+    this.markRange(ch, start, start + words.length);
   }
 
   drawnBounds(nodeScale: number): Bounds {
@@ -194,12 +251,6 @@ export class GraphStore {
     if (x > b.maxX) b.maxX = x;
     if (y < b.minY) b.minY = y;
     if (y > b.maxY) b.maxY = y;
-  }
-
-  updateColor(index: number, rgba: number): void {
-    const ch = this.channels.nodeColor;
-    ch.data[index] = rgba;
-    this.markRange(ch, index, index + 1);
   }
 
   /**

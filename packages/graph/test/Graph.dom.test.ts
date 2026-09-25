@@ -13,6 +13,7 @@ const CAPS: GraphCaps = {
   maxStorageBufferBindingSize: 0,
   maxTextureDimension2D: 0,
   maxStorageBuffersPerShaderStage: 0,
+  maxIcons: 0,
   sharedMemory: false,
   adapter: "fake",
   profilerSlots: [],
@@ -106,6 +107,38 @@ describe("Graph.destroy", () => {
     expect(picks()).toHaveLength(5);
   });
 
+  it("updateNodes sends one message for a range and checks it", async () => {
+    const graph = await createGraph();
+    const worker = FakeWorker.last;
+    graph.setNodes({ count: 5 });
+    graph.updateNodes(2, { positions: new Float32Array([1, 2, 3, 4]), icons: new Uint16Array([7, 8]) });
+    const update = worker.sent.at(-1) as Extract<ToWorker, { t: "updateNodes" }>;
+    expect(update.t).toBe("updateNodes");
+    expect(update.start).toBe(2);
+    expect(Array.from(update.icons!)).toEqual([7, 8]);
+    expect(() => graph.updateNodes(4, { icons: new Uint16Array(2) })).toThrow(/range/);
+    expect(() => graph.updateNodes(0, { icons: new Uint16Array(2), sizes: new Float32Array(3) })).toThrow(/same nodes/);
+    const sent = worker.sent.length;
+    graph.updateNodes(0, {});
+    expect(worker.sent.length).toBe(sent);
+  });
+
+  it("defineIcons resolves or rejects with the worker's answer", async () => {
+    const graph = await createGraph();
+    const worker = FakeWorker.last;
+    const done = graph.defineIcons([{ path: "M0 0H1V1Z" }, { svg: "<svg/>" }]);
+    const msg = worker.sent.at(-1) as Extract<ToWorker, { t: "defineIcons" }>;
+    expect(msg.t).toBe("defineIcons");
+    expect(msg.icons).toEqual([{ path: "M0 0H1V1Z", viewBox: undefined, fillRule: undefined }, { svg: "<svg/>" }]);
+    worker.onmessage?.({ data: { t: "defineIcons", id: msg.id } });
+    await expect(done).resolves.toBeUndefined();
+    const failed = graph.defineIcons([{ path: "X" }]);
+    const second = worker.sent.at(-1) as Extract<ToWorker, { t: "defineIcons" }>;
+    worker.onmessage?.({ data: { t: "defineIcons", id: second.id, code: "invalid-argument", message: "bad" } });
+    await expect(failed).rejects.toThrow("bad");
+    expect(() => graph.defineIcons([{} as never])).toThrow(/path/);
+  });
+
   it("streams through messages without shared memory", async () => {
     const graph = await createGraph();
     const worker = FakeWorker.last;
@@ -114,12 +147,12 @@ describe("Graph.destroy", () => {
     stream.positions.set([1, 2, 3, 4, 5, 6]);
     stream.colors.set([1, 2, 3]);
     stream.commit();
-    const [positions, colors] = worker.sent.slice(-2) as [Extract<ToWorker, { t: "updatePositions" }>, Extract<ToWorker, { t: "nodes" }>];
-    expect(positions.t).toBe("updatePositions");
-    expect(Array.from(positions.data)).toEqual([1, 2, 3, 4, 5, 6]);
-    expect(colors.t).toBe("nodes");
-    expect(Array.from(colors.colors!)).toEqual([1, 2, 3]);
-    expect(colors.colors).not.toBe(stream.colors);
+    const update = worker.sent.at(-1) as Extract<ToWorker, { t: "updateNodes" }>;
+    expect(update.t).toBe("updateNodes");
+    expect(update.start).toBe(0);
+    expect(Array.from(update.positions!)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(Array.from(update.colors!)).toEqual([1, 2, 3]);
+    expect(update.colors).not.toBe(stream.colors);
     expect(worker.sent.some((m) => m.t === "nodeStream")).toBe(false);
   });
 

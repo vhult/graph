@@ -8,6 +8,64 @@ bandwidth), Edge 153, 1M nodes / 3M edges at fit unless stated.
 
 ---
 
+## 0050 — Node icons: an SDF when small, exact curves when large
+
+**Input.** `defineIcons` takes `{ path, viewBox?, fillRule? }` (SVG path data)
+or `{ svg }` (markup: paths, circles, ellipses, rects, polygons, transforms). It
+resolves once the icons are ready. The worker turns each icon into quadratic
+curves in a 0–1 box, sorted into Slug bands (Lengyel 2017).
+
+**Fill rules.** An icon is even-odd when all its paths are. The shader then
+folds the winding number mod 2. A mixed icon flips its even-odd paths' contours
+and fills everything as nonzero.
+
+**Distance field.** A compute pass builds a 64 px r16float field per icon, with
+4 mip levels, from the same curves.
+- It first marks which parts of each curve are real edges, so shapes that
+  overlap leave no seams.
+- Distances are exact within 4 texels.
+
+**Per node.**
+- `icons`: 16 bits in the style word, reserved for it.
+- `iconColors`: a palette index in the high half of `nodeSize`, which held an
+  unused ring width. That is binding contract 3.
+- The palette itself is engine-internal (group 2), so a contract consumer can
+  read the index but not resolve it.
+- `iconScale` (0.6 of the radius) and `iconMinPx` (6 device px) are options.
+- The unused `ENABLE_ICONS` override is gone.
+
+**Drawing.** The icon is drawn inside the node's own fragment, so draw order and
+z-index stay right.
+- Below `iconMinPx`, the cull writes nothing and the vertex shader reads nothing.
+- Up to 96 px, the fragment does one distance-field fetch.
+- Above 96 px, it fetches the field and evaluates the curves only within one
+  texel of an edge.
+
+**Instance tail.** The icon word sits in a tail of the instance buffer, 4 B per
+slot, only while icons are on. It is written as plain u32 so no two
+invocations share a vector. No storage binding is added.
+- If the tail would pass the GPU's binding limit, nodes are drawn without icons
+  and an error is reported once.
+- Every icon pipeline is built on first use.
+
+**Standalone test first.** 243 real icons, AMD Radeon 890M.
+- Below 96 px, Slug cost 3–4× the distance field: 30k icons at 16 px were +3.4
+  ms against +1.1 ms.
+- Slug was exact where the 64 px field showed flat facets at 1000 px.
+
+**Engine.** Communities 1M with edges and labels, Edge headless, GPU mean / p95,
+3 alternated runs.
+- Icons off, previous build against this one:
+  - large: 3.75–3.80 / 7.58–8.06 → 3.77–3.87 / 7.81–8.04 ms;
+  - large-zoom: 6.17–6.39 / 8.65–8.87 → 6.21–6.35 / 8.60–8.72 ms;
+  - `cull.scatter`, with the scalar stores: 0.084–0.088 → 0.086–0.089 ms.
+- Icons on every node:
+  - large-icons: 3.76–3.81 / 7.89–7.95 ms;
+  - large-zoom-icons: 6.40–6.43 / 8.73–8.78 ms;
+  - icon-zoom (to 2500×): 1.12–1.13 / 2.74–2.83 ms.
+
+---
+
 ## 0049 — Streamed z-index is merged into the style words on the GPU
 
 `streamNodes({ zIndex })` carries one byte per node in the shared slot. The

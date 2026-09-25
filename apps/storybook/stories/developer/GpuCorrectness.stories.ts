@@ -77,7 +77,7 @@ async function runChecks(graph: Graph, count: number, report: (c: Check[]) => vo
       d.positions[2 * (start + k)] = upd[2 * k]!;
       d.positions[2 * (start + k) + 1] = upd[2 * k + 1]!;
     }
-    graph.updateNodePositions(start, upd);
+    graph.updateNodes(start, { positions: upd });
   }
   for (const [fx, fy, z] of [views[0]!, views[1]!, views[4]!]) await probe("after partial update", fx, fy, z);
   return checks;

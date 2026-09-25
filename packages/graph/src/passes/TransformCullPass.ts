@@ -18,9 +18,15 @@ import {
 import { Dirty } from "../engine/Dirty";
 import type { ContractLayouts } from "../gpu/BindLayouts";
 import { Stage, type ComputeNode, type FrameContext } from "../gpu/FrameGraph";
+import { Lazy } from "../gpu/Lazy";
 import { createShaderModule } from "../gpu/ShaderModules";
 
 /** Outputs consumed by the draw passes. `version` bumps when buffers are recreated. */
+export interface IconOptions {
+  scale: number;
+  minPx: number;
+}
+
 export interface CullOutputs {
   scratch: GPUBuffer;
   instances: GPUBuffer;
@@ -49,6 +55,10 @@ export class TransformCullPass implements ComputeNode {
   outputs: CullOutputs | null = null;
   shapes = false;
   layers = false;
+  readonly iconScatter: Lazy<GPUComputePipeline[]>;
+  tailed = false;
+  private iconCount = 0;
+  private readonly scratchWords = new Uint32Array(2);
   private dispatchArgs: GPUBuffer;
   private groups: { state: GPUBindGroup; scan: GPUBindGroup; scatter: GPUBindGroup; list: GPUBindGroup } | null = null;
   private readonly moveList: GPUBuffer;
@@ -75,7 +85,9 @@ export class TransformCullPass implements ComputeNode {
     private readonly scan: GPUComputePipeline,
     private readonly down: GPUComputePipeline,
     private readonly scatter: readonly GPUComputePipeline[],
+    scatterVariant: (shapes: number, layers: number, icons: number) => Promise<GPUComputePipeline>,
   ) {
+    this.iconScatter = new Lazy(() => Promise.all([scatterVariant(0, 0, 1), scatterVariant(1, 0, 1), scatterVariant(0, 1, 1), scatterVariant(1, 1, 1)]));
     this.maxGroupsX = device.limits.maxComputeWorkgroupsPerDimension;
     // Separate buffer: indirect args must not be bound in the dispatch that consumes them.
     this.dispatchArgs = device.createBuffer({ label: "cull/dispatchArgs", size: 16, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.INDIRECT });
@@ -91,7 +103,7 @@ export class TransformCullPass implements ComputeNode {
     this.device.queue.writeBuffer(this.moveList, 0, d);
   }
 
-  static async create(device: GPUDevice, layouts: ContractLayouts, lodTargetPx: number): Promise<TransformCullPass> {
+  static async create(device: GPUDevice, layouts: ContractLayouts, lodTargetPx: number, icon: IconOptions): Promise<TransformCullPass> {
     const [module, boundsModule] = await Promise.all([
       createShaderModule(device, "passes/transform_cull.wgsl"),
       createShaderModule(device, "passes/chunk_bounds.wgsl"),
@@ -111,8 +123,13 @@ export class TransformCullPass implements ComputeNode {
         layout: device.createPipelineLayout({ bindGroupLayouts: [layouts.frame, layouts.graph, layout] }),
         compute: { module: m, entryPoint, constants },
       });
-    const scatterVariant = (shapes: number, layers: number) =>
-      make(module, "cull_scatter", phase.scatter, { LOD_TARGET_PX: lodTargetPx, NODE_SHAPES: shapes, NODE_LAYERS: layers });
+    const scatterVariant = (shapes: number, layers: number, icons = 0) =>
+      make(module, "cull_scatter", phase.scatter, {
+        LOD_TARGET_PX: lodTargetPx,
+        NODE_SHAPES: shapes,
+        NODE_LAYERS: layers,
+        ...(icons ? { NODE_ICONS: 1, ICON_SCALE: icon.scale, ICON_MIN_PX: icon.minPx } : {}),
+      });
     const [bounds, boundsList, count, reduce, scan, down, ...scatter] = await Promise.all([
       make(boundsModule, "chunk_bounds", phase.state),
       make(boundsModule, "chunk_bounds_list", phase.list),
@@ -125,20 +142,26 @@ export class TransformCullPass implements ComputeNode {
       scatterVariant(0, 1),
       scatterVariant(1, 1),
     ]);
-    return new TransformCullPass(device, phase, bounds, boundsList, count, reduce, scan, down, scatter);
+    return new TransformCullPass(device, phase, bounds, boundsList, count, reduce, scan, down, scatter, scatterVariant);
+  }
+
+  fits(nodeCount: number, icons: boolean): boolean {
+    const bytes = instanceBytes(capacityFor(nodeCount), icons);
+    const limits = this.device.limits;
+    return bytes <= limits.maxStorageBufferBindingSize && bytes <= limits.maxBufferSize;
   }
 
   /** Ensure buffers fit `nodeCount`. Old buffers go to `retire`. */
-  reserve(nodeCount: number, retire: (b: GPUBuffer) => void): void {
-    if (nodeCount <= this.capacity && this.outputs) return;
-    const cap = Math.max(1024, Math.ceil(nodeCount * GROWTH));
-    const instanceBytes = cap * NODE_INSTANCE.size;
+  reserve(nodeCount: number, retire: (b: GPUBuffer) => void, icons: boolean): void {
+    if (nodeCount <= this.capacity && this.outputs && icons === this.tailed) return;
+    const cap = capacityFor(nodeCount);
+    const bytes = instanceBytes(cap, icons);
     const limits = this.device.limits;
-    if (instanceBytes > limits.maxStorageBufferBindingSize || instanceBytes > limits.maxBufferSize) {
+    if (bytes > limits.maxStorageBufferBindingSize || bytes > limits.maxBufferSize) {
       // Buffer chunking above binding limits is milestone 9.
       throw new GraphError(
         "limits-exceeded",
-        `${nodeCount.toLocaleString("en-US")} nodes need a ${(instanceBytes / 2 ** 20).toFixed(0)} MiB instance buffer; ` +
+        `${nodeCount.toLocaleString("en-US")} nodes need a ${(bytes / 2 ** 20).toFixed(0)} MiB instance buffer; ` +
           `this GPU binds at most ${(limits.maxStorageBufferBindingSize / 2 ** 20).toFixed(0)} MiB.`,
       );
     }
@@ -151,9 +174,11 @@ export class TransformCullPass implements ComputeNode {
       size: cullScratchWords(cap) * 4,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.INDIRECT | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
     });
-    const instances = this.device.createBuffer({ label: "cull/instances", size: instanceBytes, usage: GPUBufferUsage.STORAGE });
+    const instances = this.device.createBuffer({ label: "cull/instances", size: bytes, usage: GPUBufferUsage.STORAGE });
     this.outputs = { scratch, instances, version: (this.outputs?.version ?? 0) + 1 };
     this.capacity = cap;
+    this.tailed = icons;
+    this.iconCount = -1;
     this.groups = null; // rebuilt in prepare()
     this.boundsStale = true;
     this.tableChunks = -1;
@@ -166,6 +191,13 @@ export class TransformCullPass implements ComputeNode {
 
   prepare(ctx: FrameContext): void {
     const out = this.outputs!;
+    const iconCount = ctx.icons?.count ?? 0;
+    if (iconCount !== this.iconCount) {
+      this.iconCount = iconCount;
+      this.scratchWords[0] = this.capacity;
+      this.scratchWords[1] = iconCount;
+      this.device.queue.writeBuffer(out.scratch, ENGINE_CONSTANTS.SCRATCH_ICON_BASE * 4, this.scratchWords);
+    }
     if (!this.groups) {
       const bg = (layout: GPUBindGroupLayout, entries: [number, GPUBuffer][]) =>
         this.device.createBindGroup({ layout, entries: entries.map(([binding, buffer]) => ({ binding, resource: { buffer } })) });
@@ -226,7 +258,7 @@ export class TransformCullPass implements ComputeNode {
         pass.dispatchWorkgroups(this.sx, this.sy);
         return;
       case 5:
-        pass.setPipeline(this.scatter[(this.shapes ? 1 : 0) + (this.layers ? 2 : 0)]!);
+        pass.setPipeline(((ctx.icons && this.iconScatter.value) || this.scatter)[(this.shapes ? 1 : 0) + (this.layers ? 2 : 0)]!);
         pass.setBindGroup(2, g.scatter);
         pass.dispatchWorkgroupsIndirect(this.dispatchArgs, 0);
         return;
@@ -244,4 +276,12 @@ export class TransformCullPass implements ComputeNode {
     this.dispatchArgs.destroy();
     this.moveList.destroy();
   }
+}
+
+function capacityFor(nodeCount: number): number {
+  return Math.ceil(Math.max(1024, Math.ceil(nodeCount * GROWTH)) / 4) * 4;
+}
+
+function instanceBytes(capacity: number, icons: boolean): number {
+  return capacity * NODE_INSTANCE.size + (icons ? capacity * 4 : 0);
 }

@@ -1,3 +1,4 @@
+#include "common/nodes.wgsl"
 #include "common/scan.wgsl"
 
 struct OrderParams {
@@ -9,9 +10,11 @@ struct OrderParams {
 
 @group(2) @binding(0) var<uniform> order : OrderParams;
 @group(2) @binding(1) var<storage, read> scratch : array<u32>;
-@group(2) @binding(2) var<storage, read> instances : array<NodeInstance>;
+@group(2) @binding(2) var<storage, read> instances : array<vec4<u32>>;
 @group(2) @binding(3) var<storage, read_write> hist : array<u32>;
-@group(2) @binding(4) var<storage, read_write> layered : array<NodeInstance>;
+@group(2) @binding(4) var<storage, read_write> layered : array<u32>;
+
+override NODE_ICONS : bool = false;
 
 var<workgroup> wgCount : u32;
 var<workgroup> wgHist : array<atomic<u32>, Z_LAYERS>;
@@ -30,7 +33,7 @@ fn normalCount() -> u32 {
 }
 
 fn layerAt(k : u32) -> u32 {
-  return (bitcast<u32>(instances[normalBase() + k].radiusPx) & INSTANCE_LAYER_BITS) >> INSTANCE_LAYER_SHIFT;
+  return (instances[normalBase() + k].z & INSTANCE_LAYER_BITS) >> INSTANCE_LAYER_SHIFT;
 }
 
 @compute @workgroup_size(WORKGROUP_SIZE)
@@ -105,7 +108,18 @@ fn order_scatter(
     let one = select(vec4<u32>(0u), oneHot8(d), valid);
     let s = wgScanVec4(one, lid);
     if (valid) {
-      layered[base + wgRun[d] + field8(s.exclusive, d)] = instances[base + i];
+      let src = base + i;
+      let dst = base + wgRun[d] + field8(s.exclusive, d);
+      let w = instances[src];
+      let at = dst * 4u;
+      layered[at] = w.x;
+      layered[at + 1u] = w.y;
+      layered[at + 2u] = w.z;
+      layered[at + 3u] = w.w;
+      if (NODE_ICONS && hasIconRoom(bitcast<f32>(w.z))) {
+        let tail = scratch[SCRATCH_ICON_BASE];
+        layered[tail * 4u + dst] = instances[tail + (src >> 2u)][src & 3u];
+      }
     }
     workgroupBarrier();
     if (lid < Z_LAYERS) {

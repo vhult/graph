@@ -22,10 +22,11 @@
 #include "common/cull_state.wgsl"
 
 @group(2) @binding(2) var<storage, read_write> dispatchArgs : array<u32>; // scan_blocks
-@group(2) @binding(3) var<storage, read_write> instances : array<NodeInstance>; // cull_scatter
+@group(2) @binding(3) var<storage, read_write> instances : array<u32>; // cull_scatter
 
 override NODE_SHAPES : bool = false;
 override NODE_LAYERS : bool = false;
+override NODE_ICONS : bool = false;
 
 var<workgroup> wgFlag : u32;
 var<workgroup> wgCells : array<atomic<u32>, CELLS_PER_CHUNK>;
@@ -404,7 +405,15 @@ fn cull_scatter(
       if (NODE_LAYERS) {
         r = packInstanceLayer(r, nodeLayer(i));
       }
-      instances[slot] = NodeInstance(worldToScreen(nodePos[i]), r, lodFade(nodeColor[i], p.y));
+      let w = packInstance(worldToScreen(nodePos[i]), r, lodFade(nodeColor[i], p.y));
+      let at = slot * 4u;
+      instances[at] = w.x;
+      instances[at + 1u] = w.y;
+      instances[at + 2u] = w.z;
+      instances[at + 3u] = w.w;
+      if (NODE_ICONS && hasIconRoom(r)) {
+        instances[scratch[SCRATCH_ICON_BASE] * 4u + slot] = nodeIconWord(i, scratch[SCRATCH_ICON_COUNT]);
+      }
     }
     workgroupBarrier(); // every lane has read wgRun and scanVec2
     if (lid < NUM_BUCKETS) {
