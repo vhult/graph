@@ -14,7 +14,7 @@
 import type { Meta, StoryObj } from "@storybook/html-vite";
 import type { Graph } from "@vhult/graph";
 import { PATHS, type PathName } from "@vhult/graph-bench";
-import { BenchPanel } from "../../src/bench";
+import { BenchPanel, setBenchIcons } from "../../src/bench";
 import { COUNT_OPTIONS, GRAPH_OPTIONS, setGraph, type GraphName } from "../../src/data";
 import type { Hud } from "../../src/hud";
 import { stage } from "../../src/stage";
@@ -27,6 +27,7 @@ interface Args {
   lodTargetPx: number;
   nodeLabels: boolean;
   edgeLabels: boolean;
+  icons: number;
 }
 
 /** Latest args, read by the panel when "Run" is clicked. */
@@ -35,6 +36,7 @@ let current: Args | null = null;
 function load(graph: Graph, a: Args, hud: Hud): void {
   const { genMs } = setGraph(graph, a.dataset, a.count, { nodes: a.nodeLabels, edges: a.edgeLabels });
   hud.measureLoad(graph, genMs, a.count);
+  void setBenchIcons(graph, a.count, a.icons).catch((e: unknown) => hud.setNote(`icons failed: ${e instanceof Error ? e.message : String(e)}`));
   graph.camera.fit();
   hud.setNote(`${a.dataset} · path ${a.path}`);
 }
@@ -55,11 +57,12 @@ const meta: Meta<Args> = {
           path: current!.path,
           nodeLabels: current!.nodeLabels,
           edgeLabels: current!.edgeLabels,
+          icons: current!.icons,
         }));
       },
       update: (graph, a, prev, hud) => {
         current = a;
-        if (a.dataset !== prev.dataset || a.count !== prev.count || a.nodeLabels !== prev.nodeLabels || a.edgeLabels !== prev.edgeLabels) load(graph, a, hud);
+        if (a.dataset !== prev.dataset || a.count !== prev.count || a.nodeLabels !== prev.nodeLabels || a.edgeLabels !== prev.edgeLabels || a.icons !== prev.icons) load(graph, a, hud);
         else if (a.path !== prev.path) hud.setNote(`${a.dataset} · path ${a.path}`);
       },
     }),
@@ -74,6 +77,7 @@ const meta: Meta<Args> = {
     lodTargetPx: { control: { type: "number", min: 0, step: 0.5 } },
     nodeLabels: { control: "boolean" },
     edgeLabels: { control: "boolean" },
+    icons: { control: "select", options: [0, 8, 64, 256] },
   },
   args: {
     dataset: "communities",
@@ -82,6 +86,7 @@ const meta: Meta<Args> = {
     lodTargetPx: 2.5,
     nodeLabels: true,
     edgeLabels: true,
+    icons: 0,
   },
 };
 

@@ -3,8 +3,8 @@
  * the render worker (`graph.benchmark`); this module only loads data, starts
  * runs, summarizes the per-frame series and renders/downloads the report.
  */
-import type { BenchmarkResult, Graph } from "@vhult/graph";
-import { PATHS, summarize, type PathName, type Summary } from "@vhult/graph-bench";
+import { NO_ICON, type BenchmarkResult, type Graph } from "@vhult/graph";
+import { benchIcons, hslToWord, PATHS, summarize, type PathName, type Summary } from "@vhult/graph-bench";
 import { setGraph, type GraphName } from "./data";
 
 export interface BenchCase {
@@ -15,6 +15,7 @@ export interface BenchCase {
   nodeLabels: boolean;
   edgeLabels: boolean;
   targetP99Ms?: number;
+  icons?: number;
 }
 
 export const SUITE: readonly BenchCase[] = [
@@ -27,7 +28,25 @@ export const SUITE: readonly BenchCase[] = [
   { name: "large-zoom", dataset: "communities", count: 1_000_000, path: "zoomSweep", nodeLabels: true, edgeLabels: true, targetP99Ms: 6.0 },
   { name: "mesh", dataset: "mesh", count: 1_000_000, path: "standard", nodeLabels: true, edgeLabels: true, targetP99Ms: 6.0 },
   { name: "hierarchy", dataset: "hierarchy", count: 1_000_000, path: "standard", nodeLabels: true, edgeLabels: true, targetP99Ms: 6.0 },
+  { name: "large-icons", dataset: "communities", count: 1_000_000, path: "standard", nodeLabels: true, edgeLabels: true, targetP99Ms: 6.0, icons: 64 },
+  { name: "large-zoom-icons", dataset: "communities", count: 1_000_000, path: "zoomSweep", nodeLabels: true, edgeLabels: true, targetP99Ms: 6.0, icons: 64 },
+  { name: "icon-zoom", dataset: "communities", count: 1_000_000, path: "iconZoom", nodeLabels: true, edgeLabels: true, targetP99Ms: 6.0, icons: 64 },
 ];
+
+export async function setBenchIcons(graph: Graph, count: number, icons: number): Promise<void> {
+  if (icons === 0) {
+    graph.setNodes({ count, icons: new Uint16Array(count).fill(NO_ICON) });
+    return;
+  }
+  await graph.defineIcons(benchIcons(icons));
+  const ids = new Uint16Array(count);
+  const colors = new Uint32Array(count);
+  for (let i = 0; i < count; i++) {
+    ids[i] = i % icons;
+    colors[i] = i % 3 === 0 ? 0xffffffff : hslToWord(((i >> 2) % 16) / 16, 0.8, 0.85);
+  }
+  graph.setNodes({ count, icons: ids, iconColors: colors });
+}
 
 export interface CaseRun {
   case: BenchCase;
@@ -36,6 +55,7 @@ export interface CaseRun {
 
 export async function runCase(graph: Graph, c: BenchCase): Promise<CaseRun> {
   setGraph(graph, c.dataset, c.count, { nodes: c.nodeLabels, edges: c.edgeLabels });
+  await setBenchIcons(graph, c.count, c.icons ?? 0);
   graph.camera.fit();
   const path = PATHS[c.path];
   const result = await graph.benchmark({ path: path.keys, frames: path.frames });
