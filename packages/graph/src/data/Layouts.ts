@@ -353,14 +353,16 @@ export const PICK_CONSTANTS = {
 export const HOVER_PARAMS = defineStruct("HoverParams", [
   { name: "node", type: "u32" },
   { name: "lodScale", type: "f32" },
-  { name: "nodeGrow", type: "f32" },
-  { name: "nodeColor", type: "u32" },
+  { name: "nodeOutlineScale", type: "f32" },
+  { name: "nodeOutlineColor", type: "u32" },
   { name: "edgeA", type: "u32" },
   { name: "edgeB", type: "u32" },
   { name: "edgeStyle", type: "u32" },
   { name: "edgeColor", type: "u32" },
   { name: "edgeWidth", type: "f32" },
   { name: "flags", type: "u32" },
+  { name: "nodeOutlineMinPx", type: "f32" },
+  { name: "nodeOutlineMaxPx", type: "f32" },
 ] as const);
 
 export function pickOutWords(nodeCount: number, edgeCount: number): number {

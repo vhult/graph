@@ -432,7 +432,7 @@ export class Engine {
     const hoverEdges = (this.hoverKinds & PICKED_EDGES) !== 0;
     if (!hoverNodes) this.hoverNode = -1;
     if (!hoverEdges) this.hoverEdge = -1;
-    if (!hoverNodes && this.hover?.setNode(-1, 0, false)) this.markDirty(Dirty.HOVER);
+    if (!hoverNodes && this.hover?.setNode(-1, 0, false, this.pixelRatio)) this.markDirty(Dirty.HOVER);
     if (!hoverEdges && this.hover?.setEdge(-1, 0, 0, 0)) this.markDirty(Dirty.HOVER);
     const edges = hoverEdges || (this.clickKinds & PICKED_EDGES) !== 0;
     const any = this.hoverKinds !== 0 || this.clickKinds !== 0 || this.nodeDrag;
@@ -462,8 +462,10 @@ export class Engine {
             this.graph,
             o.directedEdges,
             {
-              nodeColor: packRgbaTuple(style.nodeColor),
-              nodeScale: style.nodeScale,
+              nodeOutlineColor: packRgbaTuple(style.nodeOutlineColor),
+              nodeOutlineScale: style.nodeOutlineScale,
+              nodeOutlineMinWidth: style.nodeOutlineMinWidth,
+              nodeOutlineMaxWidth: style.nodeOutlineMaxWidth,
               edgeColor: packRgbaTuple(style.edgeColor),
               edgeWidth: style.edgeWidth,
             },
@@ -652,7 +654,7 @@ export class Engine {
     const hover = this.hover;
     if (!hover) return;
     let changed = false;
-    if (hoverNodes) changed = hover.setNode(node, nodeScale, this.store.hasNodeShapes) || changed;
+    if (hoverNodes) changed = hover.setNode(node, nodeScale, this.store.hasNodeShapes, this.pixelRatio) || changed;
     if (hoverEdges) {
       const ch = this.store.channels;
       const ends = ch.edgeIdx.data as Uint32Array;

@@ -46,6 +46,9 @@ const DEFAULT_FIT_PADDING = 24;
 const DEFAULT_PICK_RATE = 60;
 const DEFAULT_EDGE_PICK_RADIUS = 4;
 const HOVER_WHITE: RGBA = [1, 1, 1, 1];
+const DEFAULT_OUTLINE_SCALE = 0.08;
+const DEFAULT_OUTLINE_MIN_WIDTH = 3;
+const DEFAULT_OUTLINE_MAX_WIDTH = 12;
 const DEFAULT_ICON_SCALE = 0.6;
 const DEFAULT_ICON_MIN_PX = 6;
 
@@ -102,8 +105,10 @@ export class Graph {
           options.hoverStyle === false
             ? null
             : {
-                nodeColor: options.hoverStyle?.nodeColor ?? HOVER_WHITE,
-                nodeScale: Math.max(0, options.hoverStyle?.nodeScale ?? 1.25),
+                nodeOutlineColor: options.hoverStyle?.nodeOutlineColor ?? HOVER_WHITE,
+                nodeOutlineScale: Math.max(0, options.hoverStyle?.nodeOutlineScale ?? DEFAULT_OUTLINE_SCALE),
+                nodeOutlineMinWidth: Math.max(0, options.hoverStyle?.nodeOutlineMinWidth ?? DEFAULT_OUTLINE_MIN_WIDTH),
+                nodeOutlineMaxWidth: Math.max(0, options.hoverStyle?.nodeOutlineMaxWidth ?? DEFAULT_OUTLINE_MAX_WIDTH),
                 edgeColor: options.hoverStyle?.edgeColor ?? HOVER_WHITE,
                 edgeWidth: Math.max(0, options.hoverStyle?.edgeWidth ?? 2),
               },

@@ -8,6 +8,25 @@ bandwidth), Edge 153, 1M nodes / 3M edges at fit unless stated.
 
 ---
 
+## 0051 — The hovered node keeps its size and colour and gets an outline
+
+The hover used to redraw the node 1.25× larger in white, which hid its colour
+and its icon and made it jump. It now redraws the node at its drawn size, with
+its own colour and icon, still on top of its neighbours. It adds a ring outside
+its shape, anti-aliased like the node edge.
+
+`HoverStyle.nodeColor` and `nodeScale` are replaced by:
+- `nodeOutlineColor`, default white;
+- `nodeOutlineScale`, the ring width as a fraction of the drawn radius, default
+  0.08;
+- `nodeOutlineMinWidth` and `nodeOutlineMaxWidth`, which bound it, CSS px,
+  defaults 3 and 12.
+
+The ring grows with the node without taking over deep zooms. The hover is
+still one quad for one node.
+
+---
+
 ## 0050 — Node icons: an SDF when small, exact curves when large
 
 **Input.** `defineIcons` takes `{ path, viewBox?, fillRule? }` (SVG path data)

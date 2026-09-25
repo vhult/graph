@@ -8,8 +8,10 @@ import type { IconAtlas } from "../icons/IconAtlas";
 import type { IconOptions } from "./TransformCullPass";
 
 export interface HoverStyleWords {
-  nodeColor: number;
-  nodeScale: number;
+  nodeOutlineColor: number;
+  nodeOutlineScale: number;
+  nodeOutlineMinWidth: number;
+  nodeOutlineMaxWidth: number;
   edgeColor: number;
   edgeWidth: number;
 }
@@ -32,6 +34,9 @@ export class HoverPass {
   private rank: GPUBuffer | null = null;
   private lodScale = 0;
   private shapes = false;
+  private pixelRatio = 0;
+  private readonly outlineMin: number;
+  private readonly outlineMax: number;
 
   private constructor(
     private readonly device: GPUDevice,
@@ -46,8 +51,10 @@ export class HoverPass {
   ) {
     this.iconPipe = new Lazy(makeIconPipe);
     this.params = device.createBuffer({ label: "hover/params", size: Math.ceil(HOVER_PARAMS.size / 16) * 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-    this.f32[F(O.nodeGrow)] = style.nodeScale;
-    this.u32[F(O.nodeColor)] = style.nodeColor;
+    this.outlineMin = style.nodeOutlineMinWidth;
+    this.outlineMax = style.nodeOutlineMaxWidth;
+    this.f32[F(O.nodeOutlineScale)] = style.nodeOutlineScale;
+    this.u32[F(O.nodeOutlineColor)] = style.nodeOutlineColor;
     this.u32[F(O.edgeColor)] = style.edgeColor;
     this.f32[F(O.edgeWidth)] = style.edgeWidth;
   }
@@ -93,14 +100,17 @@ export class HoverPass {
     return new HoverPass(device, graph, layout, iconLayout, makeIconPipe, nodePipe, edgePipe, directed ? 10 : 4, style);
   }
 
-  setNode(node: number, lodScale: number, shapes: boolean): boolean {
-    if (node === this.node && (node < 0 || (lodScale === this.lodScale && shapes === this.shapes))) return false;
+  setNode(node: number, lodScale: number, shapes: boolean, pixelRatio: number): boolean {
+    if (node === this.node && (node < 0 || (lodScale === this.lodScale && shapes === this.shapes && pixelRatio === this.pixelRatio))) return false;
     this.node = node;
     this.lodScale = lodScale;
     this.shapes = shapes;
+    this.pixelRatio = pixelRatio;
     if (node >= 0) {
       this.u32[F(O.node)] = node;
       this.f32[F(O.lodScale)] = lodScale;
+      this.f32[F(O.nodeOutlineMinPx)] = this.outlineMin * pixelRatio;
+      this.f32[F(O.nodeOutlineMaxPx)] = this.outlineMax * pixelRatio;
       this.u32[F(O.flags)] = shapes ? PICK_CONSTANTS.HOVER_FLAG_SHAPES : 0;
       this.device.queue.writeBuffer(this.params, 0, this.data);
     }

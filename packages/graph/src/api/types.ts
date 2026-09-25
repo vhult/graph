@@ -79,8 +79,10 @@ export interface NodeDragEvent {
 }
 
 export interface HoverStyle {
-  nodeColor?: RGBA;
-  nodeScale?: number;
+  nodeOutlineColor?: RGBA;
+  nodeOutlineScale?: number;
+  nodeOutlineMinWidth?: number;
+  nodeOutlineMaxWidth?: number;
   edgeColor?: RGBA;
   edgeWidth?: number;
 }
