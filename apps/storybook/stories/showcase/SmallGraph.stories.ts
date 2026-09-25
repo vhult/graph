@@ -126,7 +126,7 @@ const meta: Meta<Args> = {
     },
   }),
   argTypes: graphArgTypes<Args>([NODES], { directed: { control: "boolean" }, icons: { control: "boolean" } }),
-  args: { nodes: NODES, directed: true, icons: true, ...GRAPH_ARGS, edgeColor: "nodes", edgeWidth: 1.5, edgeAlpha: 0.8 },
+  args: { nodes: NODES, directed: true, icons: true, ...GRAPH_ARGS, edgeColor: "nodes", edgeWidth: 1.5, edgeAlpha: 0.8, labels: true },
   parameters: { controls: { include: ["directed", "icons"] } },
 };
 

@@ -113,7 +113,7 @@ export function graphArgTypes<A extends GraphArgs>(sizes: readonly number[], own
     edgeDebug: { control: "inline-radio", options: ["off", "length", "thinning", "chunk"] },
     nodeScale: { control: { type: "range", min: 0.1, max: 4, step: 0.1 } },
     lodTargetPx: { control: { type: "range", min: 0, max: 8, step: 0.5 } },
-    labels: { table: { disable: true } },
+    labels: { control: "boolean" },
   } as Partial<ArgTypes<A>>;
 }
 
@@ -131,7 +131,7 @@ export function renderGraph<A extends GraphArgs>(spec: GraphStory<A>) {
   };
   return (story: A, ctx: StoryContext): HTMLElement => {
     const t = toggles(ctx);
-    const args: A = { ...story, labels: t.labels, edges: t.edges && story.edges };
+    const args: A = { ...story, edges: t.edges && story.edges };
     return stage(args, ctx, {
       options: (a) => ({
         edgeWidth: a.edgeWidth,

@@ -79,7 +79,7 @@ const meta: Meta<Args> = {
     depthOrder: { control: "boolean" },
   }),
   args: { nodes: 1_500_000, speed: 1, inclination: HOLE3D.inclination, beaming: HOLE3D.beaming, glow: true, depthOrder: true, ...GRAPH_ARGS, edges: false, lodTargetPx: 0 },
-  parameters: { controls: { include: ["nodes", "speed", "inclination", "beaming", "glow", "depthOrder"] } },
+  parameters: { controls: { include: ["nodes", "speed", "inclination", "beaming", "glow", "depthOrder", "labels"] } },
 };
 
 export default meta;
