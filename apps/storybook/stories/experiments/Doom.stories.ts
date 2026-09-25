@@ -33,7 +33,7 @@ const meta: Meta<GraphArgs> = {
   }),
   argTypes: graphArgTypes<GraphArgs>([DOOM.width * DOOM.height]),
   args: { ...GRAPH_ARGS, nodes: DOOM.width * DOOM.height, edges: false, lodTargetPx: 0 },
-  parameters: { controls: { include: [] } },
+  parameters: { controls: { include: ["labels"] } },
 };
 
 export default meta;

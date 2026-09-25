@@ -5,6 +5,8 @@
 import camera from "./common/camera.wgsl";
 import cullState from "./common/cull_state.wgsl";
 import edges from "./common/edges.wgsl";
+import iconCurves from "./common/icon_curves.wgsl";
+import icons from "./common/icons.wgsl";
 import labels from "./common/labels.wgsl";
 import layouts from "./common/layouts.wgsl";
 import morton from "./common/morton.wgsl";
@@ -20,6 +22,7 @@ import edgeSort from "./passes/edge_sort.wgsl";
 import gather from "./passes/gather.wgsl";
 import mergeLayers from "./passes/merge_layers.wgsl";
 import hover from "./passes/hover.wgsl";
+import iconSdf from "./passes/icon_sdf.wgsl";
 import labelDraw from "./passes/label_draw.wgsl";
 import labelMark from "./passes/label_mark.wgsl";
 import labelPlace from "./passes/label_place.wgsl";
@@ -40,6 +43,8 @@ export const SHADERS: ShaderFs = {
   "common/sdf.wgsl": sdf,
   "common/nodes.wgsl": nodes,
   "common/edges.wgsl": edges,
+  "common/icon_curves.wgsl": iconCurves,
+  "common/icons.wgsl": icons,
   "common/labels.wgsl": labels,
   "common/morton.wgsl": morton,
   "common/scan.wgsl": scan,
@@ -53,6 +58,7 @@ export const SHADERS: ShaderFs = {
   "passes/gather.wgsl": gather,
   "passes/merge_layers.wgsl": mergeLayers,
   "passes/hover.wgsl": hover,
+  "passes/icon_sdf.wgsl": iconSdf,
   "passes/label_draw.wgsl": labelDraw,
   "passes/label_mark.wgsl": labelMark,
   "passes/label_place.wgsl": labelPlace,

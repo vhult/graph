@@ -1,5 +1,6 @@
 /** Optional GPU features the engine can exploit, and the limits it negotiated. */
 import type { GraphCaps } from "../api/types";
+import { CONSTANTS } from "../data/Layouts";
 
 export const OPTIONAL_FEATURES = [
   "timestamp-query",
@@ -14,6 +15,10 @@ export const OPTIONAL_FEATURES = [
  * 8 graph-data bindings (@group(1), public contract) + 2 pass-local (@group(2)).
  */
 export const REQUIRED_STORAGE_BUFFERS_PER_STAGE = 10;
+
+export function maxIcons(device: GPUDevice): number {
+  return Math.min(device.limits.maxTextureArrayLayers, CONSTANTS.NO_ICON);
+}
 
 export function describeAdapter(adapter: GPUAdapter): string {
   const info = (adapter as GPUAdapter & { info?: GPUAdapterInfo }).info;
@@ -35,6 +40,7 @@ export function readCaps(adapter: GPUAdapter, device: GPUDevice, sharedMemory: b
     maxStorageBufferBindingSize: l.maxStorageBufferBindingSize,
     maxTextureDimension2D: l.maxTextureDimension2D,
     maxStorageBuffersPerShaderStage: l.maxStorageBuffersPerShaderStage,
+    maxIcons: maxIcons(device),
     sharedMemory,
     adapter: describeAdapter(adapter),
     profilerSlots,

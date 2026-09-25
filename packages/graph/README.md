@@ -101,8 +101,9 @@ Everything is typed; the `.d.ts` files document each option and method.
 |---|---|
 | `Graph.create(canvas, options?)` | Start the engine. Rejects with `UnsupportedError` when WebGPU or `OffscreenCanvas` is missing |
 | `setNodes`, `setEdges` | Bulk-load typed arrays (set nodes first, then edges) |
-| `setNodePositions`, `setNodeColors`, `setNodeSizes`, `setNodeShapes`, `setNodeZIndex`, `setNodeCount` | Replace one node channel. Shapes are `NodeShape.circle`, `square` or `hexagon`; z-index goes from 0 (bottom) to 15 (top) |
-| `updateNodePositions`, `updateNodeColor` | Partial updates |
+| `setNodePositions`, `setNodeColors`, `setNodeSizes`, `setNodeShapes`, `setNodeZIndex`, `setNodeIcons`, `setNodeIconColors`, `setNodeCount` | Replace one node channel. Shapes are `NodeShape.circle`, `square` or `hexagon`; z-index goes from 0 (bottom) to 15 (top) |
+| `updateNodes(start, data)` | Change any node channels for the nodes from `start`, uploading only those |
+| `defineIcons(icons)` | The icon set: `{ path, viewBox?, fillRule? }` (SVG path data) or `{ svg }` (SVG markup). Resolves once the icons are ready. Nodes pick one with `icons` (its index, `NO_ICON` for none) and tint it with `iconColors`; `iconScale` and `iconMinPx` set its size in the node and the size below which it is not drawn |
 | `streamNodes({ positions, colors, zIndex })` | Write every position, colour and/or z-index each frame from your own loop, then `commit()`; they arrive in the same frame |
 | `setNodeLabels`, `setEdgeLabels` | Label text, placed without overlap |
 | `setBackground`, `setNodeScale` | Style |

@@ -28,7 +28,7 @@ const meta: Meta<GraphArgs> = {
   }),
   argTypes: graphArgTypes<GraphArgs>([100_000, 1_000_000]),
   args: { nodes: 100_000, ...GRAPH_ARGS, edges: false },
-  parameters: { controls: { include: ["nodes"] } },
+  parameters: { controls: { include: ["nodes", "labels"] } },
 };
 
 export default meta;

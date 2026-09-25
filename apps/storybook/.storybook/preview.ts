@@ -4,7 +4,7 @@ import { disposeStage } from "../src/stage";
 import "./preview.css";
 
 const preview: Preview = {
-  initialGlobals: { hud: "on", drag: "off", hover: "on", labels: "off", edges: "on" },
+  initialGlobals: { hud: "on", drag: "off", hover: "on", edges: "on" },
   globalTypes: {
     hud: {
       description: "Debug overlay",
@@ -42,18 +42,6 @@ const preview: Preview = {
         dynamicTitle: true,
       },
     },
-    labels: {
-      description: "Labels",
-      toolbar: {
-        title: "Labels",
-        icon: "document",
-        items: [
-          { value: "on", title: "Labels on" },
-          { value: "off", title: "Labels off" },
-        ],
-        dynamicTitle: true,
-      },
-    },
     edges: {
       description: "Edges",
       toolbar: {
@@ -78,7 +66,7 @@ const preview: Preview = {
           "Showcase",
           ["Small graph", "Large graph"],
           "Nodes",
-          ["Shapes", "Z-index"],
+          ["Styles"],
           "Edges",
           ["Styles"],
           "Stress",

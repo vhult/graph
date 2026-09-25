@@ -60,7 +60,7 @@ const meta: Meta<Args> = {
     depthOrder: { control: "boolean" },
   }),
   args: { nodes: 1_000_000, speed: 1, depthOrder: true, ...GRAPH_ARGS, edges: false, lodTargetPx: 0 },
-  parameters: { controls: { include: ["nodes", "speed", "depthOrder"] } },
+  parameters: { controls: { include: ["nodes", "speed", "depthOrder", "labels"] } },
 };
 
 export default meta;

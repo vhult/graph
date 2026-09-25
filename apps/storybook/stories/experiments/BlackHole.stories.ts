@@ -57,7 +57,7 @@ const meta: Meta<Args> = {
     speed: { control: { type: "range", min: 0, max: 4, step: 0.1 } },
   },
   args: { ...GRAPH_ARGS, nodes: 1_000_000, speed: 0.1, edges: false, lodTargetPx: 0 },
-  parameters: { controls: { include: ["nodes", "speed"] } },
+  parameters: { controls: { include: ["nodes", "speed", "labels"] } },
 };
 
 export default meta;

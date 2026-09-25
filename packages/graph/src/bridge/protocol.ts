@@ -4,7 +4,8 @@
  * and never produce a message in steady state.
  */
 import type { GraphErrorCode } from "../api/errors";
-import type { BenchmarkOptions, BenchmarkResult, CameraView, EdgeDebugMode, GraphCaps, HoverStyle, LabelSnapshot, RGBA } from "../api/types";
+import type { BenchmarkOptions, BenchmarkResult, CameraView, EdgeDebugMode, GraphCaps, HoverStyle, IconSource, LabelSnapshot, RGBA } from "../api/types";
+import type { NodeArrays } from "../data/GraphStore";
 
 export type DebugLevel = 0 | 1 | 2;
 
@@ -39,6 +40,8 @@ export interface InitOptions {
   edgePickRadius: number;
   hoverStyle: Required<HoverStyle> | null;
   nodeDrag: boolean;
+  iconScale: number;
+  iconMinPx: number;
   timeOrigin: number;
 }
 
@@ -59,13 +62,13 @@ export type ToWorker =
   | { t: "wake" }
   /** Fallback input path (no SharedArrayBuffer): numbers only, same fields as a ring record. */
   | { t: "input"; r: [type: number, time: number, x: number, y: number, dx: number, dy: number, buttons: number, mods: number] }
-  | { t: "nodes"; count: number; positions?: Float32Array; colors?: Uint32Array; sizes?: Float32Array; shapes?: Uint8Array; zIndex?: Uint8Array }
+  | ({ t: "nodes"; count: number } & NodeArrays)
+  | ({ t: "updateNodes"; start: number } & NodeArrays)
+  | { t: "defineIcons"; id: number; icons: IconSource[] }
   | { t: "edges"; count: number; indices?: Uint32Array; styles?: Uint32Array; colors?: Uint32Array }
   | { t: "nodeLabels"; labels: string[] }
   | { t: "edgeLabels"; labels: string[] }
-  | { t: "updatePositions"; start: number; data: Float32Array }
   | { t: "nodeStream"; buffer: SharedArrayBuffer; count: number; positions: boolean; colors: boolean; zIndex: boolean }
-  | { t: "updateColor"; index: number; rgba: number }
   | { t: "view"; view: Partial<CameraView> }
   | { t: "fit"; padding: number }
   | { t: "background"; rgba: RGBA }
@@ -86,6 +89,7 @@ export type FromWorker =
   | { t: "state"; data: Float64Array }
   | { t: "benchmark"; id: number; result: BenchmarkResult }
   | { t: "labelSnapshot"; id: number; snapshot: LabelSnapshot }
+  | { t: "defineIcons"; id: number; code?: GraphErrorCode; message?: string }
   | { t: "hover"; node?: number; edge?: number }
   | { t: "click"; node?: number; edge?: number }
   | { t: "drag"; event: DragEventName; index: number; x: number; y: number }

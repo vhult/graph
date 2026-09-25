@@ -1,7 +1,8 @@
 import { CONSTANTS, ENGINE_CONSTANTS } from "../data/Layouts";
 import { Stage, type ComputeNode, type FrameContext } from "../gpu/FrameGraph";
+import { Lazy } from "../gpu/Lazy";
 import { createShaderModule } from "../gpu/ShaderModules";
-import type { TransformCullPass } from "./TransformCullPass";
+import type { IconOptions, TransformCullPass } from "./TransformCullPass";
 
 export class NodeOrderPass implements ComputeNode {
   readonly stage = Stage.NODE_ORDER;
@@ -12,6 +13,7 @@ export class NodeOrderPass implements ComputeNode {
   layers = false;
   layered: GPUBuffer | null = null;
   version = 0;
+  readonly iconScatter: Lazy<GPUComputePipeline>;
 
   private hist: GPUBuffer | null = null;
   private group: GPUBindGroup | null = null;
@@ -30,13 +32,15 @@ export class NodeOrderPass implements ComputeNode {
     private readonly pipelines: readonly [GPUComputePipeline, GPUComputePipeline, GPUComputePipeline],
     private readonly cull: TransformCullPass,
     private readonly retire: (b: GPUBuffer) => void,
+    makeIconScatter: () => Promise<GPUComputePipeline>,
   ) {
+    this.iconScatter = new Lazy(makeIconScatter);
     this.runsOn = cull.runsOn;
     this.maxGroupsX = device.limits.maxComputeWorkgroupsPerDimension;
     this.params = device.createBuffer({ label: "order/params", size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
   }
 
-  static async create(device: GPUDevice, cull: TransformCullPass, retire: (b: GPUBuffer) => void): Promise<NodeOrderPass> {
+  static async create(device: GPUDevice, cull: TransformCullPass, retire: (b: GPUBuffer) => void, icon: IconOptions): Promise<NodeOrderPass> {
     const module = await createShaderModule(device, "passes/node_order.wgsl");
     const s = (binding: number, type: GPUBufferBindingType): GPUBindGroupLayoutEntry => ({ binding, visibility: GPUShaderStage.COMPUTE, buffer: { type } });
     const layout = device.createBindGroupLayout({
@@ -45,10 +49,17 @@ export class NodeOrderPass implements ComputeNode {
     });
     const emptyLayout = device.createBindGroupLayout({ label: "empty", entries: [] });
     const pl = device.createPipelineLayout({ bindGroupLayouts: [emptyLayout, emptyLayout, layout] });
-    const make = (entryPoint: string) => device.createComputePipelineAsync({ label: `order/${entryPoint}`, layout: pl, compute: { module, entryPoint } });
+    const make = (entryPoint: string, icons = 0) =>
+      device.createComputePipelineAsync({
+        label: `order/${entryPoint}#${icons}`,
+        layout: pl,
+        compute: { module, entryPoint, constants: icons ? { NODE_ICONS: 1, ICON_SCALE: icon.scale, ICON_MIN_PX: icon.minPx } : undefined },
+      });
     const pipelines = (await Promise.all([make("order_count"), make("order_scan"), make("order_scatter")])) as [GPUComputePipeline, GPUComputePipeline, GPUComputePipeline];
-    return new NodeOrderPass(device, layout, device.createBindGroup({ layout: emptyLayout, entries: [] }), pipelines, cull, retire);
+    return new NodeOrderPass(device, layout, device.createBindGroup({ layout: emptyLayout, entries: [] }), pipelines, cull, retire, () => make("order_scatter", 1));
   }
+
+
 
   active(): boolean {
     return this.layers;
@@ -79,11 +90,12 @@ export class NodeOrderPass implements ComputeNode {
     });
   }
 
-  encodePhase(phase: number, pass: GPUComputePassEncoder): void {
+  encodePhase(phase: number, pass: GPUComputePassEncoder, ctx: FrameContext): void {
     pass.setBindGroup(0, this.empty);
     pass.setBindGroup(1, this.empty);
     pass.setBindGroup(2, this.group!);
-    pass.setPipeline(this.pipelines[phase as 0 | 1 | 2]);
+    const icons = phase === 2 && ctx.icons ? this.iconScatter.value : null;
+    pass.setPipeline(icons ?? this.pipelines[phase as 0 | 1 | 2]);
     if (phase === 1) pass.dispatchWorkgroups(1);
     else pass.dispatchWorkgroups(this.gx, this.gy);
   }

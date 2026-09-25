@@ -26,19 +26,18 @@ export interface StageSpec<A> {
 export interface StoryContext {
   id: string;
   viewMode?: string;
-  globals?: { hud?: string; drag?: string; hover?: string; labels?: string; edges?: string };
+  globals?: { hud?: string; drag?: string; hover?: string; edges?: string };
 }
 
 export interface Toggles {
   drag: boolean;
   hover: boolean;
-  labels: boolean;
   edges: boolean;
 }
 
 export function toggles(context: StoryContext): Toggles {
   const g = context.globals ?? {};
-  return { drag: g.drag === "on", hover: g.hover !== "off", labels: g.labels === "on", edges: g.edges !== "off" };
+  return { drag: g.drag === "on", hover: g.hover !== "off", edges: g.edges !== "off" };
 }
 
 interface Current {

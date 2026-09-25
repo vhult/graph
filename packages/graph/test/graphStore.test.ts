@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { GraphError } from "../src/api/errors";
 import { DEFAULT_NODE_COLOR, GraphStore } from "../src/data/GraphStore";
 import { CONSTANTS, DEFAULT_NODE_STYLE } from "../src/data/Layouts";
 
@@ -82,6 +83,54 @@ describe("GraphStore", () => {
     expect(Array.from(words, (w) => w & CONSTANTS.STYLE_SHAPE_MASK)).toEqual([1, 2, 0]);
     s.syncZIndex(new Uint8Array(3));
     expect(s.hasZLayers).toBe(false);
+  });
+
+  it("updateNodes writes only its range of the style and size words", () => {
+    const s = new GraphStore();
+    const { STYLE_ICON_SHIFT, STYLE_ICON_MASK, STYLE_SHAPE_MASK, SIZE_ICON_COLOR_SHIFT } = CONSTANTS;
+    s.setNodes(10, { shapes: new Uint8Array(10).fill(1), sizes: new Float32Array(10).fill(2) });
+    for (const ch of Object.values(s.channels)) ch.realloc = false;
+    s.markClean();
+    s.updateNodes(3, { icons: new Uint16Array([4, 5]), iconColors: new Uint32Array([0xff0000ff, 0xffffffff]) });
+    const style = s.channels.nodeStyle;
+    const size = s.channels.nodeSize;
+    expect(s.hasIcons).toBe(true);
+    expect(style.realloc).toBe(false);
+    expect([style.dirty.start(0), style.dirty.end(0)]).toEqual([3, 5]);
+    expect([size.dirty.start(0), size.dirty.end(0)]).toEqual([3, 5]);
+    expect(Array.from(style.data.slice(2, 6), (w) => (w >>> STYLE_ICON_SHIFT) & STYLE_ICON_MASK)).toEqual([CONSTANTS.NO_ICON, 4, 5, CONSTANTS.NO_ICON]);
+    expect(Array.from(style.data.slice(2, 6), (w) => w & STYLE_SHAPE_MASK)).toEqual([1, 1, 1, 1]);
+    expect(Array.from(size.data.slice(2, 6), (w) => w >>> SIZE_ICON_COLOR_SHIFT)).toEqual([0, 1, 0, 0]);
+    expect(Array.from(size.data.slice(2, 6), (w) => w & 0xffff)).toEqual([0x4000, 0x4000, 0x4000, 0x4000]);
+  });
+
+  it("updateNodes appends new icon colours to the palette and keeps old indices", () => {
+    const s = new GraphStore();
+    s.setNodes(2, { iconColors: new Uint32Array([0xff0000ff, 0xff00ff00]) });
+    const version = s.paletteVersion;
+    s.updateNodes(0, { iconColors: new Uint32Array([0xffff0000]) });
+    expect(Array.from(s.iconPalette)).toEqual([0xffffffff, 0xff0000ff, 0xff00ff00, 0xffff0000]);
+    expect(Array.from(s.channels.nodeSize.data, (w) => w >>> CONSTANTS.SIZE_ICON_COLOR_SHIFT)).toEqual([3, 2]);
+    expect(s.paletteVersion).toBe(version + 1);
+  });
+
+  it("updateNodes sizes and positions go through dirty ranges and grow the largest size", () => {
+    const s = new GraphStore();
+    s.setNodes(4, { sizes: new Float32Array(4).fill(1) });
+    s.updateNodes(1, { sizes: new Float32Array([8]), positions: new Float32Array([5, 6]) });
+    expect(s.maxNodeSize).toBe(8);
+    expect(Array.from(s.channels.nodePos.data.slice(2, 4))).toEqual([5, 6]);
+    expect(() => s.updateNodes(3, { sizes: new Float32Array(2) })).toThrow(RangeError);
+  });
+
+  it("too many icon colours throw before anything changes", () => {
+    const s = new GraphStore();
+    s.setNodes(3, {});
+    const n = 70_000;
+    expect(() => s.setNodes(n, { iconColors: Uint32Array.from({ length: n }, (_, i) => i) })).toThrow(GraphError);
+    expect(s.nodeCount).toBe(3);
+    expect(s.channels.nodePos.data.length).toBe(6);
+    expect(s.channels.nodeSize.data.length).toBe(3);
   });
 
   it("drawn bounds grow the node centres by the largest radius", () => {

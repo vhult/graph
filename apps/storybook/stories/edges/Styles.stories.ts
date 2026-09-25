@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/html-vite";
 import { PALETTE, rgbToWord } from "@vhult/graph-bench";
 import { EDGE_DIRECTED } from "../../src/graphStory";
-import { stage, toggles } from "../../src/stage";
+import { stage } from "../../src/stage";
 
 interface Edge {
   width: number;
@@ -60,18 +60,15 @@ function build() {
 const meta: Meta = {
   title: "Edges/Styles",
   render: (args, ctx) =>
-    stage({ ...args, labels: toggles(ctx).labels }, ctx, {
+    stage(args, ctx, {
       options: () => ({ directedEdges: true }),
-      setup: (graph, a, hud) => {
+      setup: (graph, _a, hud) => {
         const g = build();
         graph.setNodes(g.nodes);
         graph.setEdges(g.edges);
-        graph.setEdgeLabels(a.labels ? g.labels : []);
+        graph.setEdgeLabels(g.labels);
         graph.camera.fit();
         hud.setNote("Edge styles · width, arrowheads, per-edge colour, gradient, labels");
-      },
-      update: (graph, a, prev) => {
-        if (a.labels !== prev.labels) graph.setEdgeLabels(a.labels ? build().labels : []);
       },
     }),
 };

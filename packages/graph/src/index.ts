@@ -17,11 +17,15 @@ export type {
   LabelSnapshot,
   EdgeData,
   EdgeDebugMode,
+  IconPath,
+  IconSource,
+  IconSvg,
   NodeData,
   NodeDragEvent,
+  NodeUpdate,
   NodeStream,
   NodeStreamChannels,
   RGBA,
 } from "./api/types";
-export { NodeShape } from "./api/types";
+export { NO_ICON, NodeShape } from "./api/types";
 export { packRgba } from "./data/Pack";

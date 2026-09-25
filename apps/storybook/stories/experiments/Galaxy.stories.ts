@@ -49,7 +49,7 @@ const meta: Meta<Args> = {
   }),
   argTypes: graphArgTypes<Args>(SIZES, { speed: { control: { type: "range", min: 0, max: 4, step: 0.1 } } }),
   args: { nodes: 1_000_000, speed: 1, ...GRAPH_ARGS, edges: false, lodTargetPx: 0 },
-  parameters: { controls: { include: ["nodes", "speed"] } },
+  parameters: { controls: { include: ["nodes", "speed", "labels"] } },
 };
 
 export default meta;

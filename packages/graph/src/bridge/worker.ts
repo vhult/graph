@@ -56,6 +56,7 @@ async function init(msg: Extract<ToWorker, { t: "init" }>): Promise<void> {
       onError: fail,
       onBenchmark: (id, result, transfer) => post({ t: "benchmark", id, result }, transfer),
       onLabelSnapshot: (id, snapshot, transfer) => post({ t: "labelSnapshot", id, snapshot }, transfer),
+      onIcons: (id, error) => post(error ? { t: "defineIcons", id, code: error.code, message: error.message } : { t: "defineIcons", id }),
       onHover: (node, edge) => post({ t: "hover", node, edge }),
       onClick: (node, edge) => post({ t: "click", node, edge }),
       onDrag: (event, index, x, y) => post({ t: "drag", event, index, x, y }),
@@ -73,7 +74,13 @@ async function init(msg: Extract<ToWorker, { t: "init" }>): Promise<void> {
   }
   if (!stateShared) startStatePosting();
   post({ t: "ready", caps: engine.caps });
-  for (const m of pending.splice(0)) dispatch(m);
+  for (const m of pending.splice(0)) {
+    try {
+      dispatch(m);
+    } catch (e) {
+      fail(e, false);
+    }
+  }
 }
 
 function startStatePosting(): void {
@@ -100,6 +107,8 @@ function dispatch(msg: ToWorker): void {
     }
     case "nodes":
       return e.setNodes(msg.count, msg);
+    case "defineIcons":
+      return e.defineIcons(msg.id, msg.icons);
     case "nodeStream":
       return e.setStream(new StreamSlots(msg.buffer, msg.count, msg.positions, msg.colors, msg.zIndex));
     case "edges":
@@ -108,10 +117,8 @@ function dispatch(msg: ToWorker): void {
       return e.setNodeLabels(msg.labels);
     case "edgeLabels":
       return e.setEdgeLabels(msg.labels);
-    case "updatePositions":
-      return e.updatePositions(msg.start, msg.data);
-    case "updateColor":
-      return e.updateColor(msg.index, msg.rgba);
+    case "updateNodes":
+      return e.updateNodes(msg.start, msg);
     case "view":
       return e.setView(msg.view);
     case "fit":

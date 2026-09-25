@@ -13,6 +13,7 @@
   - `src/gpu` has the device, buffers, bind layouts, frame graph, radix sort and profiler.
   - `src/passes` holds one file per GPU pass (upload, cull, sort, geometry, labels).
   - `src/labels` is the glyph atlas and label layout.
+  - `src/icons` is the icon parser (SVG path data and markup to curves) and the icon atlas.
   - `src/shaders` holds the WGSL sources, grouped by pass, plus the preprocessor.
   - `test` is the Vitest suite. `docs/decisions.md` is the decision log. `scripts` is the build.
 - `packages/bench` has the shared benchmark fixtures (seeded datasets, camera paths, stats). Saved runs go in `results`.

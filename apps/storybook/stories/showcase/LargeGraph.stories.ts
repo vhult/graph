@@ -24,7 +24,7 @@ const meta: Meta<Args> = {
   }),
   argTypes: { layout: { control: "select", options: MAP_OPTIONS }, ...graphArgTypes<Args>(NODE_COUNTS) },
   args: { layout: "cosmic web", ...GRAPH_ARGS, nodes: 1_000_000, edgeColor: "nodes", edgeAlpha: 0.6 },
-  parameters: { controls: { include: ["layout", "nodes", "seed"] } },
+  parameters: { controls: { include: ["layout", "nodes", "seed", "labels"] } },
 };
 
 export default meta;

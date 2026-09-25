@@ -7,7 +7,9 @@
  * reports it separately from the engine's load time.
  */
 import type { Meta, StoryObj } from "@storybook/html-vite";
+import type { Graph } from "@vhult/graph";
 import { communities } from "@vhult/graph-bench";
+import { setBenchIcons } from "../../src/bench";
 import { DangerZone, type DangerArgs } from "../../src/danger";
 import { cached } from "../../src/data";
 import { countControl, GRAPH_ARGS, graphArgTypes, renderGraph } from "../../src/graphStory";
@@ -17,6 +19,13 @@ type Args = DangerArgs;
 const SIZES = [5_000_000, 10_000_000, 25_000_000] as const;
 
 const danger = new DangerZone();
+const iconCounts = new WeakMap<Graph, number>();
+
+function showIcons(graph: Graph, count: number): void {
+  if (iconCounts.get(graph) === count) return;
+  iconCounts.set(graph, count);
+  setBenchIcons(graph, count, 64).catch((e: unknown) => console.error(e));
+}
 
 const meta: Meta<Args> = {
   title: "Stress/Scale",
@@ -25,7 +34,10 @@ const meta: Meta<Args> = {
     load: (a) => cached(`communities:${a.nodes}:${a.neighbours}:${a.seed}`, () => communities(a.nodes, a.neighbours, a.seed)),
     dataArgs: ["neighbours", "dangerZone", "vramGB"],
     gate: (graph, a, root) => danger.gate(graph, a, root),
-    onLoad: (graph, g, a) => danger.loaded(graph, g, a),
+    onLoad: (graph, g, a) => {
+      showIcons(graph, g.nodes.count);
+      danger.loaded(graph, g, a);
+    },
   }),
   argTypes: graphArgTypes<Args>(SIZES, {
     nodes: { ...countControl(SIZES), if: { arg: "dangerZone", truthy: false } },
@@ -33,7 +45,7 @@ const meta: Meta<Args> = {
     dangerZone: { control: "boolean" },
     vramGB: { control: { type: "range", min: 2, max: 32, step: 1 }, if: { arg: "dangerZone" } },
   }),
-  args: { nodes: 10_000_000, neighbours: 2, dangerZone: false, vramGB: 8, ...GRAPH_ARGS, edgeAlpha: 0.25 },
+  args: { nodes: 10_000_000, neighbours: 2, dangerZone: false, vramGB: 8, ...GRAPH_ARGS, edgeAlpha: 0.25, labels: true },
   parameters: { controls: { include: ["nodes", "neighbours", "dangerZone", "vramGB"] } },
 };
 

@@ -8,7 +8,7 @@
  *     or via any API message.
  */
 import { GraphError } from "../api/errors";
-import type { BenchmarkOptions, BenchmarkResult, CameraView, GraphCaps, LabelSnapshot, RGBA } from "../api/types";
+import type { BenchmarkOptions, BenchmarkResult, CameraView, GraphCaps, IconSource, LabelSnapshot, RGBA } from "../api/types";
 import { INPUT, type InputRing, type InputRecord } from "../bridge/InputRing";
 import type { StreamSlots } from "../bridge/StreamSlots";
 import type { DragEventName, InitOptions } from "../bridge/protocol";
@@ -25,6 +25,7 @@ import { FrameUniform, type FrameInputs } from "../gpu/FrameUniform";
 import { GraphBuffers } from "../gpu/GraphBuffers";
 import { PermuteKernels } from "../gpu/PermuteKernels";
 import { Profiler, type ProfileSample } from "../gpu/Profiler";
+import { IconAtlas } from "../icons/IconAtlas";
 import { Labels } from "../labels/Labels";
 import { EDGE_DEBUG_MODES, EdgeCullPass } from "../passes/EdgeCullPass";
 import { LabelDrawPass } from "../passes/LabelDrawPass";
@@ -57,6 +58,7 @@ export interface EngineInit {
   onError: (e: GraphError, fatal: boolean) => void;
   onBenchmark: (id: number, result: BenchmarkResult, transfer: ArrayBuffer[]) => void;
   onLabelSnapshot: (id: number, snapshot: LabelSnapshot, transfer: ArrayBuffer[]) => void;
+  onIcons: (id: number, error: GraphError | null) => void;
   onHover: (node: number | undefined, edge: number | undefined) => void;
   onClick: (node: number | undefined, edge: number | undefined) => void;
   onDrag: (event: DragEventName, index: number, x: number, y: number) => void;
@@ -84,6 +86,17 @@ const NODE_DIRTY = [
   ["shapes", Dirty.TOPOLOGY],
   ["colors", Dirty.STYLE],
   ["zIndex", Dirty.STYLE],
+  ["icons", Dirty.STYLE],
+  ["iconColors", Dirty.STYLE],
+] as const satisfies readonly (readonly [keyof NodeArrays, number])[];
+const UPDATE_DIRTY = [
+  ["positions", Dirty.POSITIONS],
+  ["sizes", Dirty.POSITIONS],
+  ["shapes", Dirty.STYLE],
+  ["colors", Dirty.STYLE],
+  ["zIndex", Dirty.STYLE],
+  ["icons", Dirty.STYLE],
+  ["iconColors", Dirty.STYLE],
 ] as const satisfies readonly (readonly [keyof NodeArrays, number])[];
 const PICK_DIRTY = Dirty.TOPOLOGY | Dirty.POSITIONS | Dirty.MOVED | Dirty.CAMERA | Dirty.STYLE | Dirty.STATE | Dirty.RESIZE | Dirty.EDGES | Dirty.LABELLED;
 
@@ -125,6 +138,11 @@ export class Engine {
   private pixelRatio: number;
   /** Node count the cull buffers are sized for; -1 forces a check. */
   private reservedFor = -1;
+  private reservedIcons = false;
+  private iconsTooLarge = false;
+  private iconAtlas: IconAtlas | null = null;
+  private iconLoad: Promise<IconAtlas> | null = null;
+  private iconChain: Promise<unknown> = Promise.resolve();
   /** Edge count the edge cull buffers are sized for; -1 forces a check. */
   private reservedEdgesFor = -1;
   private bench: Benchmark | null = null;
@@ -207,6 +225,7 @@ export class Engine {
       nodeCount: 0,
       edgeCount: 0,
       dirty: 0,
+      icons: null,
     };
     this.frameInputs = {
       camera: this.camera,
@@ -261,15 +280,16 @@ export class Engine {
       minLengthPx: init.options.edgeMinLengthPx,
       debug: Math.max(0, EDGE_DEBUG_MODES.indexOf(init.options.edgeDebug)),
     };
+    const iconOpts = { scale: init.options.iconScale, minPx: init.options.iconMinPx };
     const [sort, cull, nodes, edgeSort, edgeCull, edges] = await Promise.all([
       SortPass.create(device, layouts, graph, store.bounds),
-      TransformCullPass.create(device, layouts, init.options.lodTargetPx),
-      NodeGeometryPass.create(device, format, layouts),
+      TransformCullPass.create(device, layouts, init.options.lodTargetPx, iconOpts),
+      NodeGeometryPass.create(device, format, layouts, iconOpts),
       EdgeSortPass.create(device, graph, store.bounds),
       EdgeCullPass.create(device, layouts, edgeOpts),
       EdgeGeometryPass.create(device, format, layouts, edgeOpts),
     ]);
-    const order = await NodeOrderPass.create(device, cull, (b) => graph.retireAfterSubmit(b));
+    const order = await NodeOrderPass.create(device, cull, (b) => graph.retireAfterSubmit(b), iconOpts);
     nodes.order = order;
     // Compute runs in stage order: upload, node sort, edge sort, node cull, edge cull.
     frameGraph.addCompute(new UploadPass(graph));
@@ -317,6 +337,46 @@ export class Engine {
       this.newData();
     }
     this.markDirty(dirty);
+  }
+
+  updateNodes(start: number, arrays: NodeArrays): void {
+    this.store.updateNodes(start, arrays);
+    let dirty = 0;
+    for (const [k, flag] of UPDATE_DIRTY) if (arrays[k]) dirty |= flag;
+    this.markDirty(dirty);
+  }
+
+  defineIcons(id: number, icons: readonly IconSource[]): void {
+    this.iconChain = this.iconChain
+      .then(() => this.loadIcons())
+      .then((atlas) => {
+        if (this.destroyed) return;
+        atlas.define(icons);
+        this.markDirty(Dirty.STYLE);
+        this.init.onIcons(id, null);
+      })
+      .catch((e: unknown) => this.init.onIcons(id, e instanceof GraphError ? e : new GraphError("internal", String(e))));
+  }
+
+  private loadIcons(): Promise<IconAtlas> {
+    this.iconLoad ??= Promise.allSettled([
+      IconAtlas.create(this.gpu),
+      this.passes.cull.iconScatter.load(),
+      this.passes.order.iconScatter.load(),
+      this.passes.nodes.iconVariant.load(),
+      this.hover?.iconPipe.load(),
+    ]).then(([atlas, ...rest]) => {
+      const failed = [atlas, ...rest].find((r) => r.status === "rejected");
+      if (failed || this.destroyed) {
+        if (atlas.status === "fulfilled") atlas.value.destroy();
+        this.iconLoad = null;
+        throw failed ? failed.reason : new GraphError("destroyed", "Graph destroyed");
+      }
+      this.iconAtlas = (atlas as PromiseFulfilledResult<IconAtlas>).value;
+      this.markDirty(Dirty.STYLE);
+      return this.iconAtlas;
+    });
+    return this.iconLoad;
   }
 
   setEdges(count: number, arrays: EdgeArrays): void {
@@ -372,7 +432,7 @@ export class Engine {
     const hoverEdges = (this.hoverKinds & PICKED_EDGES) !== 0;
     if (!hoverNodes) this.hoverNode = -1;
     if (!hoverEdges) this.hoverEdge = -1;
-    if (!hoverNodes && this.hover?.setNode(-1, 0, false)) this.markDirty(Dirty.HOVER);
+    if (!hoverNodes && this.hover?.setNode(-1, 0, false, this.pixelRatio)) this.markDirty(Dirty.HOVER);
     if (!hoverEdges && this.hover?.setEdge(-1, 0, 0, 0)) this.markDirty(Dirty.HOVER);
     const edges = hoverEdges || (this.clickKinds & PICKED_EDGES) !== 0;
     const any = this.hoverKinds !== 0 || this.clickKinds !== 0 || this.nodeDrag;
@@ -395,12 +455,22 @@ export class Engine {
       };
       const style = o.hoverStyle;
       const hover = style
-        ? HoverPass.create(this.gpu.device, this.gpu.format, this.layouts, this.graph, o.directedEdges, {
-            nodeColor: packRgbaTuple(style.nodeColor),
-            nodeScale: style.nodeScale,
-            edgeColor: packRgbaTuple(style.edgeColor),
-            edgeWidth: style.edgeWidth,
-          })
+        ? HoverPass.create(
+            this.gpu.device,
+            this.gpu.format,
+            this.layouts,
+            this.graph,
+            o.directedEdges,
+            {
+              nodeOutlineColor: packRgbaTuple(style.nodeOutlineColor),
+              nodeOutlineScale: style.nodeOutlineScale,
+              nodeOutlineMinWidth: style.nodeOutlineMinWidth,
+              nodeOutlineMaxWidth: style.nodeOutlineMaxWidth,
+              edgeColor: packRgbaTuple(style.edgeColor),
+              edgeWidth: style.edgeWidth,
+            },
+            { scale: o.iconScale, minPx: o.iconMinPx },
+          )
         : Promise.resolve(null);
       Promise.all([PickPass.create(this.gpu.device, this.layouts, o.lodTargetPx, edgeOpts), hover]).then(
         ([pick, hover]) => {
@@ -414,6 +484,12 @@ export class Engine {
           this.hover = hover;
           this.passes.nodes.hover = hover;
           this.passes.edges.hover = hover;
+          if (hover && this.iconLoad) {
+            hover.iconPipe.load().then(
+              () => this.markDirty(Dirty.HOVER),
+              (e: unknown) => this.init.onError(e instanceof GraphError ? e : new GraphError("internal", String(e)), false),
+            );
+          }
           this.pickWanted = this.hoverKinds !== 0;
           this.wake();
         },
@@ -578,7 +654,7 @@ export class Engine {
     const hover = this.hover;
     if (!hover) return;
     let changed = false;
-    if (hoverNodes) changed = hover.setNode(node, nodeScale, this.store.hasNodeShapes) || changed;
+    if (hoverNodes) changed = hover.setNode(node, nodeScale, this.store.hasNodeShapes, this.pixelRatio) || changed;
     if (hoverEdges) {
       const ch = this.store.channels;
       const ends = ch.edgeIdx.data as Uint32Array;
@@ -586,11 +662,6 @@ export class Engine {
       changed = hover.setEdge(edge, edge >= 0 ? ends[edge * 2]! : 0, edge >= 0 ? ends[edge * 2 + 1]! : 0, style) || changed;
     }
     if (changed) this.markDirty(Dirty.HOVER);
-  }
-
-  updatePositions(start: number, data: Float32Array): void {
-    this.store.updatePositions(start, data);
-    this.markDirty(Dirty.POSITIONS);
   }
 
   setStream(stream: StreamSlots): void {
@@ -636,11 +707,6 @@ export class Engine {
     this.streamedPositions = null;
     this.streamedColors = null;
     this.streamedZIndex = null;
-  }
-
-  updateColor(index: number, rgba: number): void {
-    this.store.updateColor(index, rgba);
-    this.markDirty(Dirty.STYLE);
   }
 
   setView(view: Partial<CameraView>): void {
@@ -723,6 +789,7 @@ export class Engine {
     this.passes.edgeCull.destroy();
     this.passes.labels.destroy();
     this.labels.destroy();
+    this.iconAtlas?.destroy();
     this.profiler.destroy();
     this.graph.destroy();
     this.frameUniform.destroy();
@@ -801,7 +868,10 @@ export class Engine {
     this.frameGraph.split = full;
     const uploaded = this.graph.flush();
     if (full) probe.mark(CPU.UPLOAD);
-    const nodeCount = this.reserveNodes();
+    const atlas = this.iconAtlas;
+    if (atlas && atlas.paletteVersion !== this.store.paletteVersion) atlas.setPalette(this.store.iconPalette, this.store.paletteVersion);
+    const icons = this.store.hasIcons && atlas !== null && atlas.count > 0;
+    const nodeCount = this.reserveNodes(icons);
     const edgeCount = this.reserveEdges();
     if (full) probe.mark(CPU.RESERVE);
 
@@ -818,6 +888,7 @@ export class Engine {
     ctx.nodeCount = nodeCount;
     ctx.edgeCount = edgeCount;
     ctx.dirty = this.dirty;
+    ctx.icons = icons && this.passes.cull.tailed ? atlas : null;
     this.passes.edges.perEdgeStyle = this.store.hasEdgeStyles;
     this.passes.edges.perEdgeColor = this.store.hasEdgeColors;
     this.passes.cull.shapes = this.store.hasNodeShapes;
@@ -877,12 +948,19 @@ export class Engine {
   };
 
   /** Size the cull buffers for the current node count; returns the drawable count. */
-  private reserveNodes(): number {
+  private reserveNodes(icons: boolean): number {
     const n = this.store.nodeCount;
-    if (n !== this.reservedFor) {
+    if (n !== this.reservedFor || icons !== this.reservedIcons) {
+      this.reservedIcons = icons;
+      const tail = icons && this.passes.cull.fits(n, true);
+      if (icons && !tail && !this.iconsTooLarge) {
+        const msg = `${n.toLocaleString("en-US")} nodes with icons need a larger buffer than this GPU binds: nodes are drawn without icons.`;
+        this.init.onError(new GraphError("limits-exceeded", msg), false);
+      }
+      this.iconsTooLarge = icons && !tail;
       try {
         const retire = (b: GPUBuffer) => this.graph.retireAfterSubmit(b);
-        this.passes.cull.reserve(n, retire);
+        this.passes.cull.reserve(n, retire, tail);
         this.passes.nodes.bind(this.passes.cull.outputs!);
         this.reservedFor = n;
       } catch (e) {

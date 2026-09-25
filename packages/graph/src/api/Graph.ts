@@ -5,6 +5,7 @@
 import { InputRing } from "../bridge/InputRing";
 import { StreamSlots } from "../bridge/StreamSlots";
 import type { FromWorker, ToWorker } from "../bridge/protocol";
+import type { NodeArrays } from "../data/GraphStore";
 import { createStateBuffer, STATE_SLOT } from "../bridge/SharedState";
 import { DebugOverlay } from "./DebugOverlay";
 import { errorFromCode, GraphError, UnsupportedError } from "./errors";
@@ -21,9 +22,11 @@ import type {
   GraphStats,
   LabelSnapshot,
   EdgeData,
+  IconSource,
   NodeData,
   NodeStream,
   NodeStreamChannels,
+  NodeUpdate,
   RGBA,
 } from "./types";
 
@@ -43,6 +46,11 @@ const DEFAULT_FIT_PADDING = 24;
 const DEFAULT_PICK_RATE = 60;
 const DEFAULT_EDGE_PICK_RADIUS = 4;
 const HOVER_WHITE: RGBA = [1, 1, 1, 1];
+const DEFAULT_OUTLINE_SCALE = 0.08;
+const DEFAULT_OUTLINE_MIN_WIDTH = 3;
+const DEFAULT_OUTLINE_MAX_WIDTH = 12;
+const DEFAULT_ICON_SCALE = 0.6;
+const DEFAULT_ICON_MIN_PX = 6;
 
 type Listener<K extends keyof GraphEvents> = (payload: GraphEvents[K]) => void;
 
@@ -97,12 +105,16 @@ export class Graph {
           options.hoverStyle === false
             ? null
             : {
-                nodeColor: options.hoverStyle?.nodeColor ?? HOVER_WHITE,
-                nodeScale: Math.max(0, options.hoverStyle?.nodeScale ?? 1.25),
+                nodeOutlineColor: options.hoverStyle?.nodeOutlineColor ?? HOVER_WHITE,
+                nodeOutlineScale: Math.max(0, options.hoverStyle?.nodeOutlineScale ?? DEFAULT_OUTLINE_SCALE),
+                nodeOutlineMinWidth: Math.max(0, options.hoverStyle?.nodeOutlineMinWidth ?? DEFAULT_OUTLINE_MIN_WIDTH),
+                nodeOutlineMaxWidth: Math.max(0, options.hoverStyle?.nodeOutlineMaxWidth ?? DEFAULT_OUTLINE_MAX_WIDTH),
                 edgeColor: options.hoverStyle?.edgeColor ?? HOVER_WHITE,
                 edgeWidth: Math.max(0, options.hoverStyle?.edgeWidth ?? 2),
               },
         nodeDrag: options.nodeDrag ?? false,
+        iconScale: Math.min(1, Math.max(0.01, options.iconScale ?? DEFAULT_ICON_SCALE)),
+        iconMinPx: Math.max(0, options.iconMinPx ?? DEFAULT_ICON_MIN_PX),
         timeOrigin: performance.timeOrigin,
       },
     };
@@ -157,6 +169,7 @@ export class Graph {
   private benchSeq = 0;
   private benchPending: { id: number; resolve: (r: BenchmarkResult) => void; reject: (e: Error) => void } | null = null;
   private readonly snapshotPending = new Map<number, { resolve: (s: LabelSnapshot) => void; reject: (e: Error) => void }>();
+  private readonly iconsPending = new Map<number, { resolve: () => void; reject: (e: Error) => void }>();
   private readonly listeners: { [K in keyof GraphEvents]: Set<Listener<K>> } = {
     error: new Set(),
     nodeHover: new Set(),
@@ -212,13 +225,21 @@ export class Graph {
     if (!Number.isInteger(n) || n < 0) throw new GraphError("invalid-argument", "setNodes: count must be a non-negative integer");
     const transfer: Transferable[] = [];
     const positions = data.positions && take(data.positions, n * 2, "positions", opts, transfer);
-    const colors = data.colors && take(asWords(data.colors), n, "colors", opts, transfer);
-    const sizes = data.sizes && take(data.sizes, n, "sizes", opts, transfer);
-    const shapes = data.shapes && take(data.shapes, n, "shapes", opts, transfer);
-    const zIndex = data.zIndex && take(data.zIndex, n, "zIndex", opts, transfer);
     this.nodeCount = n;
-    this.send({ t: "nodes", count: n, positions, colors, sizes, shapes, zIndex }, transfer);
+    this.send({ t: "nodes", count: n, ...nodeArrays(data, n, opts, transfer) }, transfer);
     if (t0) this.apiEnd("setNodes", t0);
+  }
+
+  updateNodes(start: number, data: NodeUpdate, opts?: CopyOption): void {
+    const n = updateCount(data);
+    if (n === 0) return;
+    if (!Number.isInteger(start) || start < 0 || start + n > this.nodeCount) {
+      throw new GraphError("invalid-argument", "updateNodes: range exceeds node count");
+    }
+    const t0 = this.apiStart();
+    const transfer: Transferable[] = [];
+    this.send({ t: "updateNodes", start, ...nodeArrays(data, n, opts, transfer) }, transfer);
+    if (t0) this.apiEnd("updateNodes", t0);
   }
 
   /**
@@ -288,6 +309,32 @@ export class Graph {
     this.setNodes({ count: this.nodeCount, zIndex }, opts);
   }
 
+  defineIcons(icons: readonly IconSource[]): Promise<void> {
+    if (this.destroyed) return Promise.reject(new GraphError("destroyed", "Graph destroyed"));
+    const t0 = this.apiStart();
+    const list = icons.map((icon, i): IconSource => {
+      if ("svg" in icon && typeof icon.svg === "string") return { svg: icon.svg };
+      if ("path" in icon && (typeof icon.path === "string" || Array.isArray(icon.path))) {
+        const viewBox = icon.viewBox ? ([...icon.viewBox] as [number, number, number, number]) : undefined;
+        return { path: typeof icon.path === "string" ? icon.path : [...icon.path], viewBox, fillRule: icon.fillRule };
+      }
+      throw new GraphError("invalid-argument", `defineIcons: icon ${i} needs a "path" or an "svg"`);
+    });
+    const id = ++this.benchSeq;
+    const done = new Promise<void>((resolve, reject) => this.iconsPending.set(id, { resolve, reject }));
+    this.send({ t: "defineIcons", id, icons: list });
+    if (t0) this.apiEnd("defineIcons", t0);
+    return done;
+  }
+
+  setNodeIcons(icons: Uint16Array, opts?: CopyOption): void {
+    this.setNodes({ count: this.nodeCount, icons }, opts);
+  }
+
+  setNodeIconColors(colors: Uint32Array | Uint8Array, opts?: CopyOption): void {
+    this.setNodes({ count: this.nodeCount, iconColors: colors }, opts);
+  }
+
   streamNodes(channels: NodeStreamChannels): NodeStream {
     const count = this.nodeCount;
     const positions = channels.positions === true;
@@ -299,9 +346,7 @@ export class Graph {
       const c = new Uint32Array(colors ? count : 0);
       const z = new Uint8Array(zIndex ? count : 0);
       const commit = (): void => {
-        if (positions) this.updateNodePositions(0, p, { copy: true });
-        if (colors) this.setNodeColors(c, { copy: true });
-        if (zIndex) this.setNodeZIndex(z, { copy: true });
+        this.updateNodes(0, { positions: positions ? p : undefined, colors: colors ? c : undefined, zIndex: zIndex ? z : undefined }, { copy: true });
       };
       return { positions: p, colors: c, zIndex: z, commit };
     }
@@ -322,25 +367,6 @@ export class Graph {
         if (ring.claimWake()) this.worker.postMessage({ t: "wake" } satisfies ToWorker);
       },
     };
-  }
-
-  /** Partial update of positions for nodes `start .. start + data.length / 2`. Dirty-range tracked. */
-  updateNodePositions(start: number, data: Float32Array, opts?: CopyOption): void {
-    if (start < 0 || start + (data.length >> 1) > this.nodeCount) {
-      throw new GraphError("invalid-argument", "updateNodePositions: range exceeds node count");
-    }
-    const t0 = this.apiStart();
-    const transfer: Transferable[] = [];
-    const d = take(data, data.length, "data", opts, transfer);
-    this.send({ t: "updatePositions", start, data: d }, transfer);
-    if (t0) this.apiEnd("updateNodePositions", t0);
-  }
-
-  /** `rgba` is a packed rgba8unorm word (see `packRgba`). */
-  updateNodeColor(index: number, rgba: number): void {
-    const t0 = this.apiStart();
-    this.send({ t: "updateColor", index, rgba: rgba >>> 0 });
-    if (t0) this.apiEnd("updateNodeColor", t0);
   }
 
   // ---- style ---------------------------------------------------------------------
@@ -457,6 +483,8 @@ export class Graph {
     this.benchPending = null;
     for (const p of this.snapshotPending.values()) p.reject(new GraphError("destroyed", "Graph destroyed"));
     this.snapshotPending.clear();
+    for (const p of this.iconsPending.values()) p.reject(new GraphError("destroyed", "Graph destroyed"));
+    this.iconsPending.clear();
     this.pointer.dispose();
     this.resizeObserver?.disconnect();
     // The worker closes itself after releasing the device; terminate as a backstop.
@@ -536,6 +564,13 @@ export class Graph {
         for (const fn of this.listeners[m.event]) fn(e);
         return;
       }
+      case "defineIcons": {
+        const p = this.iconsPending.get(m.id);
+        this.iconsPending.delete(m.id);
+        if (m.code) p?.reject(errorFromCode(m.code, m.message ?? ""));
+        else p?.resolve();
+        return;
+      }
       case "labelSnapshot": {
         const p = this.snapshotPending.get(m.id);
         this.snapshotPending.delete(m.id);
@@ -569,12 +604,38 @@ function canvasDeviceSize(canvas: HTMLCanvasElement, pixelRatio: number): { widt
   return { width: Math.max(1, Math.round(r.width * pixelRatio)), height: Math.max(1, Math.round(r.height * pixelRatio)) };
 }
 
-function asWords(colors: Uint32Array | Uint8Array): Uint32Array {
+function asWords(colors: Uint32Array | Uint8Array, name: string): Uint32Array {
   if (colors instanceof Uint32Array) return colors;
   if (colors.byteOffset % 4 === 0 && colors.length % 4 === 0) {
     return new Uint32Array(colors.buffer, colors.byteOffset, colors.length / 4);
   }
-  throw new GraphError("invalid-argument", "colors: Uint8Array must be 4-byte aligned RGBA");
+  throw new GraphError("invalid-argument", `${name}: Uint8Array must be 4-byte aligned RGBA`);
+}
+
+function nodeArrays(data: NodeUpdate, n: number, opts: CopyOption | undefined, transfer: Transferable[]): NodeArrays {
+  return {
+    positions: data.positions && take(data.positions, n * 2, "positions", opts, transfer),
+    colors: data.colors && take(asWords(data.colors, "colors"), n, "colors", opts, transfer),
+    sizes: data.sizes && take(data.sizes, n, "sizes", opts, transfer),
+    shapes: data.shapes && take(data.shapes, n, "shapes", opts, transfer),
+    zIndex: data.zIndex && take(data.zIndex, n, "zIndex", opts, transfer),
+    icons: data.icons && take(data.icons, n, "icons", opts, transfer),
+    iconColors: data.iconColors && take(asWords(data.iconColors, "iconColors"), n, "iconColors", opts, transfer),
+  };
+}
+
+function updateCount(data: NodeUpdate): number {
+  const counts: number[] = [];
+  if (data.positions) counts.push(data.positions.length / 2);
+  if (data.colors) counts.push(data.colors instanceof Uint8Array ? data.colors.length / 4 : data.colors.length);
+  if (data.sizes) counts.push(data.sizes.length);
+  if (data.shapes) counts.push(data.shapes.length);
+  if (data.zIndex) counts.push(data.zIndex.length);
+  if (data.icons) counts.push(data.icons.length);
+  if (data.iconColors) counts.push(data.iconColors instanceof Uint8Array ? data.iconColors.length / 4 : data.iconColors.length);
+  const n = counts[0] ?? 0;
+  if (counts.some((c) => c !== n) || !Number.isInteger(n)) throw new GraphError("invalid-argument", "updateNodes: every array must cover the same nodes");
+  return n;
 }
 
 function isDetached(buf: ArrayBufferLike): boolean {
@@ -586,7 +647,7 @@ function isDetached(buf: ArrayBufferLike): boolean {
  * Validate length, then either copy or mark the backing buffer for transfer.
  * Transfer detaches the WHOLE backing buffer, including other views over it.
  */
-function take<T extends Float32Array | Uint32Array | Uint8Array>(arr: T, expected: number, name: string, opts: CopyOption | undefined, transfer: Transferable[]): T {
+function take<T extends Float32Array | Uint32Array | Uint16Array | Uint8Array>(arr: T, expected: number, name: string, opts: CopyOption | undefined, transfer: Transferable[]): T {
   if (isDetached(arr.buffer)) {
     throw new GraphError("detached-array", `${name}: array is detached (it was transferred earlier). Pass { copy: true } to keep using it.`);
   }
