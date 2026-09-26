@@ -4,17 +4,19 @@
  * Premultiplied alpha, no vertex buffers.
  */
 import { EDGE_CONSTANTS } from "../data/Layouts";
+import { edgeConstants, edgeKey, type Tunable, type Tune } from "../engine/Tune";
 import type { ContractLayouts } from "../gpu/BindLayouts";
 import { Stage, type FrameContext, type RenderNode } from "../gpu/FrameGraph";
+import { Variants } from "../gpu/Lazy";
 import { createShaderModule } from "../gpu/ShaderModules";
-import type { EdgeCullOptions, EdgeCullOutputs } from "./EdgeCullPass";
+import type { EdgeCullOutputs } from "./EdgeCullPass";
 import type { HoverPass } from "./HoverPass";
 
 /** Pipeline variant index: bit 0 = per-edge style, bit 1 = per-edge colour, bit 2 = node shapes. */
 const VARIANTS = 4;
 const SHAPE_VARIANTS = 8;
 
-export class EdgeGeometryPass implements RenderNode {
+export class EdgeGeometryPass implements RenderNode, Tunable {
   readonly stage = Stage.EDGE_GEOMETRY;
   readonly name = "edges";
 
@@ -26,15 +28,15 @@ export class EdgeGeometryPass implements RenderNode {
 
   private bound: EdgeCullOutputs | null = null;
   private bindGroup: GPUBindGroup | null = null;
+  private readonly pipelines = new Variants<readonly GPURenderPipeline[]>();
 
   private constructor(
     private readonly device: GPUDevice,
     private readonly layout: GPUBindGroupLayout,
-    private readonly pipelines: readonly GPURenderPipeline[],
-    private readonly directed: boolean,
+    private readonly make: (t: Tune) => Promise<readonly GPURenderPipeline[]>,
   ) {}
 
-  static async create(device: GPUDevice, format: GPUTextureFormat, layouts: ContractLayouts, opts: EdgeCullOptions): Promise<EdgeGeometryPass> {
+  static async create(device: GPUDevice, format: GPUTextureFormat, layouts: ContractLayouts, tune: Tune): Promise<EdgeGeometryPass> {
     const module = await createShaderModule(device, "passes/edge_geometry.wgsl");
     const read = (binding: number): GPUBindGroupLayoutEntry => ({ binding, visibility: GPUShaderStage.VERTEX, buffer: { type: "read-only-storage" } });
     const layout = device.createBindGroupLayout({ label: "group2/edges", entries: [read(0), read(1)] });
@@ -44,12 +46,9 @@ export class EdgeGeometryPass implements RenderNode {
       alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
     };
     // Every variant is built up front: choosing one must never wait inside a frame.
-    const make = (v: number) => {
+    const make = (t: Tune, v: number) => {
       const constants = {
-        EDGE_ARROWS: opts.directed ? 1 : 0,
-        EDGE_MAX_OVERDRAW: opts.maxOverdraw,
-        EDGE_MIN_LEN_PX: opts.minLengthPx,
-        EDGE_DEBUG: opts.debug,
+        ...edgeConstants(t),
         EDGE_PER_EDGE_STYLE: v & 1,
         EDGE_PER_EDGE_COLOR: (v >> 1) & 1,
         NODE_SHAPES: (v >> 2) & 1,
@@ -62,8 +61,23 @@ export class EdgeGeometryPass implements RenderNode {
         primitive: { topology: "triangle-strip" },
       });
     };
-    const pipelines = await Promise.all(Array.from({ length: opts.directed ? SHAPE_VARIANTS : VARIANTS }, (_, v) => make(v)));
-    return new EdgeGeometryPass(device, layout, pipelines, opts.directed);
+    const makeAll = (t: Tune) => Promise.all(Array.from({ length: t.arrows ? SHAPE_VARIANTS : VARIANTS }, (_, v) => make(t, v)));
+    const pass = new EdgeGeometryPass(device, layout, makeAll);
+    await pass.loadTune(tune);
+    pass.useTune(tune);
+    return pass;
+  }
+
+  loadTune(t: Tune): Promise<unknown> {
+    return this.pipelines.load(edgeKey(t), () => this.make(t));
+  }
+
+  hasTune(t: Tune): boolean {
+    return this.pipelines.get(edgeKey(t)) !== null;
+  }
+
+  useTune(t: Tune): void {
+    this.pipelines.use(edgeKey(t));
   }
 
   /** (Re)bind the cull outputs; a no-op when unchanged. */
@@ -82,7 +96,8 @@ export class EdgeGeometryPass implements RenderNode {
 
   encode(pass: GPURenderPassEncoder, ctx: FrameContext): void {
     if (ctx.edgeCount === 0 || ctx.nodeCount === 0 || !this.bindGroup || !this.bound) return;
-    pass.setPipeline(this.pipelines[(this.perEdgeStyle ? 1 : 0) | (this.perEdgeColor ? 2 : 0) | (this.shapes && this.directed ? 4 : 0)]!);
+    const pipes = this.pipelines.value!;
+    pass.setPipeline(pipes[(this.perEdgeStyle ? 1 : 0) | (this.perEdgeColor ? 2 : 0) | (this.shapes && pipes.length > VARIANTS ? 4 : 0)]!);
     pass.setBindGroup(0, ctx.frameBindGroup);
     pass.setBindGroup(1, ctx.graphBindGroup);
     pass.setBindGroup(2, this.bindGroup);

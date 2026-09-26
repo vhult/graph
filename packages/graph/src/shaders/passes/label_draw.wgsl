@@ -10,8 +10,7 @@
 
 override HALO : bool = true;
 
-const FILL : vec3<f32> = vec3<f32>(0.914, 0.929, 0.953);
-const EDGE_FILL : vec3<f32> = vec3<f32>(0.725, 0.765, 0.816);
+const EDGE_SHADE : vec3<f32> = vec3<f32>(0.793, 0.823, 0.856);
 const HALO_COLOR : vec4<f32> = vec4<f32>(0.031, 0.039, 0.055, 0.85);
 
 struct VOut {
@@ -43,7 +42,7 @@ fn vs(@builtin(vertex_index) vi : u32, @builtin(instance_index) ii : u32) -> VOu
   let local = vec2<f32>(f32(word >> 16u), 0.0) + corner * size;
   var sp : vec2<f32>;
   if ((e.index & LABEL_EDGE_BIT) != 0u) {
-    let ij = ends[e.index & ~LABEL_EDGE_BIT];
+    let ij = ends[e.index & ~LABEL_EDGE_BIT] & vec2<u32>(EDGE_END_MASK, 0xFFFFFFFFu);
     let a = worldToScreen(positions[ij.x]);
     let b = worldToScreen(positions[ij.y]);
     var dir = normalize(b - a + vec2<f32>(1e-6, 0.0));
@@ -71,6 +70,7 @@ fn fs(in : VOut) -> @location(0) vec4<f32> {
     let a = HALO_COLOR.a * t.g * in.alpha;
     return vec4<f32>(HALO_COLOR.rgb * a, a);
   }
-  let a = t.r * in.alpha;
-  return vec4<f32>(select(FILL, EDGE_FILL, in.edge != 0u) * a, a);
+  let fill = unpack4x8unorm(label.color);
+  let a = t.r * in.alpha * fill.a;
+  return vec4<f32>(select(fill.rgb, fill.rgb * EDGE_SHADE, in.edge != 0u) * a, a);
 }

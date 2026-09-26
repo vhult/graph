@@ -20,3 +20,7 @@ export const Dirty = {
   HOVER: 1 << 12,
   MOVED: 1 << 13,
 } as const;
+
+export function edgeUpdateDirty(arrays: { indices?: unknown; styles?: unknown }, all: boolean): number {
+  return arrays.indices || (all && arrays.styles) ? Dirty.EDGES | Dirty.STYLE : Dirty.STYLE;
+}

@@ -2,8 +2,9 @@
  * Pan / zoom controls, applied in the worker from InputRing records.
  * Pointer coordinates are absolute device px, so coalescing moves loses nothing.
  */
+import type { Mode } from "../api/types";
 import { INPUT, MOD, type InputRecord } from "../bridge/InputRing";
-import type { Camera2D } from "./Camera2D";
+import { type Camera2D, wrapAngle } from "./Camera2D";
 
 const WHEEL_ZOOM_SPEED = 0.0015;
 /** Trackpad pinch arrives as ctrl+wheel with small deltas. */
@@ -28,15 +29,55 @@ const ZOOM_TAU_S = 0.05;
 const ZOOM_EPSILON = 1e-4;
 /** Longest dt honoured, seconds: after an idle sleep the gap is meaningless. */
 const MAX_STEP_S = 0.1;
+const WHEEL_END_MS = 150;
+const TURN = Math.PI * 2;
+
+export class Gesture {
+  dirty = false;
+  sent = false;
+  ended = false;
+  dx = 0;
+  dy = 0;
+  factor = 1;
+  angle = 0;
+  x = 0;
+  y = 0;
+  mods = 0;
+
+  at(x: number, y: number, mods: number): void {
+    this.dirty = true;
+    this.x = x;
+    this.y = y;
+    this.mods = mods;
+  }
+
+  end(): void {
+    if (this.dirty || this.sent) this.ended = true;
+  }
+
+  clear(): void {
+    this.dirty = false;
+    this.dx = 0;
+    this.dy = 0;
+    this.factor = 1;
+    this.angle = 0;
+  }
+}
 
 export class Controls {
-  enabled = true;
+  panMode: Mode = "auto";
+  zoomMode: Mode = "auto";
+  rotateMode: Mode = false;
   hold = false;
   pinching = false;
+  readonly panGesture = new Gesture();
+  readonly zoomGesture = new Gesture();
+  readonly rotateGesture = new Gesture();
   /** Last pointer position, device px; -1 when outside the canvas. */
   pointerX = -1;
   pointerY = -1;
   private dragging = false;
+  private mods = 0;
   /** Natural log of the zoom factor still to be applied. 0 when settled. */
   private pendingZoomLog = 0;
   private anchorX = 0;
@@ -44,15 +85,21 @@ export class Controls {
   private pinchX = 0;
   private pinchY = 0;
   private pinchDist = 0;
+  private pinchAngle = 0;
+  private wheeling = false;
+  private wheelStep = false;
+  private wheelMs = 0;
 
   /** Apply one record. Returns true if the camera changed. */
   apply(rec: InputRecord, camera: Camera2D): boolean {
+    this.mods = rec.mods;
     switch (rec.type) {
       case INPUT.POINTER_DOWN:
-        this.pinching = false;
+        this.endPinch();
+        this.panGesture.end();
         this.pointerX = rec.x;
         this.pointerY = rec.y;
-        this.dragging = this.enabled && (rec.buttons & 1) !== 0;
+        this.dragging = this.panMode !== false && (rec.buttons & 1) !== 0;
         return false;
 
       case INPUT.POINTER_MOVE: {
@@ -61,55 +108,85 @@ export class Controls {
         const wasInside = this.pointerX >= 0;
         this.pointerX = rec.x;
         this.pointerY = rec.y;
-        if (this.hold || !this.dragging || !wasInside || (rec.buttons & 1) === 0) {
-          if ((rec.buttons & 1) === 0) this.dragging = false;
+        if (this.hold || !this.dragging || !wasInside || (rec.buttons & 1) === 0 || this.panMode === false) {
+          if ((rec.buttons & 1) === 0 && this.dragging) {
+            this.dragging = false;
+            this.panGesture.end();
+          }
           return false;
         }
         if (dx === 0 && dy === 0) return false;
-        camera.panByScreen(dx, dy);
-        return true;
+        return this.panBy(dx, dy, rec.x, rec.y, camera);
       }
 
       case INPUT.POINTER_UP:
-        this.pinching = false;
+        this.endPinch();
         this.dragging = false;
+        this.panGesture.end();
         return false;
 
       case INPUT.POINTER_LEAVE:
-        this.pinching = false;
+        this.endPinch();
         if (!this.dragging) this.pointerX = this.pointerY = -1;
         return false;
 
       case INPUT.WHEEL: {
-        if (!this.enabled || rec.dy === 0) return false;
+        if (this.zoomMode === false || rec.dy === 0) return false;
         const speed = (rec.mods & MOD.CTRL) !== 0 ? PINCH_ZOOM_SPEED : WHEEL_ZOOM_SPEED;
+        const step = -rec.dy * speed;
+        const g = this.zoomGesture;
+        g.factor *= Math.exp(step);
+        g.at(rec.x, rec.y, rec.mods);
+        this.wheeling = true;
+        this.wheelStep = true;
+        if (this.zoomMode !== "auto") return false;
         // Accumulate into the target; `advance` applies it over several frames.
         // Notches that arrive mid-glide simply add, so fast scrolling stays
         // responsive instead of queueing.
-        this.pendingZoomLog += -rec.dy * speed;
+        this.pendingZoomLog += step;
         this.anchorX = rec.x;
         this.anchorY = rec.y;
         return true;
       }
 
       case INPUT.PINCH: {
-        if (!this.enabled) return false;
         const dx = rec.x - this.pinchX;
         const dy = rec.y - this.pinchY;
         const factor = this.pinchDist > 0 && rec.dx > 0 ? rec.dx / this.pinchDist : 1;
+        let turn = rec.dy - this.pinchAngle;
+        turn -= TURN * Math.round(turn / TURN);
         const anchor = !this.pinching;
         this.pinching = true;
         this.pinchX = rec.x;
         this.pinchY = rec.y;
         this.pinchDist = rec.dx;
+        this.pinchAngle = rec.dy;
         if (anchor) {
           this.pendingZoomLog = 0;
           return false;
         }
-        if (dx === 0 && dy === 0 && factor === 1) return false;
-        camera.panByScreen(dx, dy);
-        camera.zoomAt(factor, rec.x, rec.y);
-        return true;
+        let moved = false;
+        if ((dx !== 0 || dy !== 0) && this.panMode !== false) moved = this.panBy(dx, dy, rec.x, rec.y, camera);
+        if (factor !== 1 && this.zoomMode !== false) {
+          const g = this.zoomGesture;
+          g.factor *= factor;
+          g.at(rec.x, rec.y, rec.mods);
+          if (this.zoomMode === "auto") {
+            camera.zoomAt(factor, rec.x, rec.y);
+            moved = true;
+          }
+        }
+        if (turn !== 0 && this.rotateMode !== false) {
+          const g = this.rotateGesture;
+          g.angle += turn;
+          g.at(rec.x, rec.y, rec.mods);
+          if (this.rotateMode === "auto") {
+            camera.rotateAround(turn, rec.x, rec.y);
+            camera.rotation = wrapAngle(camera.rotation);
+            moved = true;
+          }
+        }
+        return moved;
       }
     }
     return false;
@@ -138,18 +215,49 @@ export class Controls {
     return true;
   }
 
+  settleWheel(nowMs: number): number {
+    if (!this.wheeling) return 0;
+    if (this.wheelStep) {
+      this.wheelStep = false;
+      this.wheelMs = nowMs;
+    }
+    const left = this.wheelMs + WHEEL_END_MS - nowMs;
+    if (left > 0) return left;
+    this.wheeling = false;
+    this.zoomGesture.end();
+    return 0;
+  }
+
   release(fromX: number, fromY: number, camera: Camera2D): boolean {
     this.hold = false;
     if (!this.dragging) return false;
     const dx = this.pointerX - fromX;
     const dy = this.pointerY - fromY;
     if (dx === 0 && dy === 0) return false;
-    camera.panByScreen(dx, dy);
-    return true;
+    return this.panBy(dx, dy, this.pointerX, this.pointerY, camera);
   }
 
   /** Drop any in-flight glide; a programmatic view change wins outright. */
   cancelZoom(): void {
     this.pendingZoomLog = 0;
+  }
+
+  private panBy(dx: number, dy: number, x: number, y: number, camera: Camera2D): boolean {
+    const g = this.panGesture;
+    g.dx += dx;
+    g.dy += dy;
+    g.at(x, y, this.mods);
+    if (this.panMode !== "auto") return false;
+    camera.panByScreen(dx, dy);
+    return true;
+  }
+
+  private endPinch(): void {
+    if (!this.pinching) return;
+    this.pinching = false;
+    this.wheeling = false;
+    this.panGesture.end();
+    this.zoomGesture.end();
+    this.rotateGesture.end();
   }
 }

@@ -28,7 +28,7 @@ const meta: Meta<Args> = {
   title: "Experiments/Lorenz",
   render: renderGraph<Args>({
     describe: () => "Lorenz · points flowing along the attractor as it turns in 3D, depth streamed as z-index every frame",
-    options: () => ({ hoverStyle: false, nodeDrag: false }),
+    options: () => ({ input: { drag: false, select: false }, style: { hover: false } }),
     load: (a) => {
       const l = attractor(a);
       return { data: l.data.graph, genMs: l.genMs };
@@ -36,8 +36,8 @@ const meta: Meta<Args> = {
     onLoad: (graph, g, a) => {
       stop();
       const id = run;
-      graph.setBackground([0.01, 0.005, 0.03, 1]);
-      frame = () => graph.camera.setView({ x: 0, y: 0, rotation: 0, zoom: (Math.min(innerWidth, innerHeight) * devicePixelRatio) / (2 * LORENZ.extent * LORENZ.scale) });
+      graph.style.set({ background: [0.01, 0.005, 0.03, 1] });
+      frame = () => graph.camera.set({ x: 0, y: 0, rotation: 0, zoom: Math.min(innerWidth, innerHeight) / (2 * LORENZ.extent * LORENZ.scale) });
       frame();
       addEventListener("resize", frame);
       const l = attractor(a).data;

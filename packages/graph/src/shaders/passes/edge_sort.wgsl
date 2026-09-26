@@ -33,6 +33,8 @@ struct EdgeKeyParams {
 @group(0) @binding(5) var<storage, read_write> vals : array<u32>;
 @group(0) @binding(6) var<storage, read_write> mapped : array<vec2<u32>>; // engine indices, user order
 
+override EDGE_END_MASK : u32;
+
 const WG : u32 = 256u;
 
 @compute @workgroup_size(WG)
@@ -43,8 +45,8 @@ fn edge_keys(@builtin(global_invocation_id) gid : vec3<u32>) {
   }
   let last = params.nodeCount - 1u;
   let u = edgeUser[i];
-  let ij = vec2<u32>(rank[min(u.x, last)], rank[min(u.y, last)]);
-  mapped[i] = ij;
+  let ij = vec2<u32>(rank[min(u.x & EDGE_END_MASK, last)], rank[min(u.y, last)]);
+  mapped[i] = vec2<u32>(ij.x | (u.x & ~EDGE_END_MASK), ij.y);
 
   let pa = positions[ij.x];
   let pb = positions[ij.y];

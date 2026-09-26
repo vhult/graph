@@ -46,24 +46,26 @@ const n = 100_000;
 const positions = new Float32Array(2 * n); // x, y interleaved, world units
 for (let i = 0; i < 2 * n; i++) positions[i] = Math.random() * 1000;
 
-graph.setNodes({
+graph.nodes.set({
   count: n,
   positions,
   sizes: new Float32Array(n).fill(4), // diameters, world units
   colors: new Uint32Array(n).fill(packRgba(0.3, 0.6, 1)),
 });
-graph.setEdges({ count: 2, indices: new Uint32Array([0, 1, 1, 2]) }); // source, target pairs
+graph.edges.set({ count: 2, indices: new Uint32Array([0, 1, 1, 2]) }); // source, target pairs
 graph.camera.fit();
 ```
 
-Pan and zoom are built in, with one-finger pan and two-finger pinch zoom on
-touch screens (`controls: false` turns them off). Hover and click events work
-as soon as you listen to them, and `nodeDrag: true` lets the user drag nodes.
-Call `graph.destroy()` to release the worker and the GPU device.
+Pan, zoom, node drag, selection, hover and picking are built in, with
+one-finger pan and two-finger pinch zoom on touch screens. Each one is set with
+`graph.input.set({ pan, zoom, drag, select })` to `"auto"` (the default),
+`"manual"` (the engine only fires the events) or `false`. Rotate is built in but
+off by default: `graph.input.set({ rotate: "auto" })` turns on the two-finger
+twist. Call `graph.destroy()` to release the worker and the GPU device.
 
-**Arrays are transferred, not copied**: after `setNodes` / `setEdges` the arrays
-you passed are detached. Pass `{ copy: true }` as the second argument to keep
-them.
+**Arrays are transferred, not copied**: after `nodes.set` / `edges.set` the
+arrays you passed are detached. Pass `{ copy: true }` as the last argument to
+keep them.
 
 ## Serve with cross-origin isolation
 
@@ -99,26 +101,30 @@ Everything is typed; the `.d.ts` files document each option and method.
 
 | | |
 |---|---|
-| `Graph.create(canvas, options?)` | Start the engine. Rejects with `UnsupportedError` when WebGPU or `OffscreenCanvas` is missing |
-| `setNodes`, `setEdges` | Bulk-load typed arrays (set nodes first, then edges) |
-| `setNodePositions`, `setNodeColors`, `setNodeSizes`, `setNodeShapes`, `setNodeZIndex`, `setNodeIcons`, `setNodeIconColors`, `setNodeCount` | Replace one node channel. Shapes are `NodeShape.circle`, `square` or `hexagon`; z-index goes from 0 (bottom) to 15 (top) |
-| `updateNodes(start, data)` | Change any node channels for the nodes from `start`, uploading only those |
-| `defineIcons(icons)` | The icon set: `{ path, viewBox?, fillRule? }` (SVG path data) or `{ svg }` (SVG markup). Resolves once the icons are ready. Nodes pick one with `icons` (its index, `NO_ICON` for none) and tint it with `iconColors`; `iconScale` and `iconMinPx` set its size in the node and the size below which it is not drawn |
-| `streamNodes({ positions, colors, zIndex })` | Write every position, colour and/or z-index each frame from your own loop, then `commit()`; they arrive in the same frame |
-| `setNodeLabels`, `setEdgeLabels` | Label text, placed without overlap |
-| `setBackground`, `setNodeScale` | Style |
-| `setNodeDrag(enabled)` | Turn node dragging on or off (also the `nodeDrag` option) |
-| `camera.fit`, `camera.setView`, `camera.getView` | Camera control |
-| `resize`, `requestRender` | Manual resize (with `autoResize: false`) and a forced frame |
-| `readStats(out?)` | Frame stats: visible counts, CPU/GPU ms, GPU memory held. GPU ms are NaN while the debug overlay is closed |
+| `Graph.create(canvas, options?)` | Start the engine. Options: `pixelRatio`, `autoResize`, `style`, `input`. Rejects with `UnsupportedError` when WebGPU or `OffscreenCanvas` is missing |
+| `nodes.set`, `edges.set` | Bulk-load typed arrays (set nodes first, then edges; `nodes.set` removes every edge) |
+| `nodes.add`, `edges.add` | Add nodes or edges and get their indices back. Indices never move until you remove them |
+| `nodes.remove`, `edges.remove` | Remove nodes or edges. Removing a node removes its edges, reported by the `edgesRemoved` event |
+| `nodes.update(indices, data)`, `edges.update(indices, data)` | Change any channels for a list of indices, uploading only those |
+| `nodes.updateAll(data)`, `edges.updateAll(data)` | Change any channels for every slot. Node channels: `positions`, `colors`, `sizes`, `shapes` (`NodeShape.circle`, `square` or `hexagon`), `zIndex` (0 bottom to 15 top), `icons`, `iconColors`, `labels`. Edge channels: `indices`, `styles` (`packEdgeStyle`), `colors`, `labels` |
+| `nodes.flag`, `edges.flag` | Turn `Flag.hidden`, `Flag.selected`, `Flag.dimmed` or `Flag.focused` on or off for a list of indices or `"all"` |
+| `nodes.clear`, `nodes.compact`, `nodes.count`, `nodes.slots` (and the same on `edges`) | Remove everything, pack live items into the first slots, count live items and slots |
+| `nodes.stream({ positions, colors, zIndex })` | Write every position, colour and/or z-index each frame from your own loop, then `commit()`; they arrive in the same frame |
+| `icons.define`, `icons.add`, `icons.replace`, `icons.remove` | The icon set: `{ path, viewBox?, fillRule? }` (SVG path data) or `{ svg }` (SVG markup). Nodes pick one with `icons` (its id, `NO_ICON` for none) and tint it with `iconColors`; `style.icon.scale` and `style.icon.minPx` set its size in the node and the size below which it is not drawn |
+| `style.set(partial)` | The look at any time: `background`, `nodeScale`, `edge`, `label`, `icon`, `hover`, `selected`, `focused`, `dimmed`, `selection` |
+| `input.set(partial)` | Interactions and picking: `pan`, `zoom`, `rotate`, `drag`, `select`, `selectShape`, `selectKey`, `pick`, `pickRadius`, `edgePickRadius` |
+| `camera.get`, `camera.set`, `camera.fit`, `camera.rotate`, `camera.limits`, `camera.toWorld`, `camera.toScreen` | Camera control. Zoom is CSS px per world unit; `set`, `fit` and `rotate` animate when given a `duration` |
+| `query.at(x, y)`, `query.inside(shape)` | What is at a canvas point, and the nodes inside a box or polygon |
+| `canvas.resize`, `canvas.render`, `canvas.snapshot` | Manual resize (with `autoResize: false`), a forced frame, and an image of the current frame |
+| `stats(out?)` | Frame stats: visible counts, CPU/GPU ms, GPU memory held. GPU ms are NaN while the debug overlay is closed |
 | `debug.open`, `debug.close`, `debug.toggle`, `debug.isOpen` | Debug overlay drawn over the canvas. Measures nothing while closed |
 | `debug.expand(bool)` | Switch the overlay between the small view and the full per-pass, per-stage view |
 | `debug.record()`, `debug.stop()` | Record up to 10 s of per-frame data; resolves with the JSON recording |
-| `benchmark(options)` | Play a camera path and record per-frame CPU and GPU times |
-| `on("nodeHover", fn)`, `on("edgeHover", fn)` | The node or edge under the pointer, as your index, or `null` |
-| `on("nodeClick", fn)`, `on("edgeClick", fn)` | The node or edge clicked, or `null` for empty space |
-| `on("nodeDragStart", fn)`, `on("nodeDrag", fn)`, `on("nodeDragEnd", fn)` | A node the user drags, as `{ index, x, y }` in world units |
-| `on("error", fn)` | Runtime errors, e.g. device loss |
+| `debug.benchmark(options)` | Play a camera path and record per-frame CPU and GPU times |
+| `on("hover", fn)`, `on("click", fn)`, `on("doubleClick", fn)`, `on("contextMenu", fn)` | What is under the pointer, as a `Hit`: `node`, `edge` (your indices, or `null`), world `x`, `y` and canvas `screenX`, `screenY` |
+| `on("dragStart", fn)`, `on("drag", fn)`, `on("dragEnd", fn)` | A drag of one node or every selected node: `{ index, nodes, x, y }` at the start, then `{ index, dx, dy }` in world units |
+| `on("select", fn)`, `on("pan", fn)`, `on("zoom", fn)`, `on("rotate", fn)`, `on("view", fn)` | Selection, gesture steps and camera moves |
+| `on("edgesRemoved", fn)`, `on("error", fn)` | Edges removed with a node, and runtime errors, e.g. device loss |
 | `destroy()` | Release everything |
 
 ## Three nodes, one edge
@@ -131,7 +137,7 @@ import { Graph, packRgba } from "@vhult/graph";
 // The canvas needs a CSS size. The engine reads it and tracks resizes.
 const graph = await Graph.create(document.querySelector("canvas")!);
 
-graph.setNodes({
+graph.nodes.set({
   count: 3,
   // x, y interleaved, in world units — any scale you like
   positions: new Float32Array([0, 0, 100, 0, 50, 80]),
@@ -142,7 +148,7 @@ graph.setNodes({
 });
 
 // Pairs of node indices: this joins node 0 to 1, and 1 to 2.
-graph.setEdges({ count: 2, indices: new Uint32Array([0, 1, 1, 2]) });
+graph.edges.set({ count: 2, indices: new Uint32Array([0, 1, 1, 2]) });
 
 // Move the camera so the whole graph is on screen.
 graph.camera.fit();

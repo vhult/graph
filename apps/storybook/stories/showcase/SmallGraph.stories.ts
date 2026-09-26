@@ -10,9 +10,9 @@
  *   - Labels: every node named, relations along the edges where they fit.
  */
 import type { Meta, StoryObj } from "@storybook/html-vite";
-import { NO_ICON, NodeShape, type Graph } from "@vhult/graph";
+import { NO_ICON, NodeShape, packEdgeStyle, type Graph } from "@vhult/graph";
 import { PALETTE, rgbToWord, type GraphDataset } from "@vhult/graph-bench";
-import { EDGE_DIRECTED, GRAPH_ARGS, graphArgTypes, renderGraph, type GraphArgs, type GraphLabels } from "../../src/graphStory";
+import { GRAPH_ARGS, graphArgTypes, renderGraph, type GraphArgs, type GraphLabels } from "../../src/graphStory";
 import { DEMO_ICON_LIST, iconId, type DemoIcon } from "../../src/icons";
 import { showReadout } from "../../src/readout";
 
@@ -100,9 +100,9 @@ const defined = new WeakSet<Graph>();
 function showIcons(graph: Graph, on: boolean): void {
   if (!defined.has(graph)) {
     defined.add(graph);
-    graph.defineIcons(DEMO_ICON_LIST).catch((e: unknown) => console.error(e));
+    graph.icons.define(DEMO_ICON_LIST).catch((e: unknown) => console.error(e));
   }
-  graph.updateNodes(0, { icons: on ? DEMO.icons : NO_ICONS, iconColors: DEMO.iconColors }, { copy: true });
+  graph.nodes.updateAll({ icons: on ? DEMO.icons : NO_ICONS, iconColors: DEMO.iconColors }, { copy: true });
 }
 
 const meta: Meta<Args> = {
@@ -111,9 +111,7 @@ const meta: Meta<Args> = {
     describe: (a) => `Small graph · a hub and ${GROUPS} groups${a.directed ? ", directed" : ""}`,
     load: () => ({ data: DEMO.graph, genMs: 0 }),
     labels: () => DEMO.labels,
-    // Arrowheads are compiled into the edge shader, so this is an engine option.
-    options: (a) => ({ directedEdges: a.directed }),
-    edgeStyle: (a) => (a.directed ? EDGE_DIRECTED : undefined),
+    edgeStyle: (a) => (a.directed ? packEdgeStyle({ directed: true }) : undefined),
     onLoad: (graph, _g, a, root) => {
       showIcons(graph, a.icons);
       showReadout(graph, root, {

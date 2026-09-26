@@ -31,7 +31,9 @@ import nodeGeometry from "./passes/node_geometry.wgsl";
 import nodeOrder from "./passes/node_order.wgsl";
 import pickEdges from "./passes/pick_edges.wgsl";
 import pickNodes from "./passes/pick_nodes.wgsl";
+import queryInside from "./passes/query_inside.wgsl";
 import scatterUpdate from "./passes/scatter_update.wgsl";
+import selectionShape from "./passes/selection_shape.wgsl";
 import shuffleChunks from "./passes/shuffle_chunks.wgsl";
 import sort from "./passes/sort.wgsl";
 import transformCull from "./passes/transform_cull.wgsl";
@@ -67,7 +69,9 @@ export const SHADERS: ShaderFs = {
   "passes/node_order.wgsl": nodeOrder,
   "passes/pick_edges.wgsl": pickEdges,
   "passes/pick_nodes.wgsl": pickNodes,
+  "passes/query_inside.wgsl": queryInside,
   "passes/scatter_update.wgsl": scatterUpdate,
+  "passes/selection_shape.wgsl": selectionShape,
   "passes/shuffle_chunks.wgsl": shuffleChunks,
   "passes/sort.wgsl": sort,
   "passes/transform_cull.wgsl": transformCull,

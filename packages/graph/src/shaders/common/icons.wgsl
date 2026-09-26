@@ -27,12 +27,13 @@ fn iconAttrs(word : u32, radiusPx : f32) -> IconAttrs {
   let side = iconSidePx(radiusPx);
   let k = word >> ICON_WORD_COLOR_SHIFT;
   var tint = textureLoad(iconPalette, vec2<u32>(k % ICON_PALETTE_WIDTH, k / ICON_PALETTE_WIDTH), 0);
-  tint.a *= smoothstep(ICON_MIN_PX, max(ICON_MIN_PX * ICON_FADE_RATIO, ICON_MIN_PX + 1.0), side);
+  let minPx = frame.iconMinPx;
+  tint.a *= smoothstep(minPx, max(minPx * ICON_FADE_RATIO, minPx + 1.0), side);
   return IconAttrs(icon, tint, vec2<f32>(side, max(0.0, log2(ICON_SPAN / side))));
 }
 
 fn iconCoverage(icon : u32, uv : vec2<f32>, side : f32, lod : f32) -> f32 {
-  let em = (uv / ICON_SCALE + 1.0) * 0.5;
+  let em = (uv / frame.iconScale + 1.0) * 0.5;
   let tc = (em * ICON_SPAN + f32(ICON_TILE_PAD)) / f32(ICON_TILE);
   if (any(tc < vec2<f32>(0.0)) || any(tc > vec2<f32>(1.0))) {
     return 0.0;

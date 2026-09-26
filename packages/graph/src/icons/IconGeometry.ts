@@ -30,7 +30,7 @@ interface Band {
   max: number[];
 }
 
-interface BuiltIcon {
+export interface BuiltIcon {
   curves: Quad[];
   nb: number;
   evenOdd: boolean;
@@ -51,16 +51,21 @@ const CURVE_TOLERANCE = 2e-4;
 const BANDS_MAX = 32;
 const BAND_SLACK = 1.05;
 const SKIPPED = new Set(["defs", "clipPath", "mask", "symbol", "title", "desc", "metadata", "style", "pattern", "linearGradient", "radialGradient", "filter", "marker"]);
+const EMPTY_BAND: Band = { curves: [], min: [], max: [] };
+const EMPTY_ICON: BuiltIcon = { curves: [], nb: 1, evenOdd: false, h: [EMPTY_BAND], v: [EMPTY_BAND] };
 
-export function buildIcons(sources: readonly IconSource[]): IconSet {
-  const built = sources.map((s, i) => {
+export function parseIcons(sources: readonly IconSource[]): BuiltIcon[] {
+  return sources.map((s, i) => {
     try {
       return buildIcon("svg" in s ? parseSvg(s.svg) : fromPath(s));
     } catch (e) {
-      throw new GraphError("invalid-argument", `defineIcons: icon ${i}: ${e instanceof Error ? e.message : String(e)}`);
+      throw new GraphError("invalid-argument", `icons: icon ${i}: ${e instanceof Error ? e.message : String(e)}`);
     }
   });
-  return pack(built);
+}
+
+export function buildIcons(sources: readonly IconSource[]): IconSet {
+  return packIcons(parseIcons(sources));
 }
 
 function fromPath(icon: IconPathSource): ParsedIcon {
@@ -618,8 +623,9 @@ function buildIcon(icon: ParsedIcon): BuiltIcon {
   return { curves, nb: bestNb, evenOdd, h: best.h, v: best.v };
 }
 
-function pack(icons: BuiltIcon[]): IconSet {
+export function packIcons(slots: readonly (BuiltIcon | null)[]): IconSet {
   const { ICON_HEADER_WORDS, ICON_RECORD_WORDS, ICON_CURVE_WORDS, ICON_FLAG_EVEN_ODD } = ICON_CONSTANTS;
+  const icons = slots.map((icon) => icon ?? EMPTY_ICON);
   let words = ICON_HEADER_WORDS + icons.length * ICON_RECORD_WORDS;
   const bandBase: number[] = [];
   const listBase: number[] = [];

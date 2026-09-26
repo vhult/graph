@@ -97,9 +97,9 @@ async function runChecks(graph: Graph, a: Args, report: (c: Check[]) => void): P
   ];
   const checks: Check[] = [];
   for (const [fx, fy, z, rotation] of views) {
-    graph.camera.setView({ x: minX + fx * (maxX - minX), y: minY + fy * (maxY - minY), zoom: fitZoom * z, rotation });
+    graph.camera.set({ x: minX + fx * (maxX - minX), y: minY + fy * (maxY - minY), zoom: fitZoom * z, rotation });
     await sleep(SETTLE_MS);
-    checks.push(verify(`(${fx}, ${fy}) ×${z}${rotation ? ` rot ${rotation}` : ""}`, await graph.readLabelSnapshot()));
+    checks.push(verify(`(${fx}, ${fy}) ×${z}${rotation ? ` rot ${rotation}` : ""}`, await graph.debug.labelSnapshot()));
     report(checks);
   }
   return checks;
@@ -119,7 +119,7 @@ const meta: Meta<Args> = {
   title: "Developer/Label correctness",
   render: (args, ctx) =>
     stage(args, ctx, {
-      options: () => ({ controls: false }),
+      options: () => ({ input: { pan: false, zoom: false, drag: false, select: false } }),
       setup: async (graph, a, hud, root) => {
         const panel = document.createElement("div");
         panel.className = "bench-panel";

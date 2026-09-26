@@ -2,7 +2,7 @@ import { CONSTANTS, ENGINE_CONSTANTS } from "../data/Layouts";
 import { Stage, type ComputeNode, type FrameContext } from "../gpu/FrameGraph";
 import { Lazy } from "../gpu/Lazy";
 import { createShaderModule } from "../gpu/ShaderModules";
-import type { IconOptions, TransformCullPass } from "./TransformCullPass";
+import type { TransformCullPass } from "./TransformCullPass";
 
 export class NodeOrderPass implements ComputeNode {
   readonly stage = Stage.NODE_ORDER;
@@ -40,7 +40,7 @@ export class NodeOrderPass implements ComputeNode {
     this.params = device.createBuffer({ label: "order/params", size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
   }
 
-  static async create(device: GPUDevice, cull: TransformCullPass, retire: (b: GPUBuffer) => void, icon: IconOptions): Promise<NodeOrderPass> {
+  static async create(device: GPUDevice, frameLayout: GPUBindGroupLayout, cull: TransformCullPass, retire: (b: GPUBuffer) => void): Promise<NodeOrderPass> {
     const module = await createShaderModule(device, "passes/node_order.wgsl");
     const s = (binding: number, type: GPUBufferBindingType): GPUBindGroupLayoutEntry => ({ binding, visibility: GPUShaderStage.COMPUTE, buffer: { type } });
     const layout = device.createBindGroupLayout({
@@ -48,12 +48,12 @@ export class NodeOrderPass implements ComputeNode {
       entries: [s(0, "uniform"), s(1, "read-only-storage"), s(2, "read-only-storage"), s(3, "storage"), s(4, "storage")],
     });
     const emptyLayout = device.createBindGroupLayout({ label: "empty", entries: [] });
-    const pl = device.createPipelineLayout({ bindGroupLayouts: [emptyLayout, emptyLayout, layout] });
+    const pl = device.createPipelineLayout({ bindGroupLayouts: [frameLayout, emptyLayout, layout] });
     const make = (entryPoint: string, icons = 0) =>
       device.createComputePipelineAsync({
         label: `order/${entryPoint}#${icons}`,
         layout: pl,
-        compute: { module, entryPoint, constants: icons ? { NODE_ICONS: 1, ICON_SCALE: icon.scale, ICON_MIN_PX: icon.minPx } : undefined },
+        compute: { module, entryPoint, constants: icons ? { NODE_ICONS: 1 } : undefined },
       });
     const pipelines = (await Promise.all([make("order_count"), make("order_scan"), make("order_scatter")])) as [GPUComputePipeline, GPUComputePipeline, GPUComputePipeline];
     return new NodeOrderPass(device, layout, device.createBindGroup({ layout: emptyLayout, entries: [] }), pipelines, cull, retire, () => make("order_scatter", 1));
@@ -91,7 +91,7 @@ export class NodeOrderPass implements ComputeNode {
   }
 
   encodePhase(phase: number, pass: GPUComputePassEncoder, ctx: FrameContext): void {
-    pass.setBindGroup(0, this.empty);
+    pass.setBindGroup(0, ctx.frameBindGroup);
     pass.setBindGroup(1, this.empty);
     pass.setBindGroup(2, this.group!);
     const icons = phase === 2 && ctx.icons ? this.iconScatter.value : null;

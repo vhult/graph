@@ -47,16 +47,18 @@ export class Labels {
   generation = 0;
   liveCount = 0;
   solves = 0;
+  color = 0;
   private readonly nodes: TextSet;
   private readonly edges: TextSet;
   private pixelRatio = 1;
   private readonly run = createRun();
   private readonly slotWords = new Uint32Array(LABEL_GLYPHS);
+  private readonly colorWord = new Uint32Array(1);
   private readonly liveData = new ArrayBuffer(LABEL_SLOTS * LIVE_LABEL.size);
 
   constructor(
     private readonly device: GPUDevice,
-    private readonly opts: LabelOptions,
+    private opts: LabelOptions,
   ) {
     this.atlas = new GlyphAtlas(device);
     const storage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST;
@@ -100,24 +102,49 @@ export class Labels {
     };
   }
 
-  setPixelRatio(pixelRatio: number): void {
+  setPixelRatio(pixelRatio: number): boolean {
     this.pixelRatio = pixelRatio;
-    if (!this.atlas.configure(Math.round(this.opts.sizeCssPx * pixelRatio), this.opts.font)) return;
+    if (!this.atlas.configure(Math.round(this.opts.sizeCssPx * pixelRatio), this.opts.font)) return false;
     this.restart(this.nodes);
     this.restart(this.edges);
     this.reset();
+    return true;
   }
 
-  setNodeText(texts: readonly string[]): void {
+  setStyle(opts: LabelOptions): boolean {
+    const padding = opts.paddingCssPx !== this.opts.paddingCssPx;
+    this.opts = { ...opts };
+    return this.setPixelRatio(this.pixelRatio) || padding;
+  }
+
+  setColor(color: number): void {
+    this.color = color;
+    this.colorWord[0] = color;
+    this.device.queue.writeBuffer(this.params, LABEL_PARAMS.offset.color, this.colorWord);
+  }
+
+  setNodeText(texts: readonly string[]): boolean {
+    if (texts.length === 0 && this.nodes.texts === null) return false;
     this.nodes.texts = texts.length > 0 ? texts : null;
     this.restart(this.nodes);
     this.reset();
+    return true;
   }
 
-  setEdgeText(texts: readonly string[]): void {
+  setEdgeText(texts: readonly string[]): boolean {
+    if (texts.length === 0 && this.edges.texts === null) return false;
     this.edges.texts = texts.length > 0 ? texts : null;
     this.restart(this.edges);
     this.resetEdges();
+    return true;
+  }
+
+  setNodeTextAt(indices: Uint32Array, texts: readonly string[]): void {
+    this.writeAt(this.nodes, indices, texts);
+  }
+
+  setEdgeTextAt(indices: Uint32Array, texts: readonly string[]): void {
+    this.writeAt(this.edges, indices, texts);
   }
 
   setNodeCount(nodeCount: number): void {
@@ -132,6 +159,11 @@ export class Labels {
     this.edgeBitsBuffer = this.createBuffer("labels/edgeBits", Math.ceil(edgeCount / 32) * 4);
     this.restart(this.edges);
     this.resetEdges();
+  }
+
+  clearEdges(): void {
+    this.edges.texts = null;
+    this.setEdgeCount(0);
   }
 
   reset(): void {
@@ -210,6 +242,34 @@ export class Labels {
     const w0 = from >>> 1;
     this.device.queue.writeBuffer(set.buffer, w0 * 4, set.words, w0, Math.ceil(i / 2) - w0);
     return true;
+  }
+
+  private writeAt(set: TextSet, indices: Uint32Array, texts: readonly string[]): void {
+    if (indices.length === 0) return;
+    const n = set.count;
+    const prev = set.texts;
+    let owned: string[];
+    if (prev && prev.length === n) owned = prev as string[];
+    else {
+      owned = new Array<string>(n).fill("");
+      if (prev) for (let i = 0; i < Math.min(prev.length, n); i++) owned[i] = prev[i]!;
+    }
+    const m = this.metrics();
+    let minWord = Infinity;
+    let maxWord = -Infinity;
+    for (let j = 0; j < indices.length; j++) {
+      const i = indices[j]!;
+      const text = texts[j] ?? "";
+      owned[i] = text;
+      const w = text ? layoutLabel(text, this.atlas.advance, m.maxWidth, this.atlas.inset, this.run) : 0;
+      if (w > 0 && w < set.minWidth) set.minWidth = w;
+      const word = i >>> 1;
+      set.words[word] = i & 1 ? (set.words[word]! & 0x0000ffff) | (w << 16) : (set.words[word]! & 0xffff0000) | w;
+      if (word < minWord) minWord = word;
+      if (word > maxWord) maxWord = word;
+    }
+    set.texts = owned;
+    this.device.queue.writeBuffer(set.buffer, minWord * 4, set.words, minWord, maxWord - minWord + 1);
   }
 
   private readonly build = (user: number, slot: number, index: number): number => {

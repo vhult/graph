@@ -60,26 +60,26 @@ const MOTIONS: Motion[] = [
 async function measure(graph: Graph, a: Args, report: (rows: Row[]) => void): Promise<Row[]> {
   setGraph(graph, a.dataset, a.count, { nodes: true, edges: true });
   await fitted(graph);
-  const fit = graph.camera.getView();
+  const fit = graph.camera.get();
   const rows: Row[] = [];
   const s0 = {} as GraphStats;
   const s1 = {} as GraphStats;
   for (const m of MOTIONS) {
     let view = { x: fit.x, y: fit.y, zoom: fit.zoom * m.zoom, rotation: 0 };
-    graph.camera.setView(view);
+    graph.camera.set(view);
     await sleep(800);
-    graph.readStats(s0);
+    graph.stats(s0);
     const t0 = performance.now();
     for (let t = 0; t < m.frames; t++) {
       const s = m.step(t, fit.zoom);
       view = { ...view, x: view.x + s.dx / view.zoom, zoom: view.zoom * s.zoom };
-      graph.camera.setView(view);
+      graph.camera.set(view);
       await frame();
     }
     const seconds = (performance.now() - t0) / 1000;
-    const q = quality(await graph.readLabelSnapshot());
+    const q = quality(await graph.debug.labelSnapshot());
     await sleep(400);
-    graph.readStats(s1);
+    graph.stats(s1);
     const solves = s1.labelSolves - s0.labelSolves;
     const added = s1.labelsAdded - s0.labelsAdded;
     const removed = s1.labelsRemoved - s0.labelsRemoved;
@@ -111,7 +111,7 @@ const meta: Meta<Args> = {
   title: "Developer/Label flicker",
   render: (args, ctx) =>
     stage(args, ctx, {
-      options: () => ({ controls: false }),
+      options: () => ({ input: { pan: false, zoom: false, drag: false, select: false } }),
       setup: async (graph, a, hud, root) => {
         const panel = document.createElement("div");
         panel.className = "bench-panel";

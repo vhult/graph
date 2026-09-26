@@ -1,7 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/html-vite";
-import { NO_ICON, NodeShape } from "@vhult/graph";
+import { NO_ICON, NodeShape, packEdgeStyle } from "@vhult/graph";
 import { hslToWord, PALETTE, rgbToWord } from "@vhult/graph-bench";
-import { EDGE_DIRECTED } from "../../src/graphStory";
 import { DEMO_ICON_LIST, DEMO_ICON_NAMES, iconId, type DemoIcon } from "../../src/icons";
 import { showReadout } from "../../src/readout";
 import { stage } from "../../src/stage";
@@ -78,7 +77,7 @@ const meta: Meta = {
   title: "Nodes/Styles",
   render: (args, ctx) =>
     stage(args, ctx, {
-      options: () => ({ directedEdges: true, edgeWidth: 1.5, edgeColor: [0.6, 0.7, 0.9, 0.8] }),
+      options: () => ({ style: { edge: { width: 1.5, color: [0.6, 0.7, 0.9, 0.8] } } }),
       setup: async (graph, _a, hud, root) => {
         const n = NODES.length;
         const positions = new Float32Array(n * 2);
@@ -99,9 +98,8 @@ const meta: Meta = {
           iconColors[i] = node.tint;
         });
         const count = EDGES.length / 2;
-        graph.setNodes({ count: n, positions, colors, sizes, shapes, zIndex, icons, iconColors });
-        graph.setEdges({ count, indices: new Uint32Array(EDGES), styles: new Uint32Array(count).fill(EDGE_DIRECTED) });
-        graph.setNodeLabels(NAMES);
+        graph.nodes.set({ count: n, positions, colors, sizes, shapes, zIndex, icons, iconColors, labels: NAMES });
+        graph.edges.set({ count, indices: new Uint32Array(EDGES), styles: new Uint32Array(count).fill(packEdgeStyle({ directed: true })) });
         graph.camera.fit();
         showReadout(graph, root, { node: (i) => `${NAMES[i]} (#${i})`, edge: (e) => `${NAMES[EDGES[e * 2]!]} → ${NAMES[EDGES[e * 2 + 1]!]} (#${e})` });
         hud.setNote(
@@ -109,7 +107,7 @@ const meta: Meta = {
             "shapes, plain and with an icon, with arrowheads stopping at their edge · z-index 0 to 9, each covering the one on its left\n" +
             "every demo icon (path data and SVG markup; the pentagram even-odd, then nonzero) · per-node icon tints",
         );
-        await graph.defineIcons(DEMO_ICON_LIST).catch((e: unknown) => hud.setNote(`defineIcons failed: ${e instanceof Error ? e.message : String(e)}`));
+        await graph.icons.define(DEMO_ICON_LIST).catch((e: unknown) => hud.setNote(`icons.define failed: ${e instanceof Error ? e.message : String(e)}`));
       },
     }),
 };

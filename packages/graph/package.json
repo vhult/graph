@@ -43,9 +43,11 @@
     "gen": "node scripts/build.mjs --gen-only",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
+    "api": "api-extractor run --local",
     "prepublishOnly": "npm run typecheck && npm test && npm run build"
   },
   "devDependencies": {
+    "@microsoft/api-extractor": "^7.59.2",
     "@webgpu/types": "^0.1.74",
     "esbuild": "^0.28.2",
     "happy-dom": "^20.14.5",

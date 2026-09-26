@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { GraphError } from "../src/api/errors";
 import type { IconSource } from "../src/api/types";
 import { ICON_CONSTANTS } from "../src/data/Layouts";
-import { buildIcons, type IconSet } from "../src/icons/IconGeometry";
+import { buildIcons, packIcons, parseIcons, type IconSet } from "../src/icons/IconGeometry";
 
 const { ICON_HEADER_WORDS, ICON_RECORD_WORDS, ICON_CURVE_WORDS, ICON_BANDS_MASK, ICON_FLAG_EVEN_ODD } = ICON_CONSTANTS;
 
@@ -120,6 +120,19 @@ describe("buildIcons", () => {
     expect(set.data[2]).toBe(7);
     expect(set.curves).toBe(7);
     expect(set.maxCurves).toBe(4);
+  });
+
+  it("packs a free id as an empty record and keeps the other icons whole", () => {
+    const [square] = parseIcons([{ path: "M0 0H24V24H0Z" }]);
+    const set = packIcons([null, square!]);
+    expect(set.count).toBe(2);
+    expect(set.data[0]).toBe(2);
+    expect(record(set, 0)).toMatchObject({ nb: 1, count: 0 });
+    expect(record(set, 1).count).toBe(4);
+    expect(set.curves).toBe(4);
+    expect(set.data[1]).toBe(record(set, 1).curves);
+    const alone = packIcons([square!]);
+    expect(points(set, 1)).toEqual(points(alone, 0));
   });
 
   it("names the icon that failed", () => {

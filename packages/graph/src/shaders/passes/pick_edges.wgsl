@@ -11,7 +11,11 @@ fn pickRel(center : vec2<f32>) -> vec2<f32> {
 }
 
 fn pickEdge(e : u32, keep : f32, n : u32) -> bool {
-  let ij = edgeIdx[e];
+  let raw = edgeIdx[e];
+  let ij = edgeEnds(raw);
+  if (edgeHidden(raw) || (anyNodeHidden() && edgeEndHidden(nodeState[ij.x], nodeState[ij.y]))) {
+    return false;
+  }
   let a = worldToScreen(nodePos[ij.x]);
   var b = worldToScreen(nodePos[ij.y]);
   let full = b - a;
@@ -73,7 +77,7 @@ fn pick_edges_select(@builtin(local_invocation_index) lid : u32) {
     let c = edgeScratch[EDGE_SCRATCH_LIST + j];
     let n = edgeScratch[edgeOffsetsAt(chunks) + j + 1u] - edgeScratch[edgeOffsetsAt(chunks) + j];
     let r = loadEdgeChunk(c, chunks);
-    let m = edgeReachPx(max(r.maxWidthPx, frame.globalEdgeWidth), EDGE_ARROWS) + pick.edgeRadiusPx;
+    let m = edgeReachPx(chunkWidthPx(r.maxWidthPx), EDGE_ARROWS) + pick.edgeRadiusPx;
     if (pickPointerInBox(r.lo, r.hi, m)) {
       let k = atomicAdd(&wgPickCount, 1u);
       if (k < cap) {
@@ -108,7 +112,7 @@ fn pick_edges_test(
   let c = atomicLoad(&pickOut[PICK_LIST + 2u * j]);
   let n = atomicLoad(&pickOut[PICK_LIST + 2u * j + 1u]);
   let r = loadEdgeChunk(c, chunks);
-  let width = max(r.maxWidthPx, frame.globalEdgeWidth);
+  let width = chunkWidthPx(r.maxWidthPx);
   let keep = edgeKeep(edgeChunkLen(c), r.density, width);
   let rel = pickRel((r.midLo + r.midHi) * 0.5);
   let margin = (edgeReachPx(width, EDGE_ARROWS) + pick.edgeRadiusPx + 1.0) / frame.zoom * 1.0001 + r.maxLen * 3e-5 + length(rel) * 2e-6;

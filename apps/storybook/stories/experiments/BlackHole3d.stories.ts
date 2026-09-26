@@ -35,7 +35,7 @@ const meta: Meta<Args> = {
   render: renderGraph<Args>({
     describe: () =>
       "Black hole 3D · a thin disk on Keplerian orbits around a Schwarzschild black hole, each particle drawn as its direct image and the two thin rings of light that circle the hole, bent through a traced photon table, shifted by the gas motion and by gravity\nthe inner edge is pulled in to 4.5M, closer than a non-spinning hole allows, for the look of a fast-spinning one like Gargantua",
-    options: () => ({ hoverStyle: false, transparent: true, nodeDrag: false }),
+    options: () => ({ input: { drag: false, select: false }, style: { background: [0, 0, 0, 0], hover: false } }),
     backdrop: "radial-gradient(ellipse 70% 80% at center, #34292a 0%, #241c1c 35%, #130f0f 70%, #0a0807 100%)",
     load: (a) => {
       const l = hole(a);
@@ -44,10 +44,9 @@ const meta: Meta<Args> = {
     onLoad: (graph, g, a, root) => {
       stop();
       const id = run;
-      graph.setBackground([0, 0, 0, 0]);
       const canvas = root.querySelector("canvas");
       if (canvas) canvas.style.filter = a.glow ? GLOW : "";
-      frame = () => graph.camera.setView({ x: 0, y: 0, rotation: 0, zoom: (Math.min(innerWidth, innerHeight) * devicePixelRatio) / (2 * HOLE3D.extent * HOLE3D.scale) });
+      frame = () => graph.camera.set({ x: 0, y: 0, rotation: 0, zoom: Math.min(innerWidth, innerHeight) / (2 * HOLE3D.extent * HOLE3D.scale) });
       frame();
       addEventListener("resize", frame);
       const h = hole(a).data;

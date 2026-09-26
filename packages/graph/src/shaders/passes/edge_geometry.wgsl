@@ -44,7 +44,25 @@ fn culled() -> VOut {
 @vertex
 fn vs(@builtin(vertex_index) vi : u32, @builtin(instance_index) ii : u32) -> VOut {
   let e = edgeList[ii];
-  let ij = edgeIdx[e];
+  let raw = edgeIdx[e];
+  let ij = edgeEnds(raw);
+  if (edgeHidden(raw)) {
+    return culled();
+  }
+  let bits = raw.x >> EDGE_STATE_SHIFT;
+  var dimmed = (bits & EDGE_STATE_DIMMED) != 0u;
+  if (anyNodeHidden() || anyNodeDimmed()) {
+    let ends = nodeState[ij.x] | nodeState[ij.y];
+    if ((ends & STATE_HIDDEN) != 0u) {
+      return culled();
+    }
+    dimmed = dimmed || (ends & STATE_DIMMED) != 0u;
+  }
+  let focused = (bits & EDGE_STATE_FOCUSED) != 0u;
+  let selected = !focused && (bits & EDGE_STATE_SELECTED) != 0u;
+  if ((focused || selected) && (frame.flags & FRAME_FLAG_EDGE_LOOKS) != 0u) {
+    return culled();
+  }
   let a = worldToScreen(nodePos[ij.x]);
   var b = worldToScreen(nodePos[ij.y]);
   let full = b - a;
@@ -58,7 +76,12 @@ fn vs(@builtin(vertex_index) vi : u32, @builtin(instance_index) ii : u32) -> VOu
   if (EDGE_PER_EDGE_STYLE) {
     style = edgeStyle[e];
   }
-  let w = edgeWidthPx(style);
+  var w = edgeWidthPx(style);
+  if (focused) {
+    w *= frame.focusedEdgeWidth;
+  } else if (selected) {
+    w *= frame.selectedEdgeWidth;
+  }
   let wDraw = max(w, EDGE_MIN_DRAW_WIDTH_PX);
   // Equal ink: a half-width edge keeps half the alpha rather than disappearing.
   let coverage = min(1.0, w / wDraw);
@@ -92,12 +115,20 @@ fn vs(@builtin(vertex_index) vi : u32, @builtin(instance_index) ii : u32) -> VOu
   if (EDGE_PER_EDGE_COLOR) {
     c = unpack4x8unorm(edgeColor[e * 2u + select(0u, 1u, corner.x > 0.0)]);
   }
+  if (focused) {
+    c = unpack4x8unorm(frame.focusedEdgeColor);
+  } else if (selected) {
+    c = unpack4x8unorm(frame.selectedEdgeColor);
+  }
+  if (dimmed) {
+    c.a *= frame.dimmedAlpha;
+  }
 
   // Thinning: the same keep count EDGE_CULL computed for this chunk.
   let chunk = e >> EDGE_CHUNK_SHIFT;
   let rec = edgeChunkAt(chunk, numEdgeChunks());
   let n = edgeChunkLen(chunk);
-  let width = max(bitcast<f32>(edgeScratch[rec + 5u]), frame.globalEdgeWidth);
+  let width = chunkWidthPx(bitcast<f32>(edgeScratch[rec + 5u]));
   let keep = edgeKeep(n, bitcast<f32>(edgeScratch[rec + 6u]), width);
   let fadeIn = clamp(keep - f32(e & (EDGE_CHUNK_SIZE - 1u)), 0.0, 1.0);
 
@@ -114,7 +145,7 @@ fn vs(@builtin(vertex_index) vi : u32, @builtin(instance_index) ii : u32) -> VOu
   return o;
 }
 
-/** The engine option `edgeDebug`: what the cull decided, as colour. */
+/** The `debug.tune` edgeMode: what the cull decided, as colour. */
 fn debugColor(fade : f32, kept : f32, chunk : u32) -> vec3<f32> {
   switch (EDGE_DEBUG) {
     case 1u: {

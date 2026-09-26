@@ -21,6 +21,7 @@ override EDGE_LINES : bool = false;
 override EDGE_ARROWS : bool = false;
 
 const BIG : f32 = 3.0e38;
+const EDGE_CHUNK_MARK : u32 = 7u;
 
 fn loadEdgeChunk(c : u32, chunks : u32) -> EdgeChunk {
   let o = edgeChunkAt(c, chunks);
@@ -45,6 +46,7 @@ fn storeEdgeChunk(c : u32, chunks : u32, v : EdgeChunk) {
   edgeScratch[o + 4u] = bitcast<u32>(v.maxLen);
   edgeScratch[o + 5u] = bitcast<u32>(v.maxWidthPx);
   edgeScratch[o + 6u] = bitcast<u32>(v.density);
+  edgeScratch[o + EDGE_CHUNK_MARK] = 0u;
   edgeScratch[o + 8u] = bitcast<u32>(v.midLo.x);
   edgeScratch[o + 9u] = bitcast<u32>(v.midLo.y);
   edgeScratch[o + 10u] = bitcast<u32>(v.midHi.x);
@@ -61,6 +63,17 @@ var<workgroup> wgMid : array<vec4<f32>, WORKGROUP_SIZE>;
 var<workgroup> wgLen : array<vec4<f32>, WORKGROUP_SIZE>;
 
 @group(2) @binding(2) var<storage, read_write> touchScratch : array<atomic<u32>>;
+
+struct RestyleParams {
+  total : u32,
+  rangeCount : u32,
+  words : u32,
+  gridX : u32,
+}
+
+@group(2) @binding(3) var<storage, read> restyleRank : array<u32>;
+@group(2) @binding(4) var<storage, read> restyleList : array<vec2<u32>>;
+@group(2) @binding(5) var<uniform> restyle : RestyleParams;
 
 var<workgroup> wgTouch : atomic<u32>;
 var<workgroup> wgMove : u32;
@@ -88,7 +101,7 @@ fn edge_bounds_list(
   let chunks = numEdgeChunks();
   let m = edgeMoveAt(chunks);
   if (lid == 0u) {
-    wgMove = edgeScratch[m + MOVE_COUNT];
+    wgMove = min(edgeScratch[m + MOVE_COUNT], chunks);
   }
   let n = workgroupUniformLoad(&wgMove);
   for (var i = wid.x; i < n; i += nwg.x) {
@@ -118,21 +131,45 @@ fn edge_touch(
     atomicStore(&wgTouch, 0u);
   }
   workgroupBarrier();
-  let m = edgeMoveAt(chunks);
-  let v = atomicLoad(&touchScratch[m + MOVE_NODE]);
   for (var k = 0u; k < ITEMS_PER_THREAD; k++) {
     let e = c * EDGE_CHUNK_SIZE + k * WORKGROUP_SIZE + lid;
     if (e < frame.edgeCount) {
-      let ij = edgeIdx[e];
-      if (ij.x == v || ij.y == v) {
+      let ij = edgeEnds(edgeIdx[e]);
+      if (((nodeState[ij.x] | nodeState[ij.y]) & STATE_DRAGGING) != 0u) {
         atomicStore(&wgTouch, 1u);
       }
     }
   }
   workgroupBarrier();
   if (lid == 0u && atomicLoad(&wgTouch) != 0u) {
-    let at = atomicAdd(&touchScratch[m + MOVE_COUNT], 1u);
+    listMoved(c, chunks);
+  }
+}
+
+@compute @workgroup_size(WORKGROUP_SIZE)
+fn edge_restyle(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups) nwg : vec3<u32>) {
+  let t = gid.x + gid.y * nwg.x * WORKGROUP_SIZE;
+  if (t >= restyle.total) {
+    return;
+  }
+  let chunks = numEdgeChunks();
+  let c = restyleRank[restyleList[t].x] >> EDGE_CHUNK_SHIFT;
+  if (c < chunks) {
+    listMoved(c, chunks);
+  }
+}
+
+fn listMoved(c : u32, chunks : u32) {
+  let mark = edgeChunkAt(c, chunks) + EDGE_CHUNK_MARK;
+  if (atomicExchange(&touchScratch[mark], 1u) != 0u) {
+    return;
+  }
+  let m = edgeMoveAt(chunks);
+  let at = atomicAdd(&touchScratch[m + MOVE_COUNT], 1u);
+  if (at < chunks) {
     atomicStore(&touchScratch[m + MOVE_LIST + at], c);
+  } else {
+    atomicStore(&touchScratch[mark], 0u);
   }
 }
 
@@ -149,7 +186,7 @@ fn edgeBoundsOf(c : u32, chunks : u32, lid : u32) {
   for (var k = 0u; k < ITEMS_PER_THREAD; k++) {
     let e = c * EDGE_CHUNK_SIZE + k * WORKGROUP_SIZE + lid;
     if (e < frame.edgeCount) {
-      let ij = edgeIdx[e];
+      let ij = edgeEnds(edgeIdx[e]);
       let pa = nodePos[ij.x];
       let pb = nodePos[ij.y];
       let m = (pa + pb) * 0.5;
@@ -216,7 +253,7 @@ fn edgeChunkDraw(c : u32, chunks : u32) -> u32 {
   }
   // Screen box of the (possibly rotated) world box, grown by what the widest
   // edge draws beyond its centreline.
-  let width = max(r.maxWidthPx, frame.globalEdgeWidth);
+  let width = chunkWidthPx(r.maxWidthPx);
   let p0 = worldToScreen(r.lo);
   let p1 = worldToScreen(vec2<f32>(r.hi.x, r.lo.y));
   let p2 = worldToScreen(vec2<f32>(r.lo.x, r.hi.y));

@@ -225,7 +225,11 @@ fn emitEdge(e : u32) {
   if (e == LABEL_NONE) {
     return;
   }
-  let ij = ends[e];
+  let raw = ends[e];
+  let ij = edgeEnds(raw);
+  if (edgeHidden(raw) || (anyNodeHidden() && edgeEndHidden(states[ij.x], states[ij.y]))) {
+    return;
+  }
   let a = worldToScreen(positions[ij.x]);
   let b = worldToScreen(positions[ij.y]);
   let len = distance(a, b);

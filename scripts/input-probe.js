@@ -1,7 +1,7 @@
 /**
  * Page-side half of `gpu.mjs input` — DEVELOPMENT TOOL.
  *
- * Measures the input -> frame path, which no benchmark covers: `graph.benchmark`
+ * Measures the input -> frame path, which no benchmark covers: `graph.debug.benchmark`
  * drives the camera itself and never touches the input ring, so it reports a
  * steady 60 fps for a path that feels choppy by hand.
  *
@@ -40,7 +40,7 @@ function poll() {
     state.polling = false;
     return;
   }
-  const frames = graph.readStats().renderedFrames;
+  const frames = graph.stats().renderedFrames;
   if (frames !== state.lastFrames) {
     const now = performance.now();
     state.lastFrames = frames;
@@ -68,7 +68,7 @@ globalThis.__inputProbe = {
     state.latencies.length = 0;
     state.frameTimes.length = 0;
     state.events = 0;
-    state.lastFrames = graph.readStats().renderedFrames;
+    state.lastFrames = graph.stats().renderedFrames;
     if (!state.polling) {
       state.polling = true;
       soon(poll);

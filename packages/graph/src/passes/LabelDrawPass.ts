@@ -8,6 +8,7 @@ import type { Labels } from "../labels/Labels";
 export class LabelDrawPass implements RenderNode {
   readonly stage = Stage.LABEL_DRAW;
   readonly name = "labels";
+  overlay: Pick<RenderNode, "encode"> | null = null;
 
   private bindGroup: GPUBindGroup | null = null;
   private boundGraph: GPUBindGroup | null = null;
@@ -29,7 +30,7 @@ export class LabelDrawPass implements RenderNode {
       label: "group2/labels",
       entries: [
         { binding: 0, visibility: V, buffer: { type: "read-only-storage" } },
-        { binding: 1, visibility: V, buffer: { type: "uniform" } },
+        { binding: 1, visibility: V | GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } },
         { binding: 2, visibility: V, buffer: { type: "read-only-storage" } },
         { binding: 3, visibility: V, buffer: { type: "read-only-storage" } },
         { binding: 4, visibility: V, buffer: { type: "read-only-storage" } },
@@ -57,6 +58,11 @@ export class LabelDrawPass implements RenderNode {
   }
 
   encode(pass: GPURenderPassEncoder, ctx: FrameContext): void {
+    this.drawLabels(pass, ctx);
+    this.overlay?.encode(pass, ctx);
+  }
+
+  private drawLabels(pass: GPURenderPassEncoder, ctx: FrameContext): void {
     const n = this.labels.liveCount;
     if (n === 0 || ctx.nodeCount === 0) return;
     if (ctx.graphBindGroup !== this.boundGraph) {

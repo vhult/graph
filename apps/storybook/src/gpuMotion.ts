@@ -128,7 +128,7 @@ export class GpuMotion {
     });
     const total = Math.ceil(spec.count / WG);
     const gx = Math.min(total, device.limits.maxComputeWorkgroupsPerDimension);
-    const stream = graph.streamNodes({ positions: true, zIndex: depth, colors });
+    const stream = graph.nodes.stream({ positions: true, zIndex: depth, colors });
     const motion = new GpuMotion(device, stream, spec.count, pipeline, bindGroup, params, out, layers, colorsOut, readbacks, [gx, Math.ceil(total / gx)], spec.params);
     motion.raf = requestAnimationFrame(motion.tick);
     return motion;

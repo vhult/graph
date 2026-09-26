@@ -97,7 +97,7 @@ const PLACE_ENTRIES = {
   label_traverse_edges: ["params", "treeBox", "edgeTreeBox", "edgeTreeLen", "work"],
   label_job_args: ["work", "args"],
   label_emit: ["scratch", "params", "positions", "sizes", "states", "order", "widths", "labelIndex", "candidates", "work"],
-  label_emit_edges: ["params", "positions", "ends", "edgeOrder", "edgeWidths", "edgeTops", "edgeBits", "candidates", "work", "phase"],
+  label_emit_edges: ["params", "positions", "states", "ends", "edgeOrder", "edgeWidths", "edgeTops", "edgeBits", "candidates", "work", "phase"],
   label_count: ["params", "candidates", "work", "cellCount"],
   label_scan: ["params", "work", "args", "cellCount", "cellStart"],
   label_scatter: ["params", "candidates", "work", "cellCount", "cellStart", "cellItems", "decision"],
@@ -653,6 +653,7 @@ export class LabelPass implements ComputeNode {
     u[o.edgeCount / 4] = t.edgeCount;
     u[o.bitsOffset / 4] = labelledWordOffset(t.nodeCount);
     u[o.liveCount / 4] = this.labels.liveCount;
+    u[o.color / 4] = this.labels.color;
     this.device.queue.writeBuffer(this.labels.params, 0, this.paramData);
   }
 

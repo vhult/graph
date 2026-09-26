@@ -1,7 +1,7 @@
 import type { ArgTypes, Meta, StoryObj } from "@storybook/html-vite";
-import type { RGBA } from "@vhult/graph";
+import { packEdgeStyle, type RGBA } from "@vhult/graph";
 import { cached, LAYOUT_OPTIONS, loadLayout, NODE_COUNTS, type LayoutName } from "../../src/data";
-import { EDGE_DIRECTED, GRAPH_ARGS, graphArgTypes, renderGraph, type GraphArgs } from "../../src/graphStory";
+import { GRAPH_ARGS, graphArgTypes, renderGraph, type GraphArgs } from "../../src/graphStory";
 import { showReadout } from "../../src/readout";
 
 interface Args extends GraphArgs {
@@ -13,7 +13,7 @@ interface Args extends GraphArgs {
   pickRate: number;
   pickRadius: number;
   edgePickRadius: number;
-  hoverNodeScale: number;
+  hoverOutlineScale: number;
   hoverEdgeWidth: number;
   pixelRatio: number;
   background: string;
@@ -38,7 +38,7 @@ const CATEGORY: Record<string, string> = {
   pickRate: "Interaction",
   pickRadius: "Interaction",
   edgePickRadius: "Interaction",
-  hoverNodeScale: "Interaction",
+  hoverOutlineScale: "Interaction",
   hoverEdgeWidth: "Interaction",
   pixelRatio: "Engine",
   background: "Engine",
@@ -55,7 +55,7 @@ const own: Partial<ArgTypes<Args>> = {
   pickRate: range(1, 240, 1),
   pickRadius: range(0, 16, 0.5),
   edgePickRadius: range(0, 16, 0.5),
-  hoverNodeScale: range(0.5, 3, 0.05),
+  hoverOutlineScale: range(0, 0.5, 0.01),
   hoverEdgeWidth: range(0.5, 6, 0.25),
   pixelRatio: range(0.5, 3, 0.25),
   background: { control: "color" },
@@ -95,21 +95,23 @@ const meta: Meta<Args> = {
     load: (a) => loadLayout(a.layout, a.nodes, a.seed),
     dataArgs: ["layout"],
     options: (a) => ({
-      directedEdges: a.directed,
-      labelSize: a.labelSize,
-      labelPadding: a.labelPadding,
-      pickRate: a.pickRate,
-      pickRadius: a.pickRadius,
-      edgePickRadius: a.edgePickRadius,
-      hoverStyle: { nodeScale: a.hoverNodeScale, edgeWidth: a.hoverEdgeWidth },
+      input: { pickRadius: a.pickRadius, edgePickRadius: a.edgePickRadius },
       pixelRatio: a.pixelRatio,
-      background: toRgba(a.background),
+      style: {
+        background: toRgba(a.background),
+        label: { size: a.labelSize, padding: a.labelPadding },
+        hover: { outline: { scale: a.hoverOutlineScale }, edgeWidth: a.hoverEdgeWidth },
+      },
     }),
-    edgeStyle: (a) => (a.directed ? EDGE_DIRECTED : undefined),
+    tune: (a) => ({ pickRate: a.pickRate }),
+    edgeStyle: (a) => (a.directed ? packEdgeStyle({ directed: true }) : undefined),
     labels: (g, a) => ({ nodes: numbered(g.nodes.count, "#"), edges: edgeText(a) }),
     onLoad: (graph, _g, _a, root) => showReadout(graph, root),
     onUpdate: (graph, a, prev) => {
-      if (a.edgeLabels !== prev.edgeLabels) graph.setEdgeLabels(edgeText(a));
+      if (a.edgeLabels !== prev.edgeLabels) {
+        const text = edgeText(a);
+        graph.edges.updateAll({ labels: text.length ? text : null });
+      }
     },
   }),
   argTypes: categorized({ layout: own.layout, ...graphArgTypes<Args>(NODE_COUNTS, own) }),
@@ -124,7 +126,7 @@ const meta: Meta<Args> = {
     pickRate: 60,
     pickRadius: 0,
     edgePickRadius: 4,
-    hoverNodeScale: 1.25,
+    hoverOutlineScale: 0.08,
     hoverEdgeWidth: 2,
     pixelRatio: globalThis.devicePixelRatio ?? 1,
     background: "#0a0a0f",
