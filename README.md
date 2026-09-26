@@ -1,8 +1,8 @@
 # @vhult/graph
 
-Super fast WebGPU graph rendering engine.
+Fast WebGPU graph rendering engine.
 
-<img width="448" height="397" alt="image" src="https://github.com/user-attachments/assets/67372405-85ef-4394-9f5d-4096b1bd4dfe" />
+<img width="1526" height="1358" alt="image" src="https://github.com/user-attachments/assets/ca5fc5bd-68c4-4e36-a694-b82968459fd3" />
 
 ## Links
 
