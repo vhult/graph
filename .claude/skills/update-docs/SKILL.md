@@ -9,7 +9,8 @@ The docs site is `apps/docs`. It is served at the root of `graph.vhult.com`, wit
 
 - `apps/docs/content/site.yaml`: header links, GitHub repo and npm package for the widgets, npm badges, landing, docs sidebar, API group order, footer.
 - `apps/docs/content/pages/<id>.yaml`: one guide page each.
-- `apps/docs/content/api/<group>.yaml`: one API group each, with the text and examples of every export in it.
+- `apps/docs/content/api/latest/<group>.yaml`: one API group each, with the text and examples of every export in it.
+- `apps/docs/content/api/v<N>/`: the frozen API docs of an older major version, served at `/v<N>/api`. Never edit them. Only the `release` skill creates them.
 - The signatures and the short doc comments come from `packages/graph/temp/graph.api.json`, which `npm run build` writes with API Extractor.
 - The React code in `apps/docs/src` renders the content. Do not touch it to change content.
 - `/llms.txt` and `/llms-full.txt` are the plain Markdown docs for LLMs. `apps/docs/plugins/llms.ts` builds them from the same content and API model, so there is nothing to edit for them.
@@ -30,7 +31,7 @@ Run `npm run build` at the repo root. It refreshes `temp/graph.api.json`.
 - **New export**: add it to the group it belongs to, in `namespace` (the `graph.*` part itself), `types` or `values` (constants and functions). Groups follow `graph.*`: `start`, `nodes`, `edges`, `shared`, `style`, `icons`, `camera`, `input`, `events`, `query`, `canvas`, `debug`. Then write its `docs` entry.
 - **New member**: add it under `members` of its export's `docs` entry.
 - **Removed export or member**: delete it from its group and its `docs` entry. A name that no longer exists fails the build.
-- **Changed behavior**: update the description and the example, and search `apps/docs/content` for the name to fix the guide pages too.
+- **Changed behavior**: update the description and the example, and search `apps/docs/content` for the name to fix the guide pages too. Skip the `api/v<N>` folders.
 - **New guide page**: add `pages/<id>.yaml` and list `<id>` in a `site.yaml` `docs` section. A page file that is not listed fails the build.
 
 Run `node --experimental-strip-types --no-warnings scripts/missing.mjs [group]` from `apps/docs` to list the exports and members that still have no description. The build also prints the count.
@@ -94,7 +95,7 @@ A page is a `title`, an optional `description` and a list of `blocks`. Each bloc
 
 Text supports `` `code` ``, `**bold**` and `[label](href)`. Code that starts with an exported name links to its API page by itself: `` `Graph` `` links to `/api/Graph` and `` `Graph.create` `` to `/api/Graph#create`.
 
-Internal links are checked at build: `/`, `/api`, `/api/<Export>`, `/docs/<page id>` and `/storybook/`, each with an optional `#anchor`. A broken link fails the build.
+Internal links are checked at build: `/`, `/api`, `/api/<Export>`, `/docs/<page id>` and `/storybook/`, each with an optional `#anchor`. A broken link fails the build. Always write `/api/...`, never `/v<N>/api/...`: a frozen version rewrites its own links.
 
 Quote a YAML string that holds `: ` or starts with a backtick, `[` or `{`.
 

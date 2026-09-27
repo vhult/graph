@@ -96,7 +96,6 @@ export interface Content {
   version: string;
   site: Site;
   pages: Record<string, Page>;
-  api: ApiGroup[];
 }
 
 export interface Token {
@@ -134,5 +133,13 @@ export interface ApiEntry {
 }
 
 export interface ApiModel {
+  entries: ApiEntry[];
+}
+
+export interface ApiVersion {
+  id: string;
+  version: string;
+  base: string;
+  groups: ApiGroup[];
   entries: ApiEntry[];
 }

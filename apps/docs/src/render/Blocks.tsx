@@ -1,4 +1,4 @@
-import { entriesOf, labelOf } from "../content/api";
+import { useApi } from "../content/api";
 import type { Block } from "../content/types";
 import { Link } from "../router";
 import { Code } from "./Code";
@@ -13,14 +13,15 @@ export function slug(text: string): string {
 }
 
 function ApiList({ names }: { names: string[] }) {
+  const api = useApi();
   return (
     <ul className="api-list">
       {names.map((name) => {
-        const entry = entriesOf(name)[0];
+        const entry = api.entriesOf(name)[0];
         return (
           <li key={name}>
-            <Link href={`/api/${name}`}>
-              <code>{labelOf(name)}</code>
+            <Link href={api.itemHref(name)}>
+              <code>{api.labelOf(name)}</code>
             </Link>
             {entry && <span className="kind">{entry.kind}</span>}
             {entry && (

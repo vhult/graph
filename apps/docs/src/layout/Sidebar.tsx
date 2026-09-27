@@ -1,7 +1,8 @@
 import content from "virtual:content";
 import { useEffect, useRef, useState } from "react";
-import { labelOf } from "../content/api";
+import { useApi, type Api } from "../content/api";
 import { Link } from "../router";
+import { VersionPicker } from "./Versions";
 
 export type Area = "docs" | "api";
 
@@ -22,11 +23,11 @@ interface Group {
   parts: Part[];
 }
 
-function apiItem(name: string): Item {
-  return { label: labelOf(name), href: `/api/${name}`, code: true };
+function apiItem(api: Api, name: string): Item {
+  return { label: api.labelOf(name), href: api.itemHref(name), code: true };
 }
 
-function groups(area: Area): Group[] {
+function groups(area: Area, api: Api): Group[] {
   if (area === "docs") {
     return content.site.docs.map((s) => ({
       title: s.section,
@@ -35,14 +36,14 @@ function groups(area: Area): Group[] {
     }));
   }
   return [
-    { title: "Reference", fold: false, parts: [{ items: [{ label: "Overview", href: "/api", code: false }] }] },
-    ...content.api.map((g) => ({
+    { title: "Reference", fold: false, parts: [{ items: [{ label: "Overview", href: api.base, code: false }] }] },
+    ...api.groups.map((g) => ({
       title: g.title,
       fold: true,
       parts: [
-        { items: g.namespace ? [apiItem(g.namespace)] : [] },
-        { title: "Types", items: g.types.map(apiItem) },
-        { title: "Values", items: g.values.map(apiItem) },
+        { items: g.namespace ? [apiItem(api, g.namespace)] : [] },
+        { title: "Types", items: g.types.map((name) => apiItem(api, name)) },
+        { title: "Values", items: g.values.map((name) => apiItem(api, name)) },
       ].filter((p) => p.items.length > 0),
     })),
   ];
@@ -97,7 +98,8 @@ function List({ list, path, open, toggle }: ListProps) {
 
 export function Sidebar({ area, path }: { area: Area; path: string }) {
   const aside = useRef<HTMLElement>(null);
-  const list = groups(area);
+  const api = useApi();
+  const list = groups(area, api);
   const [open, setOpen] = useState(() => new Set(list.filter((g) => holds(g, path)).map((g) => g.title)));
   const [seen, setSeen] = useState(path);
 
@@ -125,10 +127,12 @@ export function Sidebar({ area, path }: { area: Area; path: string }) {
   return (
     <>
       <aside className="sidebar" ref={aside}>
+        {area === "api" && <VersionPicker path={path} />}
         <List list={list} path={path} open={open} toggle={toggle} />
       </aside>
       <details className="side-menu">
         <summary>Menu</summary>
+        {area === "api" && <VersionPicker path={path} />}
         <List list={list} path={path} open={open} toggle={toggle} />
       </details>
     </>

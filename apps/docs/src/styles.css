@@ -475,6 +475,21 @@ dd code,
   display: none;
 }
 
+.version-picker {
+  display: block;
+  margin-bottom: 24px;
+}
+
+.version-picker select {
+  width: 100%;
+  padding: 4px 8px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--text);
+  font: 13px var(--mono);
+}
+
 .doc {
   min-width: 0;
   padding: 36px 0 72px;
