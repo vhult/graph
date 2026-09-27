@@ -2,13 +2,15 @@
 
 Fast WebGPU graph rendering engine.
 
-<img width="1526" height="1358" alt="image" src="https://github.com/user-attachments/assets/ca5fc5bd-68c4-4e36-a694-b82968459fd3" />
+<img width="1526" height="1358" alt="image" src="https://github.com/user-attachments/assets/e02965dc-8bcd-43ff-864f-27fed270590f" />
 
 ## Links
 
 - npm: https://www.npmjs.com/package/@vhult/graph
-- Storybook, latest release: https://graph.vhult.com
-- Storybook, dev branch: https://dev.graph.vhult.com
+- Docs: https://graph.vhult.com
+- Storybook: https://graph.vhult.com/storybook/
+
+You can also look at the next planned released state here: https://dev.graph.vhult.com/storybook/
 
 ## Performance
 The goal of this library is to make a new generation graph rendering using WebGPU with the highest possible level of performance.
@@ -32,13 +34,15 @@ packages/graph/          @vhult/graph — the library (zero runtime dependencies
   docs/decisions.md      ADR log
 packages/bench/          @vhult/graph-bench — seeded datasets, camera paths, stats (private)
 apps/storybook/          @vhult/graph-storybook — consumes the built package (private)
+apps/docs/               @vhult/graph-docs — the public docs site, content in content/*.yaml (private)
 ```
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `npm run dev` | Build the library, then watch it + run Storybook on http://localhost:6006 |
+| `npm run dev` | Build the library, then watch it + run Storybook on http://localhost:6006 and the docs on http://localhost:5173 |
+| `npm run storybook:build` | Build the library, the Storybook and the docs into `apps/docs/dist`, the Storybook under `storybook/` |
 | `npm run build` | Build `packages/graph/dist` (ESM + worker + `.d.ts`), then refresh the API report (`api/graph.api.md`, `temp/graph.api.json`) |
 | `npm test` | Unit tests |
 | `npm run typecheck` | Typecheck every workspace |

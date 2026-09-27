@@ -1,12 +1,8 @@
 # @vhult/graph
 
-Super fast WebGPU graph rendering engine.
+Fast WebGPU graph rendering engine.
 
-<img width="448" height="397" alt="image" src="https://github.com/user-attachments/assets/67372405-85ef-4394-9f5d-4096b1bd4dfe" />
-
-Rendering only: no layout, no simulation. You give it node positions and edges
-as typed arrays; it draws them from a Web Worker on an `OffscreenCanvas`, so the
-main thread never touches the GPU.
+<img width="1526" height="1358" alt="image" src="https://github.com/user-attachments/assets/e02965dc-8bcd-43ff-864f-27fed270590f" />
 
 ```sh
 npm install @vhult/graph
@@ -18,14 +14,10 @@ Safari 26+). Zero runtime dependencies.
 ## Links
 
 - npm: https://www.npmjs.com/package/@vhult/graph
-- Storybook, latest release: https://graph.vhult.com
-- Storybook, dev branch: https://dev.graph.vhult.com
+- Docs: https://graph.vhult.com
+- Storybook: https://graph.vhult.com/storybook/
 
-## Performance
-
-The goal of this library is to make a new generation graph rendering using
-WebGPU with the highest possible level of performance. It renders millions of
-nodes and edges easily.
+You can also look at the next planned released state here: https://dev.graph.vhult.com/storybook/
 
 ## Quick start
 
