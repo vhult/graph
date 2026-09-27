@@ -94,7 +94,7 @@ export class DangerZone {
   private measure(graph: Graph): void {
     const c = this.current;
     if (!c || c.graph !== graph || c.nodes === 0) return;
-    const st = graph.readStats(this.stats);
+    const st = graph.stats(this.stats);
     if (st.nodeCount !== c.nodes || st.renderedFrames === 0) return;
     if (c.nodes < (this.largest.get(graph) ?? 0)) return;
     this.samples.set(c.key, { nodes: c.nodes, edges: st.edgeCount, peakBytes: st.peakGpuBytes });

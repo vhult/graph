@@ -44,14 +44,14 @@ function bounds(d: NodeDataset) {
 async function runChecks(graph: Graph, count: number, report: (c: Check[]) => void): Promise<Check[]> {
   const g = communities(count, 2, 7);
   const d = g.nodes;
-  graph.setNodes(d, { copy: true });
-  graph.setEdges(g.edges, { copy: true });
+  graph.nodes.set(d, { copy: true });
+  graph.edges.set(g.edges, { copy: true });
   graph.camera.fit();
   await sleep(1500);
   const sizes = sizesAsF16(d.sizes);
   const b = bounds(d);
   const checks: Check[] = [];
-  const stats = graph.readStats();
+  const stats = graph.stats();
   const vw = stats.viewportWidth, vh = stats.viewportHeight;
   const fitZoom = Math.min((vw - 48) / (b.maxX - b.minX), (vh - 48) / (b.maxY - b.minY));
 
@@ -60,9 +60,9 @@ async function runChecks(graph: Graph, count: number, report: (c: Check[]) => vo
   ];
   const probe = async (label: string, fx: number, fy: number, z: number) => {
     const x = b.minX + fx * (b.maxX - b.minX), y = b.minY + fy * (b.maxY - b.minY), zoom = fitZoom * z;
-    graph.camera.setView({ x, y, zoom, rotation: 0 });
+    graph.camera.set({ x, y, zoom: zoom / stats.pixelRatio, rotation: 0 });
     await sleep(SETTLE_MS);
-    checks.push({ name: `${label} (${fx}, ${fy}) ×${z}`, gpu: graph.readStats(stats).visibleNodes, cpu: cpuVisibleCount(d, { x, y, zoom, viewportWidth: vw, viewportHeight: vh }, sizes) });
+    checks.push({ name: `${label} (${fx}, ${fy}) ×${z}`, gpu: graph.stats(stats).visibleNodes, cpu: cpuVisibleCount(d, { x, y, zoom, viewportWidth: vw, viewportHeight: vh }, sizes) });
     report(checks);
   };
   for (const [fx, fy, z] of views) await probe("view", fx, fy, z);
@@ -77,7 +77,8 @@ async function runChecks(graph: Graph, count: number, report: (c: Check[]) => vo
       d.positions[2 * (start + k)] = upd[2 * k]!;
       d.positions[2 * (start + k) + 1] = upd[2 * k + 1]!;
     }
-    graph.updateNodePositions(start, upd);
+    const idx = Uint32Array.from({ length: n }, (_, k) => start + k);
+    graph.nodes.update(idx, { positions: upd });
   }
   for (const [fx, fy, z] of [views[0]!, views[1]!, views[4]!]) await probe("after partial update", fx, fy, z);
   return checks;
@@ -100,8 +101,9 @@ const meta: Meta<Args> = {
       // clusters instead, so the two are only comparable with it disabled.
       // What this proves is that the cull itself is still exact; what LOD costs
       // visually is a separate, image-based question.
-      options: () => ({ lodTargetPx: 0, controls: false }),
+      options: () => ({ input: { pan: false, zoom: false, drag: false, select: false } }),
       setup: async (graph, a, hud, root) => {
+        graph.debug.tune({ lodTargetPx: 0 });
         const panel = document.createElement("div");
         panel.className = "bench-panel";
         root.append(panel);

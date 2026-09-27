@@ -7,11 +7,13 @@
  * sort / bulk-replace events, never per frame. Per-frame partial updates use
  * `ScatterSlot`, which caches its resources.
  */
+import { CONSTANTS } from "../data/Layouts";
 import { createShaderModule } from "./ShaderModules";
 
 const WG = 256;
 
 export interface ScatterSlot {
+  label: string;
   params: GPUBuffer;
   ranges: GPUBuffer;
   upload: GPUBuffer | null;
@@ -20,8 +22,16 @@ export interface ScatterSlot {
   key: readonly GPUBuffer[];
 }
 
+export interface LayerSlot {
+  params: GPUBuffer;
+  upload: GPUBuffer | null;
+  bindGroup: GPUBindGroup | null;
+  key: readonly GPUBuffer[];
+}
+
 export class PermuteKernels {
   private readonly gatherLayout: GPUBindGroupLayout;
+  private readonly mergeLayout: GPUBindGroupLayout;
   private readonly composeLayout: GPUBindGroupLayout;
   private readonly scatterLayout: GPUBindGroupLayout;
   private readonly params = new Uint32Array(4);
@@ -32,7 +42,12 @@ export class PermuteKernels {
     private readonly gatherPipe: GPUComputePipeline,
     private readonly composePipe: GPUComputePipeline,
     private readonly scatterPipe: GPUComputePipeline,
+    private readonly mergePipe: GPUComputePipeline,
+    private readonly invertPipe: GPUComputePipeline,
+    private readonly edgeStatePipe: GPUComputePipeline,
+    private readonly empty: GPUBindGroup,
   ) {
+    this.mergeLayout = mergePipe.getBindGroupLayout(2);
     this.gatherLayout = gatherPipe.getBindGroupLayout(0);
     this.composeLayout = composePipe.getBindGroupLayout(0);
     this.scatterLayout = scatterPipe.getBindGroupLayout(0);
@@ -40,9 +55,10 @@ export class PermuteKernels {
   }
 
   static async create(device: GPUDevice): Promise<PermuteKernels> {
-    const [gatherModule, scatterModule] = await Promise.all([
+    const [gatherModule, scatterModule, mergeModule] = await Promise.all([
       createShaderModule(device, "passes/gather.wgsl"),
       createShaderModule(device, "passes/scatter_update.wgsl"),
+      createShaderModule(device, "passes/merge_layers.wgsl"),
     ]);
     const storage = (type: GPUBufferBindingType) => ({ visibility: GPUShaderStage.COMPUTE, buffer: { type } });
     const uniform = { binding: 0, ...storage("uniform") };
@@ -70,18 +86,36 @@ export class PermuteKernels {
         { binding: 4, ...storage("storage") },
       ],
     });
-    const pipe = (module: GPUShaderModule, entryPoint: string, layout: GPUBindGroupLayout) =>
+    const pipe = (module: GPUShaderModule, entryPoint: string, layout: GPUBindGroupLayout, constants?: Record<string, number>) =>
       device.createComputePipelineAsync({
         label: entryPoint,
         layout: device.createPipelineLayout({ bindGroupLayouts: [layout] }),
-        compute: { module, entryPoint },
+        compute: { module, entryPoint, constants },
       });
-    const [g, c, s] = await Promise.all([
+    const mergeLayout = device.createBindGroupLayout({
+      label: "merge_layers",
+      entries: [
+        uniform,
+        { binding: 1, ...storage("read-only-storage") },
+        { binding: 2, ...storage("read-only-storage") },
+        { binding: 3, ...storage("storage") },
+      ],
+    });
+    const emptyLayout = device.createBindGroupLayout({ label: "empty", entries: [] });
+    const edgeConstants = { EDGE_END_MASK: CONSTANTS.EDGE_END_MASK, EDGE_STATE_SHIFT: CONSTANTS.EDGE_STATE_SHIFT };
+    const [g, c, s, m, inv, es] = await Promise.all([
       pipe(gatherModule, "gather", gatherLayout),
       pipe(gatherModule, "compose", composeLayout),
       pipe(scatterModule, "scatter_update", scatterLayout),
+      device.createComputePipelineAsync({
+        label: "merge_layers",
+        layout: device.createPipelineLayout({ bindGroupLayouts: [emptyLayout, emptyLayout, mergeLayout] }),
+        compute: { module: mergeModule, entryPoint: "merge_layers" },
+      }),
+      pipe(gatherModule, "invert", gatherLayout),
+      pipe(scatterModule, "scatter_edge_state", scatterLayout, edgeConstants),
     ]);
-    return new PermuteKernels(device, g, c, s);
+    return new PermuteKernels(device, g, c, s, m, inv, es, device.createBindGroup({ layout: emptyLayout, entries: [] }));
   }
 
   /** dst[e] = src[perm[e]] for `n` nodes of `words` u32 each. */
@@ -104,8 +138,18 @@ export class PermuteKernels {
     return params;
   }
 
+  invert(pass: GPUComputePassEncoder, perm: GPUBuffer, dst: GPUBuffer, n: number): GPUBuffer {
+    const [gx, gy] = this.grid(n);
+    const params = this.uniform(n, 1, gx);
+    pass.setPipeline(this.invertPipe);
+    pass.setBindGroup(0, this.device.createBindGroup({ layout: this.gatherLayout, entries: entries([params, perm, perm, dst]) }));
+    pass.dispatchWorkgroups(gx, gy);
+    return params;
+  }
+
   createScatterSlot(label: string): ScatterSlot {
     return {
+      label,
       params: this.device.createBuffer({ label: `${label}/params`, size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST }),
       ranges: this.device.createBuffer({ label: `${label}/ranges`, size: 64 * 8, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST }),
       upload: null,
@@ -118,7 +162,7 @@ export class PermuteKernels {
    * Apply `total` user-indexed elements (already written to `slot.upload`, ranges
    * table already written) to `target` through `rank`.
    */
-  scatter(pass: GPUComputePassEncoder, slot: ScatterSlot, rank: GPUBuffer, target: GPUBuffer, total: number, rangeCount: number, words: number): void {
+  scatter(pass: GPUComputePassEncoder, slot: ScatterSlot, rank: GPUBuffer, target: GPUBuffer, total: number, rangeCount: number, words: number, edgeState = false): void {
     const [gx, gy] = this.grid(total);
     this.params[0] = total;
     this.params[1] = rangeCount;
@@ -126,12 +170,40 @@ export class PermuteKernels {
     this.params[3] = gx;
     this.device.queue.writeBuffer(slot.params, 0, this.params);
     const upload = slot.upload!;
-    if (slot.key[0] !== upload || slot.key[1] !== rank || slot.key[2] !== target) {
+    if (slot.key[0] !== upload || slot.key[1] !== rank || slot.key[2] !== target || slot.key[3] !== slot.ranges) {
       slot.bindGroup = this.device.createBindGroup({ layout: this.scatterLayout, entries: entries([slot.params, slot.ranges, upload, rank, target]) });
-      slot.key = [upload, rank, target];
+      slot.key = [upload, rank, target, slot.ranges];
     }
-    pass.setPipeline(this.scatterPipe);
+    pass.setPipeline(edgeState ? this.edgeStatePipe : this.scatterPipe);
     pass.setBindGroup(0, slot.bindGroup!);
+    pass.dispatchWorkgroups(gx, gy);
+  }
+
+  createLayerSlot(): LayerSlot {
+    return {
+      params: this.device.createBuffer({ label: "layers/params", size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST }),
+      upload: null,
+      bindGroup: null,
+      key: [],
+    };
+  }
+
+  mergeLayers(pass: GPUComputePassEncoder, slot: LayerSlot, order: GPUBuffer, style: GPUBuffer, n: number): void {
+    const [gx, gy] = this.grid(n);
+    this.params[0] = n;
+    this.params[1] = gx;
+    this.params[2] = 0;
+    this.params[3] = 0;
+    this.device.queue.writeBuffer(slot.params, 0, this.params);
+    const upload = slot.upload!;
+    if (slot.key[0] !== upload || slot.key[1] !== order || slot.key[2] !== style) {
+      slot.bindGroup = this.device.createBindGroup({ layout: this.mergeLayout, entries: entries([slot.params, order, upload, style]) });
+      slot.key = [upload, order, style];
+    }
+    pass.setPipeline(this.mergePipe);
+    pass.setBindGroup(0, this.empty);
+    pass.setBindGroup(1, this.empty);
+    pass.setBindGroup(2, slot.bindGroup!);
     pass.dispatchWorkgroups(gx, gy);
   }
 

@@ -1,0 +1,123 @@
+title: Input
+intro: >-
+  Input sets how the graph reacts to the mouse, touch and wheel: pan, zoom, rotate, drag and select. You
+  reach it through `graph.input`, and it also sets what the pointer can pick.
+namespace: GraphInputApi
+types: [GraphInput, Mode, SelectKey, SelectShape]
+
+docs:
+  GraphInputApi:
+    description: >-
+      Everything about interaction goes through `graph.input`. Each interaction can run by itself, only
+      send its events so your code acts, or be turned off. You can also set the first values when you call
+      `Graph.create`, with the `input` option.
+    example: |
+      graph.input.set({ rotate: "auto", selectShape: "lasso" });
+    members:
+      set:
+        description: >-
+          Changes some of the settings. Fields you leave out keep their value. A wrong value throws a
+          `GraphError` with the code `"invalid-argument"`.
+        example: |
+          graph.input.set({ drag: false });
+          graph.input.set({ pick: { edges: false } });
+  GraphInput:
+    description: >-
+      The settings you pass to `input.set` or to the `input` option of `Graph.create`. Every field is
+      optional. Pan, zoom, drag and select are on by default, rotate is off.
+    example: |
+      import { Graph, type GraphInput } from "@vhult/graph";
+
+      const input: GraphInput = { rotate: "auto", selectKey: "alt", pickRadius: 4 };
+      const view = await Graph.create(canvas, { input });
+    members:
+      pan:
+        description: >-
+          A press and move on empty space moves the camera. In `"manual"` the camera does not move and you
+          get `pan` events to move it yourself. The default is `"auto"`.
+        example: |
+          graph.input.set({ pan: "manual" });
+          graph.on("pan", (e) => {
+            const view = graph.camera.get();
+            graph.camera.set({ x: view.x - e.dx / view.zoom, y: view.y - e.dy / view.zoom });
+          });
+      zoom:
+        description: >-
+          The wheel and a two-finger pinch zoom around the pointer. In `"manual"` the camera does not zoom
+          and you get `zoom` events. With `false` the wheel scrolls the page as usual. The default is
+          `"auto"`.
+        example: |
+          graph.input.set({ zoom: false });
+      rotate:
+        description: >-
+          A two-finger twist on a touch screen turns the view. In `"manual"` the view does not turn and you
+          get `rotate` events. The default is `false`.
+        example: |
+          graph.input.set({ rotate: "auto" });
+      drag:
+        description: >-
+          A press on a node and a move of more than 3 CSS px drags it. When the node is selected, every
+          selected node moves with it. In `"manual"` the nodes stay in place and you get the `dragStart`,
+          `drag` and `dragEnd` events to move them. With `false`, a press on a node pans the camera.
+        example: |
+          graph.input.set({ drag: "manual" });
+          graph.on("dragEnd", (e) => console.log(`node ${e.index} moved by ${e.dx}, ${e.dy}`));
+      select:
+        description: >-
+          A click and a drawn shape select nodes. In `"auto"` the engine sets `Flag.selected` on them. In
+          `"manual"` no flag changes and the `select` event tells you which nodes were picked. The default
+          is `"auto"`.
+        example: |
+          import { Flag } from "@vhult/graph";
+
+          graph.input.set({ select: "manual" });
+          graph.on("select", (e) => graph.nodes.flag(e.nodes, Flag.focused, true));
+      selectShape:
+        description: >-
+          The shape you draw to select nodes: `"box"` for a rectangle or `"lasso"` for a free line. The
+          default is `"box"`.
+        example: |
+          graph.input.set({ selectShape: "lasso" });
+      selectKey:
+        description: >-
+          The key to hold while you press on empty space to draw the select shape. The default is
+          `"shift"`. With null the shape is drawn on every press on empty space, so a drag there no longer
+          pans. Touch never draws the shape.
+        example: |
+          graph.input.set({ selectKey: null, selectShape: "lasso" });
+      pick:
+        description: >-
+          What hover, click and the hover highlight can find: nodes, edges and groups. By default nodes
+          and edges are on and groups are off. Fields you leave out keep their value.
+        example: |
+          graph.input.set({ pick: { nodes: true, edges: false } });
+      pickRadius:
+        description: >-
+          Extra reach around each node for the pointer, in CSS px. It makes small nodes easier to hit. The
+          default is 0.
+        example: |
+          graph.input.set({ pickRadius: 6 });
+      edgePickRadius:
+        description: >-
+          How far from an edge the pointer still hits it, in CSS px. The default is 4.
+        example: |
+          graph.input.set({ edgePickRadius: 8 });
+  Mode:
+    description: >-
+      How an interaction runs. With `"auto"` the engine does it and sends its events. With `"manual"` the
+      engine only sends the events, and your code decides what happens. With `false` the interaction is off
+      and sends nothing.
+    example: |
+      graph.input.set({ pan: "auto", drag: "manual", rotate: false });
+  SelectKey:
+    description: >-
+      The key that draws the select shape: `"shift"`, `"alt"`, `"ctrl"` or `"meta"`. Use it in the
+      `selectKey` setting.
+    example: |
+      graph.input.set({ selectKey: "alt" });
+  SelectShape:
+    description: >-
+      The shape drawn to select nodes, `"box"` or `"lasso"`. Use it in the `selectShape` setting. The
+      `select` event reports it in `shape`.
+    example: |
+      graph.input.set({ selectShape: "box" });

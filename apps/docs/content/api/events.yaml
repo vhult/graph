@@ -1,0 +1,363 @@
+title: Events
+intro: >-
+  Events tell you what the user did and what changed in the engine. Listen with `graph.on`, and stop with
+  the function it returns.
+namespace: GraphEvents
+types: [Hit, SelectEvent, DragStartEvent, DragMoveEvent, PanEvent, ZoomEvent, RotateEvent, GesturePhase]
+
+docs:
+  GraphEvents:
+    label: graph.on
+    description: >-
+      `graph.on(name, fn)` calls `fn` with the payload each time the event fires. It returns a function
+      that stops listening. The engine only sends an event while something listens to it, so events you
+      do not use cost nothing.
+    example: |
+      const stop = graph.on("click", (hit) => console.log(hit.node));
+      stop();
+    members:
+      error:
+        description: >-
+          Fires when something fails after `Graph.create`, for example when the GPU device is lost. The
+          payload is a `GraphError` with a `code` and a `message`. With no listener, the error goes to
+          `console.error`.
+        example: |
+          graph.on("error", (err) => {
+            if (err.code === "device-lost") showFallback(err.message);
+          });
+      hover:
+        description: >-
+          Fires when the node or edge under the pointer changes. The payload is a `Hit`, with null fields
+          when the pointer leaves them, leaves the canvas or the camera moves. What it can find is set by
+          `pick` in `graph.input`.
+        example: |
+          graph.on("hover", (hit) => {
+            canvas.style.cursor = hit.node !== null || hit.edge !== null ? "pointer" : "default";
+          });
+      click:
+        description: >-
+          Fires on a left click on a node, an edge or empty space. A press that moves more than 3 CSS px
+          is not a click. The payload is a `Hit`.
+        example: |
+          graph.on("click", (hit) => {
+            if (hit.node !== null) console.log(`node ${hit.node}`);
+            else if (hit.edge !== null) console.log(`edge ${hit.edge}`);
+          });
+      doubleClick:
+        description: >-
+          Fires on a left double click. The payload is a `Hit`. The two clicks before it still fire
+          `click`.
+        example: |
+          graph.on("doubleClick", (hit) => {
+            if (hit.node !== null) graph.camera.fit({ nodes: Uint32Array.of(hit.node) });
+          });
+      contextMenu:
+        description: >-
+          Fires on a right click or a long press. The payload is a `Hit`. While you listen to it, the
+          browser menu does not open.
+        example: |
+          graph.on("contextMenu", (hit) => {
+            if (hit.node !== null) console.log(`menu for node ${hit.node} at ${hit.screenX}, ${hit.screenY}`);
+          });
+      dragStart:
+        description: >-
+          Fires when a drag on a node starts, after the pointer moves more than 3 CSS px. The payload is a
+          `DragStartEvent` with the grabbed node and every node that moves with it.
+        example: |
+          graph.on("dragStart", (e) => console.log(`dragging ${e.nodes.length} nodes`));
+      drag:
+        description: >-
+          Fires when the dragged nodes move. The payload is a `DragMoveEvent` with the offset from the
+          start, in world units. With `drag: "manual"` you move the nodes yourself from it.
+        example: |
+          let start = { x: 0, y: 0 };
+          graph.on("dragStart", (e) => (start = { x: e.x, y: e.y }));
+          graph.on("drag", (e) => {
+            graph.nodes.update(Uint32Array.of(e.index), { positions: new Float32Array([start.x + e.dx, start.y + e.dy]) });
+          });
+      dragEnd:
+        description: >-
+          Fires when a drag ends: on release, or when a right click, a pinch or `drag: false` stops it. The
+          payload is a `DragMoveEvent` with the last offset.
+        example: |
+          graph.on("dragEnd", (e) => console.log(`node ${e.index} moved by ${e.dx}, ${e.dy}`));
+      select:
+        description: >-
+          Fires after each click and each drawn shape while `select` is not `false`. The payload is a
+          `SelectEvent`. In `"auto"` it holds the whole selection; in `"manual"` it holds the nodes you
+          picked, and you decide what to do with them.
+        example: |
+          graph.on("select", (e) => console.log(`${e.nodes.length} nodes selected with a ${e.shape}`));
+      pan:
+        description: >-
+          Fires while the user pans, at most once per frame. The payload is a `PanEvent`. It fires in
+          `"auto"` and `"manual"` mode.
+        example: |
+          graph.on("pan", (e) => {
+            if (e.phase === "end") console.log("pan done");
+          });
+      zoom:
+        description: >-
+          Fires while the user zooms with the wheel or a pinch, at most once per frame. The payload is a
+          `ZoomEvent`. A wheel zoom ends 150 ms after the last wheel step.
+        example: |
+          graph.on("zoom", (e) => {
+            if (e.phase === "move") console.log(`zoom step ${e.factor.toFixed(2)}`);
+          });
+      rotate:
+        description: >-
+          Fires while the user turns the view with two fingers, at most once per frame. The payload is a
+          `RotateEvent`. It needs `rotate` on in `graph.input`, since it is off by default.
+        example: |
+          graph.input.set({ rotate: "auto" });
+          graph.on("rotate", (e) => console.log(`turned ${e.angle} rad`));
+      edgesRemoved:
+        description: >-
+          Fires after `nodes.remove` with the indices of the edges that went away with the removed nodes.
+          Use it to drop any data you keep for those edges.
+        example: |
+          const edgeNames = new Map<number, string>();
+          graph.on("edgesRemoved", (edges) => {
+            for (const e of edges) edgeNames.delete(e);
+          });
+      view:
+        description: >-
+          Fires when the camera moves, for any reason, at most once per frame. The payload is a
+          `CameraView`: the centre in world units, the zoom in CSS px per world unit and the rotation in
+          radians.
+        example: |
+          graph.on("view", (view) => console.log(`zoom ${view.zoom.toFixed(2)}`));
+  Hit:
+    description: >-
+      What is under the pointer or under a point you ask about. The `hover`, `click`, `doubleClick` and
+      `contextMenu` events send it, and `query.at` returns it. Each of `node`, `edge` and `group` is null
+      when nothing of that kind is there.
+    example: |
+      const hit = await graph.query.at(120, 80);
+      if (hit.node !== null) console.log(`node ${hit.node} at ${hit.x}, ${hit.y}`);
+    members:
+      node:
+        description: >-
+          The index of the node under the point, or null.
+      edge:
+        description: >-
+          The index of the edge under the point, or null.
+      group:
+        description: >-
+          The group id under the point, or null.
+      x:
+        description: >-
+          The x of the point, in world units.
+      y:
+        description: >-
+          The y of the point, in world units.
+      screenX:
+        description: >-
+          The x of the point on the canvas, in CSS px.
+      screenY:
+        description: >-
+          The y of the point on the canvas, in CSS px.
+      button:
+        description: >-
+          The mouse button of the press, as in DOM mouse events. It is -1 for `hover` and `query.at`.
+      shift:
+        description: >-
+          True when the Shift key was held.
+      ctrl:
+        description: >-
+          True when the Control key was held.
+      alt:
+        description: >-
+          True when the Alt key was held.
+      meta:
+        description: >-
+          True when the Meta key was held.
+  SelectEvent:
+    description: >-
+      The payload of the `select` event. It says which nodes, the gesture that picked them and which keys
+      were held.
+    example: |
+      import type { SelectEvent } from "@vhult/graph";
+
+      function onSelect(e: SelectEvent) {
+        if (e.shape === "click" && e.nodes.length === 0) console.log("clicked empty space");
+      }
+      graph.on("select", onSelect);
+    members:
+      nodes:
+        description: >-
+          In `"auto"`, every selected node, in the order they were selected. In `"manual"`, the nodes
+          inside the shape or the clicked node, and none for a click on empty space.
+      shape:
+        description: >-
+          The gesture that made the selection: `"click"`, `"box"` or `"lasso"`.
+      shift:
+        description: >-
+          True when the Shift key was held.
+      ctrl:
+        description: >-
+          True when the Control key was held.
+      alt:
+        description: >-
+          True when the Alt key was held.
+      meta:
+        description: >-
+          True when the Meta key was held.
+  DragStartEvent:
+    description: >-
+      The payload of the `dragStart` event. It holds the grabbed node, every node that moves with it and
+      where the grabbed node was.
+    example: |
+      import type { DragStartEvent } from "@vhult/graph";
+
+      graph.on("dragStart", (e: DragStartEvent) => console.log(`node ${e.index} from ${e.x}, ${e.y}`));
+    members:
+      index:
+        description: >-
+          The node under the pointer when the drag started.
+      nodes:
+        description: >-
+          Every dragged node. When the grabbed node is selected, it holds every selected node; otherwise
+          only the grabbed one.
+      x:
+        description: >-
+          The x of the grabbed node at the start, in world units.
+      y:
+        description: >-
+          The y of the grabbed node at the start, in world units.
+  DragMoveEvent:
+    description: >-
+      The payload of the `drag` and `dragEnd` events. It holds the grabbed node and how far it moved since
+      the drag started.
+    example: |
+      import type { DragMoveEvent } from "@vhult/graph";
+
+      const log = (e: DragMoveEvent) => console.log(`node ${e.index}: ${e.dx}, ${e.dy}`);
+      graph.on("drag", log);
+      graph.on("dragEnd", log);
+    members:
+      index:
+        description: >-
+          The grabbed node.
+      dx:
+        description: >-
+          The horizontal offset since the start of the drag, in world units.
+      dy:
+        description: >-
+          The vertical offset since the start of the drag, in world units.
+  PanEvent:
+    description: >-
+      The payload of the `pan` event. It holds the move since the last event, in CSS px, and where the
+      pointer is.
+    example: |
+      import type { PanEvent } from "@vhult/graph";
+
+      let total = 0;
+      graph.on("pan", (e: PanEvent) => (total += Math.hypot(e.dx, e.dy)));
+    members:
+      phase:
+        description: >-
+          Where the gesture is: `"start"`, `"move"` or `"end"`.
+      dx:
+        description: >-
+          The horizontal move since the last event, in CSS px.
+      dy:
+        description: >-
+          The vertical move since the last event, in CSS px.
+      x:
+        description: >-
+          The pointer x on the canvas, in CSS px.
+      y:
+        description: >-
+          The pointer y on the canvas, in CSS px.
+      shift:
+        description: >-
+          True when the Shift key was held.
+      ctrl:
+        description: >-
+          True when the Control key was held.
+      alt:
+        description: >-
+          True when the Alt key was held.
+      meta:
+        description: >-
+          True when the Meta key was held.
+  ZoomEvent:
+    description: >-
+      The payload of the `zoom` event. It holds the zoom factor of this step and the point the zoom is
+      centred on.
+    example: |
+      import type { ZoomEvent } from "@vhult/graph";
+
+      graph.on("zoom", (e: ZoomEvent) => console.log(e.factor > 1 ? "in" : "out"));
+    members:
+      phase:
+        description: >-
+          Where the gesture is: `"start"`, `"move"` or `"end"`.
+      factor:
+        description: >-
+          The zoom factor of this step. Above 1 zooms in, below 1 zooms out.
+      x:
+        description: >-
+          The x of the zoom centre on the canvas, in CSS px.
+      y:
+        description: >-
+          The y of the zoom centre on the canvas, in CSS px.
+      shift:
+        description: >-
+          True when the Shift key was held.
+      ctrl:
+        description: >-
+          True when the Control key was held. A trackpad pinch comes as a wheel with Control held.
+      alt:
+        description: >-
+          True when the Alt key was held.
+      meta:
+        description: >-
+          True when the Meta key was held.
+  RotateEvent:
+    description: >-
+      The payload of the `rotate` event. It holds the turn of this step, in radians, and the point the turn
+      is centred on.
+    example: |
+      import type { RotateEvent } from "@vhult/graph";
+
+      let turned = 0;
+      graph.on("rotate", (e: RotateEvent) => (turned += e.angle));
+    members:
+      phase:
+        description: >-
+          Where the gesture is: `"start"`, `"move"` or `"end"`.
+      angle:
+        description: >-
+          The turn of this step, in radians.
+      x:
+        description: >-
+          The x of the turn centre on the canvas, in CSS px.
+      y:
+        description: >-
+          The y of the turn centre on the canvas, in CSS px.
+      shift:
+        description: >-
+          True when the Shift key was held.
+      ctrl:
+        description: >-
+          True when the Control key was held.
+      alt:
+        description: >-
+          True when the Alt key was held.
+      meta:
+        description: >-
+          True when the Meta key was held.
+  GesturePhase:
+    description: >-
+      Where a pan, zoom or rotate gesture is. The first event is `"start"`, the next ones are `"move"`, and
+      the last one is `"end"`. An `"end"` event carries no movement: 0 for `dx`, `dy` and `angle`, and 1
+      for `factor`.
+    example: |
+      import type { GesturePhase } from "@vhult/graph";
+
+      graph.on("zoom", (e) => {
+        const phase: GesturePhase = e.phase;
+        if (phase === "end") console.log("zoom done");
+      });

@@ -12,32 +12,42 @@
  * - Partial updates: per-range writeBuffer into a staging buffer, then one
  *   scatter_update dispatch through `rank` per channel. Never a full re-upload.
  *
- * Edge channels are only ever replaced whole, always in the user's order;
+ * Edge channels are uploaded in the user's order;
  * EDGE_SORT then turns them into engine-indexed, sorted buffers in place
  * (`adoptSortedEdges`). A node re-sort renumbers the nodes, so it re-uploads
  * the edges from the CPU mirror and they are sorted again from scratch.
  *
  * Buffers replaced during a frame are retired and destroyed after submit.
  */
-import type { GraphStore } from "../data/GraphStore";
-import { DirtyRanges } from "../data/DirtyRanges";
-import { GRAPH_BINDINGS, GRAPH_BUFFER_WORDS, type GraphBufferName } from "../data/Layouts";
-import type { PermuteKernels, ScatterSlot } from "./PermuteKernels";
+import type { Channel, GraphStore } from "../data/GraphStore";
+import { CONSTANTS, GRAPH_BINDINGS, GRAPH_BUFFER_WORDS, type GraphBufferName } from "../data/Layouts";
+import type { LayerSlot, PermuteKernels, ScatterSlot } from "./PermuteKernels";
 
 /** Smallest buffer we create: bindings need non-zero size, vec2 arrays need ≥ 8 B. */
 const MIN_BUFFER_BYTES = 16;
 
 export const NODE_CHANNELS = ["nodePos", "nodeStyle", "nodeSize", "nodeColor", "nodeState"] as const satisfies readonly GraphBufferName[];
-type NodeChannel = (typeof NODE_CHANNELS)[number];
+export type NodeChannel = (typeof NODE_CHANNELS)[number];
 const isNodeChannel = (n: GraphBufferName): n is NodeChannel => (NODE_CHANNELS as readonly string[]).includes(n);
+const SCATTER_CHANNELS = [...NODE_CHANNELS, "edgeStyle", "edgeColor"] as const satisfies readonly GraphBufferName[];
+const STREAM_CHANNELS = ["nodePos", "nodeColor"] as const satisfies readonly NodeChannel[];
+type StreamChannel = (typeof STREAM_CHANNELS)[number];
+const JOB_NODE = 0;
+const JOB_EDGE = 1;
+const JOB_EDGE_STATE = 2;
+const EDGE_STATE_TOP = ~CONSTANTS.EDGE_END_MASK;
 
 const USAGE = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC;
 
 interface ScatterJob {
-  name: NodeChannel;
+  readonly name: GraphBufferName;
+  readonly slot: ScatterSlot;
+  readonly kind: number;
   total: number;
   ranges: number;
 }
+
+const queued = (ch: Channel): boolean => !ch.dirty.isEmpty || ch.scattered.count > 0;
 
 export class GraphBuffers {
   readonly buffers = {} as Record<GraphBufferName, GPUBuffer>;
@@ -58,15 +68,25 @@ export class GraphBuffers {
   edgeOrder: GPUBuffer | null = null;
   /** Keep `edgeOrder` at the next sort (set by the engine). */
   keepEdgeOrder = false;
+  edgeRank: GPUBuffer | null = null;
+  restyledEdges = 0;
+  restyledStates = 0;
   /** Bytes uploaded by the last flush. */
   lastUploadBytes = 0;
 
   private nodeCount = -1;
   private orderIsIdentity = true;
   private readonly gathers: { name: NodeChannel; userOrder: GPUBuffer }[] = [];
-  private readonly scatters: ScatterJob[] = [];
-  private readonly slots: Record<NodeChannel, ScatterSlot>;
-  private readonly rangeTable = new Uint32Array(DirtyRanges.CAPACITY * 2);
+  private readonly jobs: Partial<Record<GraphBufferName, ScatterJob>>;
+  private readonly streams: Record<StreamChannel, ScatterJob>;
+  private readonly stateJob: ScatterJob;
+  private readonly queue: readonly ScatterJob[];
+  private invertEdges = false;
+  private readonly layerSlot: LayerSlot;
+  private layerJob = 0;
+  private rangeScratch = new Uint32Array(128);
+  private valueScratch = new Uint32Array(64);
+  private valueScratchF32 = new Float32Array(this.valueScratch.buffer);
   private readonly retired: GPUBuffer[] = [];
 
   constructor(
@@ -75,16 +95,25 @@ export class GraphBuffers {
     private readonly store: GraphStore,
     private readonly kernels: PermuteKernels,
   ) {
-    this.slots = Object.fromEntries(NODE_CHANNELS.map((n) => [n, kernels.createScatterSlot(n)])) as Record<NodeChannel, ScatterSlot>;
+    const job = (name: GraphBufferName, label: string, kind: number): ScatterJob => ({ name, slot: kernels.createScatterSlot(label), kind, total: 0, ranges: 0 });
+    this.streams = Object.fromEntries(STREAM_CHANNELS.map((n) => [n, job(n, `${n}/stream`, JOB_NODE)])) as Record<StreamChannel, ScatterJob>;
+    this.jobs = Object.fromEntries(SCATTER_CHANNELS.map((n) => [n, job(n, n, isNodeChannel(n) ? JOB_NODE : JOB_EDGE)]));
+    this.stateJob = job("edgeIdx", "edgeState", JOB_EDGE_STATE);
+    this.queue = [...Object.values(this.streams), ...Object.values(this.jobs), this.stateJob];
+    this.layerSlot = kernels.createLayerSlot();
   }
 
   /** GPU work queued by `flush` that must be encoded this frame. */
   get hasPendingWork(): boolean {
-    return this.gathers.length > 0 || this.scatters.length > 0;
+    if (this.gathers.length > 0 || this.layerJob > 0 || this.invertEdges) return true;
+    for (const s of this.queue) if (s.total > 0) return true;
+    return false;
   }
 
   /** CPU side of the upload: create/fill buffers and stage partial updates. */
   flush(): boolean {
+    this.restyledEdges = 0;
+    this.restyledStates = 0;
     if (!this.store.dirty) return false;
     const store = this.store;
     let bytes = 0;
@@ -103,12 +132,13 @@ export class GraphBuffers {
     // A sort is coming (topology, or positions replaced wholesale): the edges on
     // the GPU are indexed by the old numbering, so bring back the user's copy.
     if ((this.needsSort || store.channels.nodePos.realloc) && store.edgeCount > 0) store.reloadEdges();
+    this.prepareEdgeWrites();
 
     for (const b of GRAPH_BINDINGS) {
       const name = b.name;
       const ch = store.channels[name];
       if (ch.realloc) {
-        const filled = this.createFilled(name, ch.data);
+        const filled = this.createFilled(name, ch.data, name === "edgeIdx" ? store.edgeState : null);
         bytes += ch.data.byteLength;
         if (isNodeChannel(name) && !this.orderIsIdentity) {
           this.gathers.push({ name, userOrder: filled }); // permuted on the GPU in encode()
@@ -118,17 +148,22 @@ export class GraphBuffers {
           rebind = true;
         }
         if (name === "nodePos") this.needsSort = this.nodeCount > 0;
-        if (name === "edgeIdx") this.edgesUnsorted = true;
+        if (name === "edgeIdx") {
+          this.edgesUnsorted = true;
+          store.edgeStateChannel.dirty.clear();
+          store.edgeStateChannel.scattered.clear();
+        }
         ch.realloc = false;
         ch.dirty.clear();
+        ch.scattered.clear();
         continue;
       }
-      const d = ch.dirty;
-      // Only node channels take partial updates; edges are replaced whole.
-      if (d.isEmpty || !isNodeChannel(name)) continue;
-      bytes += this.stageScatter(name, ch.data, ch.words, d);
-      d.clear();
+      const job = this.jobs[name];
+      if (job) bytes += this.stage(ch, job);
     }
+    bytes += this.stage(store.edgeStateChannel, this.stateJob);
+    this.restyledEdges = this.jobs.edgeStyle!.total;
+    this.restyledStates = this.stateJob.total;
 
     if (rebind || !this.bindGroup) this.rebind();
     store.markClean();
@@ -148,10 +183,21 @@ export class GraphBuffers {
     if (this.gathers.length > 0) this.rebind();
     this.gathers.length = 0;
 
-    for (const s of this.scatters) {
-      this.kernels.scatter(pass, this.slots[s.name], this.rank, this.buffers[s.name], s.total, s.ranges, GRAPH_BUFFER_WORDS[s.name]);
+    if (this.invertEdges) {
+      this.invertEdges = false;
+      if (this.edgeOrder && this.edgeRank) this.retire(this.kernels.invert(pass, this.edgeOrder, this.edgeRank, this.store.edgeCount));
     }
-    this.scatters.length = 0;
+    for (const s of this.queue) {
+      if (s.total === 0) continue;
+      const rank = s.kind === JOB_NODE ? this.rank : this.edgeRank!;
+      this.kernels.scatter(pass, s.slot, rank, this.buffers[s.name], s.total, s.ranges, GRAPH_BUFFER_WORDS[s.name], s.kind === JOB_EDGE_STATE);
+      s.total = 0;
+    }
+
+    if (this.layerJob > 0) {
+      this.kernels.mergeLayers(pass, this.layerSlot, this.order, this.buffers.nodeStyle, this.layerJob);
+      this.layerJob = 0;
+    }
   }
 
   /**
@@ -194,6 +240,12 @@ export class GraphBuffers {
       this.retire(this.buffers[name], params);
       this.buffers[name] = dst;
     }
+    if (this.store.edgeRankWanted) {
+      const rank = this.device.createBuffer({ label: "edgeRank", size: Math.max(MIN_BUFFER_BYTES, edgeCount * 4), usage: GPUBufferUsage.STORAGE });
+      this.retire(this.edgeRank ?? undefined, this.kernels.invert(pass, perm, rank, edgeCount));
+      this.edgeRank = rank;
+    }
+    this.invertEdges = false;
     this.edgesUnsorted = false;
     this.rebind();
   }
@@ -216,72 +268,147 @@ export class GraphBuffers {
   }
 
   destroy(): void {
+    this.layerSlot.params.destroy();
+    this.layerSlot.upload?.destroy();
     this.afterSubmit();
     for (const b of GRAPH_BINDINGS) this.buffers[b.name]?.destroy();
     this.order?.destroy();
     this.rank?.destroy();
     this.edgeOrder?.destroy();
-    for (const s of Object.values(this.slots)) {
-      s.params.destroy();
-      s.ranges.destroy();
-      s.upload?.destroy();
+    this.edgeRank?.destroy();
+    for (const { slot } of this.queue) {
+      slot.params.destroy();
+      slot.ranges.destroy();
+      slot.upload?.destroy();
     }
   }
 
   // ---- internals ----------------------------------------------------------------
 
-  canStream(count: number): boolean {
-    return this.nodeCount === count && !this.store.channels.nodePos.realloc;
+  get restyleSlot(): ScatterSlot {
+    return this.jobs.edgeStyle!.slot;
   }
 
-  streamPositions(data: Float32Array): number {
-    const total = data.length >> 1;
-    const upload = this.uploadBuffer("nodePos", data.byteLength);
+  get stateSlot(): ScatterSlot {
+    return this.stateJob.slot;
+  }
+
+  canStream(name: NodeChannel, count: number): boolean {
+    const ch = this.store.channels[name];
+    return this.nodeCount === count && !ch.realloc && !queued(ch);
+  }
+
+  streamLayers(words: Uint32Array): number {
+    const slot = this.layerSlot;
+    if (!slot.upload || slot.upload.size < words.byteLength) {
+      if (slot.upload) this.retire(slot.upload);
+      slot.upload = this.device.createBuffer({ label: "layers/upload", size: Math.max(MIN_BUFFER_BYTES, Math.ceil((words.byteLength * 1.5) / 16) * 16), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+    }
+    this.device.queue.writeBuffer(slot.upload, 0, words);
+    this.layerJob = this.nodeCount;
+    return words.byteLength;
+  }
+
+  streamChannel(name: StreamChannel, data: Float32Array | Uint32Array): number {
+    const job = this.streams[name];
     const queue = this.device.queue;
-    queue.writeBuffer(upload, 0, data);
-    this.rangeTable[0] = 0;
-    this.rangeTable[1] = 0;
-    queue.writeBuffer(this.slots.nodePos.ranges, 0, this.rangeTable, 0, 2);
-    this.scatters.push({ name: "nodePos", total, ranges: 1 });
+    queue.writeBuffer(this.reserve(job.slot, "upload", data.byteLength), 0, data);
+    this.rangeScratch[0] = 0;
+    this.rangeScratch[1] = 0;
+    queue.writeBuffer(job.slot.ranges, 0, this.rangeScratch, 0, 2);
+    job.total = data.length / GRAPH_BUFFER_WORDS[name];
+    job.ranges = 1;
     return data.byteLength + 8;
   }
 
-  private uploadBuffer(name: NodeChannel, bytes: number): GPUBuffer {
-    const slot = this.slots[name];
-    if (!slot.upload || slot.upload.size < bytes) {
-      if (slot.upload) this.retire(slot.upload);
-      slot.upload = this.device.createBuffer({ label: `${name}/upload`, size: Math.max(MIN_BUFFER_BYTES, Math.ceil(bytes * 1.5 / 16) * 16), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
-    }
-    return slot.upload;
+  private reserve(slot: ScatterSlot, key: "upload" | "ranges", bytes: number): GPUBuffer {
+    const current = slot[key];
+    if (current && current.size >= bytes) return current;
+    if (current) this.retire(current);
+    const size = Math.max(MIN_BUFFER_BYTES, 2 ** Math.ceil(Math.log2(Math.max(1, bytes))));
+    const buffer = this.device.createBuffer({ label: `${slot.label}/${key}`, size, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+    slot[key] = buffer;
+    return buffer;
   }
 
-  /** Copy dirty user-order ranges into the channel's staging buffer; returns bytes. */
-  private stageScatter(name: NodeChannel, data: Uint32Array | Float32Array, words: number, d: DirtyRanges): number {
-    const slot = this.slots[name];
-    let total = 0;
-    for (let r = 0; r < d.count; r++) total += d.end(r) - d.start(r);
-    const bytes = total * words * 4;
-    this.uploadBuffer(name, bytes);
-    const queue = this.device.queue;
+  private prepareEdgeWrites(): void {
+    const store = this.store;
+    if (!store.edgeRankWanted && this.edgeRank) {
+      this.retire(this.edgeRank);
+      this.edgeRank = null;
+    }
+    const ch = store.channels;
+    const pending = queued(ch.edgeStyle) || queued(ch.edgeColor) || queued(store.edgeStateChannel);
+    if (!pending || store.edgeCount === 0 || ch.edgeIdx.realloc || (this.edgeRank && !this.edgesUnsorted)) return;
+    if (this.edgesUnsorted || !this.edgeOrder) {
+      store.reloadEdges();
+      return;
+    }
+    this.edgeRank = this.device.createBuffer({ label: "edgeRank", size: Math.max(MIN_BUFFER_BYTES, store.edgeCount * 4), usage: GPUBufferUsage.STORAGE });
+    this.invertEdges = true;
+  }
+
+  private stage(ch: Channel, job: ScatterJob): number {
+    if (!queued(ch)) return 0;
+    const d = ch.dirty;
+    const list = ch.scattered;
+    if (job.kind !== JOB_NODE && !this.edgeRank) {
+      d.clear();
+      list.clear();
+      return 0;
+    }
+    const w = ch.words;
+    const n = list.count;
+    const ranges = d.count + n;
+    if (this.rangeScratch.length < ranges * 2) this.rangeScratch = new Uint32Array(Math.max(ranges * 2, this.rangeScratch.length * 2));
+    const table = this.rangeScratch;
     let prefix = 0;
     for (let r = 0; r < d.count; r++) {
-      const start = d.start(r);
-      const count = d.end(r) - start;
-      queue.writeBuffer(slot.upload!, prefix * words * 4, data, start * words, count * words);
-      this.rangeTable[r * 2] = start;
-      this.rangeTable[r * 2 + 1] = prefix;
-      prefix += count;
+      table[r * 2] = d.start(r);
+      table[r * 2 + 1] = prefix;
+      prefix += d.end(r) - d.start(r);
     }
-    queue.writeBuffer(slot.ranges, 0, this.rangeTable, 0, d.count * 2);
-    this.scatters.push({ name, total, ranges: d.count });
-    return bytes + d.count * 8;
+    const upload = this.reserve(job.slot, "upload", (prefix + n) * w * 4);
+    const queue = this.device.queue;
+    for (let r = 0; r < d.count; r++) queue.writeBuffer(upload, table[r * 2 + 1]! * w * 4, ch.data, d.start(r) * w, (d.end(r) - d.start(r)) * w);
+    if (n > 0) {
+      if (this.valueScratch.length < n * w) {
+        this.valueScratch = new Uint32Array(Math.max(n * w, this.valueScratch.length * 2));
+        this.valueScratchF32 = new Float32Array(this.valueScratch.buffer);
+      }
+      const src = ch.data;
+      const dst = src instanceof Float32Array ? this.valueScratchF32 : this.valueScratch;
+      const idx = list.list;
+      for (let j = 0; j < n; j++) {
+        const i = idx[j]!;
+        table[(d.count + j) * 2] = i;
+        table[(d.count + j) * 2 + 1] = prefix + j;
+        for (let k = 0; k < w; k++) dst[j * w + k] = src[i * w + k]!;
+      }
+      queue.writeBuffer(upload, prefix * w * 4, this.valueScratch, 0, n * w);
+    }
+    queue.writeBuffer(this.reserve(job.slot, "ranges", ranges * 8), 0, table, 0, ranges * 2);
+    job.total = prefix + n;
+    job.ranges = ranges;
+    d.clear();
+    list.clear();
+    return (prefix + n) * w * 4 + ranges * 8;
   }
 
-  private createFilled(label: string, data: Uint32Array | Float32Array): GPUBuffer {
+  private createFilled(label: string, data: Uint32Array | Float32Array, edgeState: Uint32Array | null = null): GPUBuffer {
     const size = Math.max(MIN_BUFFER_BYTES, Math.ceil(data.byteLength / 16) * 16);
     const buffer = this.device.createBuffer({ label, size, usage: USAGE, mappedAtCreation: true });
     if (data.byteLength > 0) {
-      new Uint32Array(buffer.getMappedRange(0, data.byteLength)).set(new Uint32Array(data.buffer, data.byteOffset, data.length));
+      const words = new Uint32Array(buffer.getMappedRange(0, data.byteLength));
+      words.set(new Uint32Array(data.buffer, data.byteOffset, data.length));
+      if (edgeState) {
+        const shift = CONSTANTS.EDGE_STATE_SHIFT;
+        const n = Math.min(edgeState.length, words.length >> 1);
+        for (let i = 0; i < n; i++) {
+          const b = edgeState[i]!;
+          if (b !== 0) words[i * 2] = (words[i * 2]! | ((b << shift) & EDGE_STATE_TOP)) >>> 0;
+        }
+      }
     }
     buffer.unmap();
     return buffer;

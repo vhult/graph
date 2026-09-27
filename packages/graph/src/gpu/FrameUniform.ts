@@ -22,6 +22,9 @@ export interface FrameInputs {
   /** rgba8unorm tint for edges with no per-edge colour. */
   edgeColor: number;
   flags: number;
+  iconScale: number;
+  iconMinPx: number;
+  dimmedAlpha: number;
 }
 
 export class FrameUniform {
@@ -90,6 +93,9 @@ export class FrameUniform {
     f[F(O.globalEdgeWidth)] = i.edgeWidth;
     u[F(O.flags)] = i.flags;
     u[F(O.globalEdgeColor)] = i.edgeColor;
+    f[F(O.iconScale)] = i.iconScale;
+    f[F(O.iconMinPx)] = i.iconMinPx * i.pixelRatio;
+    f[F(O.dimmedAlpha)] = i.dimmedAlpha;
 
     this.device.queue.writeBuffer(this.buffer, 0, this.cpu);
   }

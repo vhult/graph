@@ -1,6 +1,6 @@
-// Cloudflare Workers Builds: serves the static Storybook build, no Worker script.
+// Cloudflare Workers Builds: serves the static docs build with the Storybook under /storybook/, no Worker script.
 // Build command `npm run storybook:build`, deploy command `npx wrangler deploy`.
-// Response headers (COOP/COEP, caching) come from apps/storybook/public/_headers.
+// Response headers (COOP/COEP on /storybook/, caching) come from apps/docs/public/_headers.
 {
   "name": "vhult-graph",
   "compatibility_date": "2026-09-21",
@@ -9,7 +9,8 @@
     { "pattern": "graph.vhult.com", "custom_domain": true }
   ],
   "assets": {
-    "directory": "./apps/storybook/storybook-static"
+    "directory": "./apps/docs/dist",
+    "not_found_handling": "single-page-application"
   },
   "env": {
     "dev": {
@@ -18,7 +19,8 @@
         { "pattern": "dev.graph.vhult.com", "custom_domain": true }
       ],
       "assets": {
-        "directory": "./apps/storybook/storybook-static"
+        "directory": "./apps/docs/dist",
+        "not_found_handling": "single-page-application"
       }
     }
   }

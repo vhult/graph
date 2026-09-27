@@ -13,6 +13,9 @@ var<workgroup> wgFlags : array<u32, WORKGROUP_SIZE>;
 const BIG : f32 = 3.0e38;
 
 @group(2) @binding(1) var<storage, read> moveList : array<u32>;
+@group(2) @binding(2) var<storage, read_write> moveTouch : array<atomic<u32>>;
+
+var<workgroup> wgTouch : atomic<u32>;
 
 @compute @workgroup_size(WORKGROUP_SIZE)
 fn chunk_bounds(
@@ -40,6 +43,36 @@ fn chunk_bounds_list(
     let c = moveList[MOVE_LIST + i];
     if (c < chunks) {
       boundsOfChunk(c, chunks, lid);
+    }
+  }
+}
+
+@compute @workgroup_size(WORKGROUP_SIZE)
+fn chunk_touch(
+  @builtin(workgroup_id) wid : vec3<u32>,
+  @builtin(num_workgroups) nwg : vec3<u32>,
+  @builtin(local_invocation_index) lid : u32,
+) {
+  let chunks = numChunks();
+  let c = wid.x + wid.y * nwg.x;
+  if (c >= chunks) {
+    return;
+  }
+  if (lid == 0u) {
+    atomicStore(&wgTouch, 0u);
+  }
+  workgroupBarrier();
+  for (var k = 0u; k < ITEMS_PER_THREAD; k++) {
+    let i = c * CHUNK_SIZE + k * WORKGROUP_SIZE + lid;
+    if (i < frame.nodeCount && (nodeState[i] & STATE_DRAGGING) != 0u) {
+      atomicStore(&wgTouch, 1u);
+    }
+  }
+  workgroupBarrier();
+  if (lid == 0u && atomicLoad(&wgTouch) != 0u) {
+    let at = atomicAdd(&moveTouch[MOVE_COUNT], 1u);
+    if (at < chunks) {
+      atomicStore(&moveTouch[MOVE_LIST + at], c);
     }
   }
 }

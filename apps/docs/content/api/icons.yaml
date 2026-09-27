@@ -1,0 +1,133 @@
+title: Icons
+intro: >-
+  Icons are small shapes drawn inside nodes. You load them once through `graph.icons`, from SVG path data or SVG
+  markup, and each node picks one by its id.
+namespace: GraphIcons
+types: [IconSource, IconPath, IconSvg]
+values: [NO_ICON]
+
+docs:
+  GraphIcons:
+    description: >-
+      Everything you do with icons goes through `graph.icons`: load the set, add more, swap one or remove some.
+      An icon is known by its id, a whole number you put in the `icons` channel of `NodeData`. The GPU holds at
+      most `graph.caps.maxIcons` icons. By default an icon takes 0.6 of the node and hides on nodes under
+      6 CSS px; the `icon` option of `graph.style` changes both.
+    example: |
+      import { packRgba } from "@vhult/graph";
+
+      const [home, user] = await graph.icons.add([
+        { path: "M12 3 2 12h3v8h6v-6h2v6h6v-8h3z" },
+        { svg: '<svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><rect x="4" y="14" width="16" height="7" rx="3"/></svg>' },
+      ]);
+      graph.nodes.update(new Uint32Array([0, 1]), {
+        icons: new Uint16Array([home, user]),
+        iconColors: new Uint32Array(2).fill(packRgba(1, 1, 1)),
+      });
+    members:
+      define:
+        description: >-
+          Replaces the whole icon set with the list you pass. An icon's id is its position in the list, so the
+          first one is 0. The promise resolves once the icons are ready to draw. A bad icon is drawn blank and
+          reported by the `error` event; the others still load.
+        example: |
+          await graph.icons.define([
+            { path: "M12 2 22 22H2z" },
+            { path: "M4 4h16v16H4z" },
+          ]);
+          graph.nodes.updateAll({ icons: new Uint16Array(graph.nodes.slots).fill(0) });
+      add:
+        description: >-
+          Adds icons to the set and resolves with their ids. Ids freed by `remove` are used again first, so keep
+          the ids it returns. It throws when the set would go over `graph.caps.maxIcons`.
+        example: |
+          const [star] = await graph.icons.add([{ path: "M12 2l3 7h7l-5.5 4.5L18.5 21 12 16.5 5.5 21l2-7.5L2 9h7z" }]);
+          graph.nodes.update(new Uint32Array([4]), { icons: new Uint16Array([star]) });
+      replace:
+        description: >-
+          Swaps the shape behind an icon id. Every node that uses the id shows the new shape, with no change to
+          the nodes. It throws when the id is not in use. A bad shape is drawn blank and reported by the `error`
+          event.
+        example: |
+          await graph.icons.replace(0, { svg: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/></svg>' });
+      remove:
+        description: >-
+          Removes icons by id. Nodes that used them show no icon, as if they had `NO_ICON`. The freed ids can
+          come back from a later `add`.
+        example: |
+          graph.icons.remove([2, 3]);
+  IconSource:
+    description: >-
+      One icon shape, as you pass it to `icons.define`, `icons.add` or `icons.replace`. It is either an
+      `IconPath`, with SVG path data, or an `IconSvg`, with SVG markup. Only the shape counts: the icon takes
+      its color from the node's `iconColors` channel.
+    example: |
+      import type { IconSource } from "@vhult/graph";
+
+      const sources: IconSource[] = [
+        { path: "M12 2 22 22H2z" },
+        { svg: '<svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18"/></svg>' },
+      ];
+      const ids = await graph.icons.add(sources);
+  IconPath:
+    description: >-
+      An icon made from SVG path data, the text you find in the `d` attribute of a `<path>`. Use it when you
+      have the path strings of an icon set. The shape is scaled to fit the node and kept centered.
+    example: |
+      import type { IconPath } from "@vhult/graph";
+
+      const ring: IconPath = {
+        path: ["M12 2a10 10 0 1 0 0 20a10 10 0 1 0 0-20z", "M12 7a5 5 0 1 0 0 10a5 5 0 1 0 0-10z"],
+        fillRule: "evenodd",
+      };
+      await graph.icons.add([ring]);
+    members:
+      path:
+        description: >-
+          The SVG path data, as one string or a list of strings. A list is drawn as one shape, with one fill
+          rule. Every path command works, arcs included.
+        example: |
+          await graph.icons.add([{ path: ["M3 3h8v8H3z", "M13 13h8v8h-8z"] }]);
+      viewBox:
+        description: >-
+          The area the path is drawn in, as x, y, width and height, like the SVG `viewBox` attribute. The
+          default is `[0, 0, 24, 24]`, the size most icon sets use. Width and height must be above 0.
+        example: |
+          await graph.icons.add([{ path: "M50 5 95 95H5z", viewBox: [0, 0, 100, 100] }]);
+      fillRule:
+        description: >-
+          How overlapping parts are filled, like the SVG `fill-rule` attribute. With `"evenodd"`, a shape
+          inside another one cuts a hole. The default is `"nonzero"`.
+        example: |
+          await graph.icons.add([{ path: ["M2 2h20v20H2z", "M8 8h8v8H8z"], fillRule: "evenodd" }]);
+  IconSvg:
+    description: >-
+      An icon made from SVG markup. Use it when you have whole `.svg` files. Only filled shapes are drawn:
+      strokes, colors, text and images are not. An SVG where everything has `fill="none"`, as in many outline
+      icon sets, has nothing to draw and fails.
+    example: |
+      import type { IconSvg } from "@vhult/graph";
+
+      const pin: IconSvg = {
+        svg: '<svg viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 0-7 7c0 5 7 13 7 13s7-8 7-13a7 7 0 0 0-7-7z"/></svg>',
+      };
+      await graph.icons.add([pin]);
+    members:
+      svg:
+        description: >-
+          The SVG markup as a string. The parser reads `path`, `circle`, `ellipse`, `rect`, `polygon` and
+          `polyline`, inside `g` and `a` groups, with their `transform`, `fill-rule`, `display` and
+          `visibility`. It skips `defs`, `symbol`, `clipPath`, `mask`, `style` and gradients. The size comes
+          from the `viewBox` on the root `svg`, then from its `width` and `height`, then from the shapes
+          themselves.
+        example: |
+          const svg = await (await fetch("/icons/cloud.svg")).text();
+          const [cloud] = await graph.icons.add([{ svg }]);
+  NO_ICON:
+    description: >-
+      The icon id that means "no icon". It is the default for every node. Put it in the `icons` channel to take
+      the icon off a node.
+    example: |
+      import { NO_ICON } from "@vhult/graph";
+
+      graph.nodes.update(new Uint32Array([0, 1]), { icons: new Uint16Array([NO_ICON, NO_ICON]) });

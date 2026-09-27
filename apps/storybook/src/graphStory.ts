@@ -7,16 +7,16 @@
  *     the node count, the seed or one of the story's `dataArgs` changes.
  *   - Toggling edges or their colouring re-uploads the edges alone; toggling
  *     labels sends the label text alone.
- *   - Edge width, tint, thinning, minimum length, node sampling and the debug
- *     view are engine options: changing them recreates the engine (stage.ts),
- *     which reloads from the cache.
+ *   - Edge width, tint and node scale are style: changing them sets the style
+ *     live. Thinning, minimum length, node sampling and the debug view go
+ *     through `debug.tune`, also live.
  */
 import type { ArgTypes } from "@storybook/html-vite";
-import type { EdgeDebugMode, Graph, GraphOptions } from "@vhult/graph";
+import type { DebugTune, EdgeDebugMode, Graph, GraphOptions } from "@vhult/graph";
 import type { GraphDataset } from "@vhult/graph-bench";
 import type { Loaded } from "./data";
 import type { Hud } from "./hud";
-import { stage, type StoryContext } from "./stage";
+import { stage, toggles, type StoryContext } from "./stage";
 
 export interface GraphArgs {
   nodes: number;
@@ -54,7 +54,8 @@ export interface GraphStory<A extends GraphArgs> {
   dataArgs?: readonly (keyof A)[];
   /** Extra engine options. */
   options?: (a: A) => GraphOptions;
-  /** Style word given to every edge, if any (e.g. `EDGE_DIRECTED`). */
+  tune?: (a: A) => DebugTune;
+  /** Style word given to every edge, if any (e.g. `packEdgeStyle({ directed: true })`). */
   edgeStyle?: (a: A) => number | undefined;
   /** After every upload, e.g. to (re)start an animation. */
   onLoad?: (graph: Graph, g: GraphDataset, a: A, root: HTMLElement) => void;
@@ -66,13 +67,6 @@ export interface GraphStory<A extends GraphArgs> {
   gate?: (graph: Graph, a: A, root: HTMLElement) => Promise<A | null>;
   dispose?: () => void;
 }
-
-/**
- * Edge style flag: draw an arrowhead at the target. Mirrors
- * `EDGE_FLAG_DIRECTED` in the engine's Layouts.ts until the style word gets a
- * public packing helper.
- */
-export const EDGE_DIRECTED = 1 << 28;
 
 /** Light blue-grey: reads on the dark background without competing with the nodes. */
 const EDGE_TINT = [0.6, 0.7, 0.9] as const;
@@ -104,7 +98,7 @@ export function graphArgTypes<A extends GraphArgs>(sizes: readonly number[], own
     nodes: countControl(sizes),
     ...own,
     seed: { control: { type: "number", min: 1, step: 1 } },
-    edges: { control: "boolean" },
+    edges: { table: { disable: true } },
     edgeColor: { control: "inline-radio", options: ["tint", "nodes"] },
     edgeWidth: { control: { type: "range", min: 0.25, max: 6, step: 0.25 } },
     edgeAlpha: { control: { type: "range", min: 0.01, max: 1, step: 0.01 } },
@@ -129,40 +123,49 @@ export function renderGraph<A extends GraphArgs>(spec: GraphStory<A>) {
     if (!spec.gate) return load(a);
     void spec.gate(graph, a, root!).then((b) => b && load(b));
   };
-  return (args: A, ctx: StoryContext): HTMLElement =>
-    stage(args, ctx, {
-      options: (a) => ({
-        edgeWidth: a.edgeWidth,
-        edgeColor: [...EDGE_TINT, a.edgeAlpha],
-        edgeMaxOverdraw: a.edgeMaxOverdraw,
-        edgeMinLengthPx: a.edgeMinLengthPx,
-        edgeDebug: a.edgeDebug,
-        lodTargetPx: a.lodTargetPx,
-        ...spec.options?.(a),
-      }),
+  const tuning = (a: A): DebugTune => ({
+    lodTargetPx: a.lodTargetPx,
+    edgeMaxOverdraw: a.edgeMaxOverdraw,
+    edgeMinLengthPx: a.edgeMinLengthPx,
+    edgeMode: a.edgeDebug,
+    ...spec.tune?.(a),
+  });
+  return (story: A, ctx: StoryContext): HTMLElement => {
+    const t = toggles(ctx);
+    const args: A = { ...story, edges: t.edges && story.edges };
+    return stage(args, ctx, {
+      options: (a) => {
+        const own = spec.options?.(a) ?? {};
+        return {
+          ...own,
+          style: { nodeScale: a.nodeScale, edge: { width: a.edgeWidth, color: [...EDGE_TINT, a.edgeAlpha] }, ...own.style },
+        };
+      },
       setup: (graph, a, hud, r) => {
         root = r;
         if (spec.backdrop) r.style.background = spec.backdrop;
-        graph.setNodeScale(a.nodeScale);
+        graph.debug.tune(tuning(a));
         reload(graph, a, hud);
       },
       update: (graph, a, prev, hud) => {
+        const tune = tuning(a);
+        if (JSON.stringify(tune) !== JSON.stringify(tuning(prev))) graph.debug.tune(tune);
         const data = a.nodes !== prev.nodes || a.seed !== prev.seed || (spec.dataArgs ?? []).some((k) => a[k] !== prev[k]);
         if (data) reload(graph, a, hud);
-        else if (a.edges !== prev.edges || a.edgeColor !== prev.edgeColor) upload(graph, loaded(a), hud, spec, false, root!);
+        else if (a.edges !== prev.edges || a.edgeColor !== prev.edgeColor || spec.edgeStyle?.(a) !== spec.edgeStyle?.(prev) || (a.edgeColor === "nodes" && a.edgeAlpha !== prev.edgeAlpha)) upload(graph, loaded(a), hud, spec, false, root!);
         else if (a.labels !== prev.labels) setLabels(graph, spec.load(loaded(a)).data, a, spec);
-        if (a.nodeScale !== prev.nodeScale) graph.setNodeScale(a.nodeScale);
         spec.onUpdate?.(graph, a, prev);
       },
       dispose: spec.dispose,
     });
+  };
 }
 
 function upload<A extends GraphArgs>(graph: Graph, a: A, hud: Hud, spec: GraphStory<A>, withNodes: boolean, root: HTMLElement): void {
   const { data: g, genMs } = spec.load(a);
   if (withNodes) {
     hud.measureLoad(graph, genMs, g.nodes.count);
-    graph.setNodes(g.nodes, { copy: true });
+    graph.nodes.set(g.nodes, { copy: true });
   }
   setEdges(graph, g, a, spec.edgeStyle?.(a));
   setLabels(graph, g, a, spec);
@@ -175,12 +178,12 @@ function upload<A extends GraphArgs>(graph: Graph, a: A, hud: Hud, spec: GraphSt
 function setEdges(graph: Graph, g: GraphDataset, a: GraphArgs, style: number | undefined): void {
   const e = g.edges;
   if (!a.edges || e.count === 0) {
-    graph.setEdges({ count: 0, indices: new Uint32Array(0) });
+    graph.edges.clear();
     return;
   }
   // Indices are the cached master, so they are copied; colours and styles are
   // made here and transferred as they are.
-  graph.setEdges({
+  graph.edges.set({
     count: e.count,
     indices: e.indices.slice(),
     colors: a.edgeColor === "nodes" ? endpointColors(g, a.edgeAlpha) : undefined,
@@ -190,13 +193,13 @@ function setEdges(graph: Graph, g: GraphDataset, a: GraphArgs, style: number | u
 
 function setLabels<A extends GraphArgs>(graph: Graph, g: GraphDataset, a: A, spec: GraphStory<A>): void {
   if (!a.labels) {
-    graph.setNodeLabels([]);
-    graph.setEdgeLabels([]);
+    graph.nodes.updateAll({ labels: null });
+    graph.edges.updateAll({ labels: null });
     return;
   }
   const labels = spec.labels?.(g, a) ?? { nodes: Array.from({ length: g.nodes.count }, (_, i) => `#${i}`) };
-  graph.setNodeLabels(labels.nodes ?? []);
-  graph.setEdgeLabels(a.edges ? (labels.edges ?? []) : []);
+  graph.nodes.updateAll({ labels: labels.nodes?.length ? labels.nodes : null });
+  graph.edges.updateAll({ labels: a.edges && labels.edges?.length ? labels.edges : null });
 }
 
 /** Each edge's two endpoint colours, with the edge alpha. */

@@ -1,10 +1,10 @@
 /**
  * Render worker entry. Pure message dispatch — all logic lives in Engine.
  */
-import { GraphError } from "../api/errors";
+import { toGraphError } from "../api/errors";
 import { Engine } from "../engine/Engine";
 import { InputRing, type InputRecord } from "./InputRing";
-import { PositionStream } from "./PositionStream";
+import { StreamSlots } from "./StreamSlots";
 import type { FromWorker, ToWorker } from "./protocol";
 import { createStateBuffer } from "./SharedState";
 
@@ -32,10 +32,10 @@ let state: Float64Array | null = null;
 let stateShared = false;
 let stateTimer: ReturnType<typeof setInterval> | undefined;
 const pending: ToWorker[] = [];
-const fallbackRec: InputRecord = { type: 0, t: 0, x: 0, y: 0, dx: 0, dy: 0, buttons: 0, mods: 0 };
+const fallbackRec: InputRecord = { type: 0, t: 0, x: 0, y: 0, dx: 0, dy: 0, buttons: 0, mods: 0, button: -1 };
 
 function fail(e: unknown, fatal: boolean): void {
-  const err = e instanceof GraphError ? e : new GraphError("internal", e instanceof Error ? e.message : String(e));
+  const err = toGraphError(e);
   post({ t: "error", code: err.code, message: err.message, fatal });
 }
 
@@ -54,11 +54,13 @@ async function init(msg: Extract<ToWorker, { t: "init" }>): Promise<void> {
       gpu: scope.navigator.gpu,
       requestFrame,
       onError: fail,
-      onBenchmark: (id, result, transfer) => post({ t: "benchmark", id, result }, transfer),
-      onLabelSnapshot: (id, snapshot, transfer) => post({ t: "labelSnapshot", id, snapshot }, transfer),
-      onHover: (node, edge) => post({ t: "hover", node, edge }),
-      onClick: (node, edge) => post({ t: "click", node, edge }),
-      onDrag: (event, index, x, y) => post({ t: "drag", event, index, x, y }),
+      onReply: (id, value, error, transfer) => post(error ? { t: "reply", id, code: error.code, message: error.message } : { t: "reply", id, value }, transfer),
+      onHit: (event, hit) => post({ t: event, hit }),
+      onGesture: (msg) => post(msg),
+      onDragStart: (index, nodes, x, y) => post({ t: "dragStart", index, nodes, x, y }, [nodes.buffer as ArrayBuffer]),
+      onDrag: (event, index, dx, dy) => post({ t: event, index, dx, dy }),
+      onView: (x, y, zoom, rotation) => post({ t: "view", x, y, zoom, rotation }),
+      onSelect: (event) => post({ t: "select", ...event }, [event.nodes.buffer as ArrayBuffer]),
       probeSink: {
         ring: (layout, frames, buffer) => post({ t: "debugRing", columns: layout.columns, gpuGroups: layout.gpuGroups, frames, buffer }),
         rows: (data) => post({ t: "debugRows", data }, [data.buffer as ArrayBuffer]),
@@ -73,7 +75,13 @@ async function init(msg: Extract<ToWorker, { t: "init" }>): Promise<void> {
   }
   if (!stateShared) startStatePosting();
   post({ t: "ready", caps: engine.caps });
-  for (const m of pending.splice(0)) dispatch(m);
+  for (const m of pending.splice(0)) {
+    try {
+      dispatch(m);
+    } catch (e) {
+      fail(e, false);
+    }
+  }
 }
 
 function startStatePosting(): void {
@@ -92,44 +100,79 @@ function dispatch(msg: ToWorker): void {
       return e.resize(msg.width, msg.height, msg.pixelRatio);
     case "wake":
       return e.wake();
-    case "input": {
-      const [type, t, x, y, dx, dy, buttons, mods] = msg.r;
-      Object.assign(fallbackRec, { type, t, x, y, dx, dy, buttons, mods });
+    case "inputRecord": {
+      const [type, t, x, y, dx, dy, buttons, mods, button] = msg.r;
+      Object.assign(fallbackRec, { type, t, x, y, dx, dy, buttons, mods, button });
       e.input(fallbackRec);
       return e.wake();
     }
+    case "input":
+      return e.setInput(msg.input);
     case "nodes":
-      return e.setNodes(msg.count, msg);
-    case "positionStream":
-      return e.setPositionStream(new PositionStream(msg.buffer, msg.count));
+      return e.setNodes(msg.count, msg, msg.labels ?? []);
+    case "defineIcons":
+      return e.defineIcons(msg.id, msg.icons);
+    case "setIcons":
+      return e.defineIcons(msg.id, msg.icons, msg.ids);
+    case "removeIcons":
+      return e.removeIcons(msg.ids);
+    case "nodeStream":
+      return e.setStream(new StreamSlots(msg.buffer, msg.count, msg.positions, msg.colors, msg.zIndex));
     case "edges":
-      return e.setEdges(msg.count, msg);
-    case "nodeLabels":
-      return e.setNodeLabels(msg.labels);
-    case "edgeLabels":
-      return e.setEdgeLabels(msg.labels);
-    case "updatePositions":
-      return e.updatePositions(msg.start, msg.data);
-    case "updateColor":
-      return e.updateColor(msg.index, msg.rgba);
+      return e.setEdges(msg.count, msg, msg.labels ?? []);
+    case "addEdges":
+      return e.addEdges(msg.at, msg.count, msg, msg.labels);
+    case "removeEdges":
+      return e.hideEdges(msg.indices);
+    case "updateEdgesAt":
+      return e.updateEdgesAt(msg.at, msg, msg.labels);
+    case "updateEdges":
+      return e.updateEdges(msg, msg.labels);
+    case "flagEdges":
+      return e.flagEdges(msg.indices, msg.flags, msg.on);
+    case "compactEdges":
+      return e.compactEdges(msg.remap);
+    case "updateNodes":
+      return e.updateNodes(msg.start, msg, msg.labels);
+    case "updateNodesAt":
+      return e.updateNodesAt(msg.indices, msg, msg.labels);
+    case "flagNodes":
+      return e.flagNodes(msg.indices, msg.flags, msg.on);
+    case "addNodes":
+      return e.addNodes(msg.indices, msg.slots, msg, msg.labels);
+    case "removeNodes": {
+      const edges = e.removeNodes(msg.indices);
+      post({ t: "edgesRemoved", id: msg.id, edges }, [edges.buffer as ArrayBuffer]);
+      return;
+    }
+    case "compactNodes":
+      return e.compactNodes(msg.remap);
     case "view":
-      return e.setView(msg.view);
+      return e.setView(msg.view, msg.duration ?? 0, msg.easing ?? "ease");
     case "fit":
-      return e.fit(msg.padding);
-    case "background":
-      return e.setBackground(msg.rgba);
-    case "nodeScale":
-      return e.setNodeScale(msg.value);
+      return e.fit(msg.padding, msg.nodes ?? null, msg.bounds ?? null, msg.duration);
+    case "rotate":
+      return e.rotate(msg.angle, msg.x, msg.y, msg.duration);
+    case "limits":
+      return e.limits(msg.minZoom, msg.maxZoom, msg.bounds);
+    case "listen":
+      return e.listen(msg.events);
+    case "style":
+      return e.setStyle(msg.style);
     case "render":
       return e.requestRender();
     case "benchmark":
       return e.benchmark(msg.id, msg.options);
     case "labelSnapshot":
       return e.labelSnapshot(msg.id);
-    case "pick":
-      return e.setPicking(msg.hover, msg.click, msg.drag);
-    case "nodeDrag":
-      return e.setNodeDrag(msg.on);
+    case "snapshot":
+      return e.snapshot(msg.id, msg.type);
+    case "queryAt":
+      return e.queryAt(msg.id, msg.x, msg.y);
+    case "queryInside":
+      return e.queryInside(msg.id, msg.points);
+    case "tune":
+      return e.tune(msg.tune);
     case "debug":
       return e.probe.setLevel(msg.level);
     case "debugRecord":

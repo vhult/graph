@@ -1,0 +1,65 @@
+name: "@vhult/graph"
+description: WebGPU graph rendering engine
+github: vhult/graph
+npm: "@vhult/graph"
+badges: [version, downloads, license, size]
+
+nav:
+  - label: Docs
+    href: /docs/getting-started
+  - label: API
+    href: /api
+  - label: Storybook
+    href: /storybook/
+
+landing:
+  tagline: The WebGPU graph renderer built for speed.
+  lead: Millions of nodes and edges
+  install: npm install @vhult/graph
+  actions:
+    - label: Get started
+      href: /docs/getting-started
+      primary: true
+    - label: API reference
+      href: /api
+    - label: Storybook
+      href: /storybook/
+  codeTitle: main.ts
+  code: |
+    import { Graph, packRgba } from "@vhult/graph";
+
+    const graph = await Graph.create(document.querySelector("canvas")!);
+
+    graph.nodes.set({
+      count: 3,
+      positions: new Float32Array([0, 0, 100, 0, 50, 80]),
+      sizes: new Float32Array([10, 10, 10]),
+      colors: new Uint32Array(3).fill(packRgba(1, 0.4, 0.2)),
+    });
+    graph.edges.set({ count: 2, indices: new Uint32Array([0, 1, 1, 2]) });
+    graph.camera.fit();
+
+    graph.on("click", (hit) => console.log(hit.node));
+  blocks:
+    - points:
+        - title: Built for speed
+          text: Culling, sorting and drawing run on the GPU with WebGPU.
+        - title: Off the main thread
+          text: The canvas moves to a Web Worker as an `OffscreenCanvas`. Your page keeps its main thread.
+        - title: Rendering only
+          text: No layout and no simulation.
+        - title: Zero runtime dependencies
+          text: One package, nothing else to install.
+    - text: The [getting started guide](/docs/getting-started) walks through a first graph, and the [Storybook](/storybook/) shows the engine with large graphs, every style and live experiments.
+
+docs:
+  - section: Start
+    pages: [getting-started]
+  - section: Guide
+    pages: [nodes-and-edges, styling, camera, interaction]
+  - section: Going further
+    pages: [performance]
+
+api: [start, nodes, edges, shared, style, icons, camera, input, events, query, canvas, debug]
+
+footer: "MIT license · [GitHub](https://github.com/vhult/graph) · [npm](https://www.npmjs.com/package/@vhult/graph)"

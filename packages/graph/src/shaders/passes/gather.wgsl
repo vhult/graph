@@ -47,3 +47,12 @@ fn compose(@builtin(global_invocation_id) gid : vec3<u32>) {
   dst[e] = user;
   rank[user] = e;
 }
+
+@compute @workgroup_size(WG)
+fn invert(@builtin(global_invocation_id) gid : vec3<u32>) {
+  let e = linearIndex(gid);
+  if (e >= params.n) {
+    return;
+  }
+  dst[perm[e]] = e;
+}

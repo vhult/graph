@@ -9,11 +9,11 @@
  *   - arg changes are forwarded to `update(graph, args, prev)` as deltas;
  *   - the engine is destroyed only on story teardown (preview.ts beforeEach).
  */
-import { Graph, type GraphOptions } from "@vhult/graph";
+import { Graph, type GraphOptions, type Mode } from "@vhult/graph";
 import { Hud } from "./hud";
 
 export interface StageSpec<A> {
-  /** Engine options derived from args. Changing these recreates the engine. */
+  /** Engine options derived from args. Changing these recreates the engine, except `style`, which is set live. */
   options?: (args: A) => GraphOptions;
   /** Called once when the engine is ready. `root` hosts extra overlays. */
   setup: (graph: Graph, args: A, hud: Hud, root: HTMLElement) => void | Promise<void>;
@@ -26,18 +26,31 @@ export interface StageSpec<A> {
 export interface StoryContext {
   id: string;
   viewMode?: string;
-  globals?: { hud?: string };
+  globals?: { hud?: string; drag?: string; hover?: string; edges?: string };
+}
+
+export interface Toggles {
+  drag: boolean;
+  hover: boolean;
+  edges: boolean;
+}
+
+export function toggles(context: StoryContext): Toggles {
+  const g = context.globals ?? {};
+  return { drag: g.drag === "on", hover: g.hover !== "off", edges: g.edges !== "off" };
 }
 
 interface Current {
   storyId: string;
   root: HTMLElement;
   optionsKey: string;
+  styleKey: string;
   args: unknown;
   graph: Graph | null;
   ready: Promise<Graph | null>;
   hud: Hud;
   hudOn: boolean;
+  drag: Mode;
   dispose?: () => void;
 }
 
@@ -50,8 +63,12 @@ let current: Current | null = null;
 
 /** `context` is the Storybook story context; only its id and globals are used. */
 export function stage<A>(args: A, context: StoryContext, spec: StageSpec<A>): HTMLElement {
-  const options = spec.options?.(args) ?? {};
-  const optionsKey = JSON.stringify(options);
+  const own = spec.options?.(args) ?? {};
+  const t = toggles(context);
+  const drag: Mode = own.input?.drag ?? (t.drag ? "auto" : false);
+  const options: GraphOptions = { ...own, input: { ...own.input, drag }, style: { ...own.style, hover: t.hover ? (own.style?.hover ?? {}) : false } };
+  const optionsKey = JSON.stringify({ ...options, input: { ...options.input, drag: undefined }, style: undefined });
+  const styleKey = JSON.stringify(options.style ?? {});
   const embed = context.viewMode === "docs";
   const hudOn = !embed && context.globals?.hud !== "off";
 
@@ -61,6 +78,13 @@ export function stage<A>(args: A, context: StoryContext, spec: StageSpec<A>): HT
     cur.args = args;
     cur.hudOn = hudOn;
     if (cur.graph) setDebug(cur.graph, hudOn);
+    if (cur.graph && cur.drag !== drag) cur.graph.input.set({ drag });
+    cur.drag = drag;
+    if (cur.styleKey !== styleKey) {
+      cur.styleKey = styleKey;
+      const style = options.style ?? {};
+      void cur.ready.then((g) => g && cur === current && g.style.set(style));
+    }
     void cur.ready.then((g) => g && cur === current && spec.update?.(g, args, prev, cur.hud));
     return cur.root;
   }
@@ -74,7 +98,7 @@ export function stage<A>(args: A, context: StoryContext, spec: StageSpec<A>): HT
   const hud = new Hud(root);
 
   const errors: string[] = [];
-  const cur: Current = { storyId: context.id, root, optionsKey, args, graph: null, ready: Promise.resolve(null), hud, hudOn, dispose: spec.dispose };
+  const cur: Current = { storyId: context.id, root, optionsKey, styleKey, args, graph: null, ready: Promise.resolve(null), hud, hudOn, drag, dispose: spec.dispose };
   current = cur;
 
   // Create after the element is in the DOM so the canvas has a real size.

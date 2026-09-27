@@ -8,16 +8,17 @@ const EDGE_AA_PAD_PX : f32 = 1.0;
 /** Thinner edges are drawn this wide with alpha scaled down: they fade instead of shimmering. */
 const EDGE_MIN_DRAW_WIDTH_PX : f32 = 1.0;
 /**
- * An edge this short on screen or shorter, in CSS px, is not drawn (engine
- * option `edgeMinLengthPx`): too small to read as a line. 0 draws every edge
+ * An edge this short on screen or shorter, in CSS px, is not drawn
+ * (`debug.tune` edgeMinLengthPx): too small to read as a line. 0 draws every edge
  * with any length.
  */
 override EDGE_MIN_LEN_PX : f32 = 6.0;
-/** Diagnostic colouring (engine option `edgeDebug`): 0 off, 1 length, 2 thinning, 3 chunk. */
+/** Diagnostic colouring (`debug.tune` edgeMode): 0 off, 1 length, 2 thinning, 3 chunk. */
 override EDGE_DEBUG : u32 = 0u;
 /** Arrowhead length and half-width as multiples of the edge width. */
 const ARROW_LEN_MUL : f32 = 4.0;
 const ARROW_HALF_MUL : f32 = 2.0;
+const ARROW_SIDE_MUL : f32 = sqrt(1.0 + (ARROW_LEN_MUL / ARROW_HALF_MUL) * (ARROW_LEN_MUL / ARROW_HALF_MUL));
 /**
  * An arrowhead is never shorter than this, in CSS px, or it vanishes on thin
  * edges and next to large nodes.
@@ -27,7 +28,31 @@ const ARROW_MIN_LEN_CSS_PX : f32 = 10.0;
 /** Width from a style word; 0 in its width byte means the global width. */
 fn edgeWidthPx(style : u32) -> f32 {
   let packed = f32(style & EDGE_WIDTH_MASK) / f32(EDGE_WIDTH_SCALE);
-  return select(packed, frame.globalEdgeWidth, packed == 0.0);
+  return select(packed, frame.globalEdgeWidth, packed == 0.0) * frame.pixelRatio;
+}
+
+fn chunkWidthPx(maxWidth : f32) -> f32 {
+  return max(maxWidth, frame.globalEdgeWidth) * frame.pixelRatio;
+}
+
+fn anyNodeHidden() -> bool {
+  return (frame.flags & FRAME_FLAG_HIDDEN) != 0u;
+}
+
+fn anyNodeDimmed() -> bool {
+  return (frame.flags & FRAME_FLAG_DIMMED) != 0u;
+}
+
+fn edgeEndHidden(sa : u32, sb : u32) -> bool {
+  return ((sa | sb) & STATE_HIDDEN) != 0u;
+}
+
+fn edgeEnds(raw : vec2<u32>) -> vec2<u32> {
+  return vec2<u32>(raw.x & EDGE_END_MASK, raw.y);
+}
+
+fn edgeHidden(raw : vec2<u32>) -> bool {
+  return ((raw.x >> EDGE_STATE_SHIFT) & EDGE_STATE_HIDDEN) != 0u;
 }
 
 /** Arrowhead length in device px for an edge this wide. */
@@ -84,7 +109,7 @@ fn edgeLengthFade(lenPx : f32) -> f32 {
 // ---- thinning ---------------------------------------------------------------
 
 /**
- * How much crowded areas of edges are thinned: lower draws fewer edges (engine option `edgeMaxOverdraw`). 0 draws every edge.
+ * How much crowded areas of edges are thinned: lower draws fewer edges (`debug.tune` edgeMaxOverdraw). 0 draws every edge.
  */
 override EDGE_MAX_OVERDRAW : f32 = 1.5;
 

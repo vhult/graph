@@ -30,3 +30,32 @@ fn packInstanceShape(radiusPx : f32, shape : u32) -> f32 {
 fn instanceShape(radiusPx : f32) -> u32 {
   return bitcast<u32>(radiusPx) & INSTANCE_SHAPE_BITS;
 }
+
+fn nodeLayer(i : u32) -> u32 {
+  return (nodeStyle[i] >> STYLE_ZLAYER_SHIFT) & STYLE_ZLAYER_MASK;
+}
+
+fn packInstanceLayer(radiusPx : f32, layer : u32) -> f32 {
+  return bitcast<f32>((bitcast<u32>(radiusPx) & ~INSTANCE_LAYER_BITS) | ((layer << INSTANCE_LAYER_SHIFT) & INSTANCE_LAYER_BITS));
+}
+
+fn packInstance(screenPos : vec2<f32>, radiusPx : f32, color : u32) -> vec4<u32> {
+  return vec4<u32>(bitcast<vec2<u32>>(screenPos), bitcast<u32>(radiusPx), color);
+}
+
+fn unpackInstance(w : vec4<u32>) -> NodeInstance {
+  return NodeInstance(bitcast<vec2<f32>>(w.xy), bitcast<f32>(w.z), w.w);
+}
+
+fn iconSidePx(radiusPx : f32) -> f32 {
+  return 2.0 * frame.iconScale * radiusPx;
+}
+
+fn hasIconRoom(radiusPx : f32) -> bool {
+  return iconSidePx(radiusPx) >= frame.iconMinPx;
+}
+
+fn nodeIconWord(i : u32, count : u32) -> u32 {
+  let icon = (nodeStyle[i] >> STYLE_ICON_SHIFT) & STYLE_ICON_MASK;
+  return select(NO_ICON, icon | ((nodeSize[i] >> SIZE_ICON_COLOR_SHIFT) << ICON_WORD_COLOR_SHIFT), icon < count);
+}

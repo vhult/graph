@@ -1,7 +1,9 @@
 node_modules/
 dist/
+packages/graph/temp/
 storybook-static/
 *.log
 .DS_Store
 TODO.md
 CLAUDE.local.md
+apps/docs/examples.gen*/

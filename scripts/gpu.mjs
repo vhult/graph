@@ -13,7 +13,10 @@ const DEFAULT_WINDOW = "2418x1112";
 const EDGE_CANDIDATES = [
   "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
   "C:/Program Files/Microsoft/Edge/Application/msedge.exe",
+  "/usr/bin/microsoft-edge",
 ];
+
+const PLATFORM_FLAGS = process.platform === "linux" ? ["--enable-features=Vulkan", "--use-angle=vulkan"] : [];
 
 const STORY = {
   bench: "developer-benchmark--benchmark",
@@ -132,6 +135,7 @@ async function launchEdge(windowSize) {
       "--no-first-run",
       "--no-default-browser-check",
       "--disable-extensions",
+      ...PLATFORM_FLAGS,
       "about:blank",
     ],
     { stdio: "ignore" },
@@ -175,6 +179,7 @@ class Cdp {
   #ws;
   #next = 1;
   #pending = new Map();
+  #handlers = new Map();
 
   static async openPage(port, url, { verbose }) {
 
@@ -183,6 +188,7 @@ class Cdp {
     const target = await r.json();
     const cdp = new Cdp();
     await cdp.#connect(target.webSocketDebuggerUrl, verbose);
+    await cdp.send("Page.navigate", { url });
     return cdp;
   }
 
@@ -206,6 +212,7 @@ class Cdp {
           else p.ok(msg.result);
           return;
         }
+        this.#handlers.get(msg.method)?.(msg.params);
         if (msg.method === "Runtime.exceptionThrown") {
           const d = msg.params.exceptionDetails;
           log(`  page exception: ${d.exception?.description ?? d.text}`);
@@ -214,6 +221,10 @@ class Cdp {
         }
       });
     });
+  }
+
+  on(method, fn) {
+    this.#handlers.set(method, fn);
   }
 
   send(method, params = {}) {
@@ -420,16 +431,55 @@ async function cmdCorrectness(opts) {
 
 async function cmdEval(opts) {
   const file = opts._[1];
-  if (!file) throw new Error("usage: node scripts/gpu.mjs eval <file.js> [--story <id>]");
+  if (!file) throw new Error("usage: node scripts/gpu.mjs eval <file.js> [--story <id>] [--args ...]");
   const { readFileSync } = await import("node:fs");
   const source = readFileSync(resolve(file), "utf8");
-  const path = typeof opts.story === "string" ? storyPath(opts.story) : BLANK_PATH;
-  return withPage(path, opts, (cdp, timeout) => cdp.evaluate(`(async () => {\n${source}\n})()`, timeout));
+  const path = typeof opts.story === "string" ? storyPath(opts.story, typeof opts.args === "string" ? opts.args : null) : BLANK_PATH;
+  return withPage(path, opts, async (cdp, timeout) => {
+    await exposeInput(cdp);
+    return cdp.evaluate(`(async () => {\n${INPUT_PRELUDE}\n${source}\n})()`, timeout);
+  });
+}
+
+const INPUT_PRELUDE = `const cdpInput = (method, params) => new Promise((ok, fail) => {
+  const id = (globalThis.__cdpSeq = (globalThis.__cdpSeq ?? 0) + 1);
+  (globalThis.__cdpPending ??= new Map()).set(id, { ok, fail });
+  globalThis.__cdpSend(JSON.stringify({ id, method, params }));
+});
+globalThis.__cdpDone = (id, error) => {
+  const p = globalThis.__cdpPending.get(id);
+  globalThis.__cdpPending.delete(id);
+  if (error) p.fail(new Error(error));
+  else p.ok();
+};`;
+
+async function exposeInput(cdp) {
+  await cdp.send("Runtime.addBinding", { name: "__cdpSend" });
+  cdp.on("Runtime.bindingCalled", async ({ name, payload }) => {
+    if (name !== "__cdpSend") return;
+    const { id, method, params } = JSON.parse(payload);
+    let error = null;
+    try {
+      if (method === "shot") {
+        const file = resolve(ROOT, String(params.file));
+        if (!file.startsWith(join(ROOT, "packages/bench/results"))) throw new Error(`cdpInput: shots go under packages/bench/results, got ${params.file}`);
+        mkdirSync(dirname(file), { recursive: true });
+        const shot = await cdp.send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
+        writeFileSync(file, Buffer.from(shot.data, "base64"));
+      } else {
+        if (!method.startsWith("Input.") && !method.startsWith("Emulation.setTouch")) throw new Error(`cdpInput: ${method} is not an input method`);
+        await cdp.send(method, params);
+      }
+    } catch (e) {
+      error = String(e);
+    }
+    await cdp.send("Runtime.evaluate", { expression: `globalThis.__cdpDone(${id}, ${JSON.stringify(error)})` });
+  });
 }
 
 async function captureViews(cdp, views, count, tag) {
   await cdp.waitFor("!!globalThis.__graphBench", "__graphBench hook", 180);
-  await cdp.waitFor(`globalThis.__graphBench.graph.readStats().nodeCount >= ${count}`, "dataset", 600);
+  await cdp.waitFor(`globalThis.__graphBench.graph.stats().nodeCount >= ${count}`, "dataset", 600);
   const meta = [];
   for (const v of views) {
     const visible = await cdp.evaluate(
@@ -438,10 +488,10 @@ async function captureViews(cdp, views, count, tag) {
          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
          g.camera.fit();
          await sleep(500);
-         const c = g.camera.getView();
-         g.camera.setView({ x: c.x, y: c.y, zoom: c.zoom * ${v.zoom}, rotation: 0 });
+         const c = g.camera.get();
+         g.camera.set({ x: c.x, y: c.y, zoom: c.zoom * ${v.zoom}, rotation: 0 });
          await sleep(700);
-         return g.readStats().visibleNodes;
+         return g.stats().visibleNodes;
        })()`,
       120,
     );
@@ -510,24 +560,25 @@ async function cmdInput(opts) {
 
   return withPage(storyPath(STORY.bench, args), opts, async (cdp, timeout) => {
     await cdp.waitFor("!!globalThis.__graphBench", "__graphBench hook", 180);
-    await cdp.waitFor(`globalThis.__graphBench.graph.readStats().nodeCount >= ${count}`, "dataset", 600);
+    await cdp.waitFor(`globalThis.__graphBench.graph.stats().nodeCount >= ${count}`, "dataset", 600);
 
     await cdp.evaluate(
       `(async () => {
          const g = globalThis.__graphBench.graph;
+         g.input.set({ pan: "auto", zoom: "auto" });
          g.camera.fit();
          await new Promise((r) => setTimeout(r, 600));
-         const c = g.camera.getView();
-         g.camera.setView({ x: c.x, y: c.y, zoom: c.zoom * ${zoom}, rotation: 0 });
+         const c = g.camera.get();
+         g.camera.set({ x: c.x, y: c.y, zoom: c.zoom * ${zoom}, rotation: 0 });
          await new Promise((r) => setTimeout(r, 600));
-         return g.readStats().visibleNodes;
+         return g.stats().visibleNodes;
        })()`,
       120,
     );
     await cdp.evaluate(`(async () => {\n${probe}\n})()`, 60);
 
     const view = await cdp.evaluate(
-      "JSON.stringify([globalThis.__graphBench.graph.readStats().viewportWidth, globalThis.__graphBench.graph.readStats().viewportHeight])",
+      "JSON.stringify([globalThis.__graphBench.graph.stats().viewportWidth, globalThis.__graphBench.graph.stats().viewportHeight])",
       30,
     );
     const [w, h] = JSON.parse(view);

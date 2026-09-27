@@ -78,17 +78,19 @@ export const FRAME = defineStruct("Frame", [
   { name: "nodeCount", type: "u32" },
   { name: "edgeCount", type: "u32" },
   { name: "globalNodeScale", type: "f32" },
-  { name: "globalEdgeWidth", type: "f32" },
+  { name: "globalEdgeWidth", type: "f32", doc: "CSS px" },
   { name: "flags", type: "u32", doc: "FRAME_* bits" },
   { name: "globalEdgeColor", type: "u32", doc: "rgba8unorm tint for edges with no per-edge colour" },
+  { name: "iconScale", type: "f32", doc: "icon side / node diameter" },
+  { name: "iconMinPx", type: "f32", doc: "smallest icon side drawn, device px" },
+  { name: "dimmedAlpha", type: "f32", doc: "alpha factor of dimmed nodes and edges" },
 ] as const);
 
 // ---------------------------------------------------------------------------
 // Binding contract — PUBLIC API, versioned
 // ---------------------------------------------------------------------------
 
-/** 2: the trailing `_pad` word became `globalEdgeColor` (same offset, same size). */
-export const BINDING_CONTRACT_VERSION = 2;
+export const BINDING_CONTRACT_VERSION = 4;
 
 export const GROUP_FRAME = 0;
 export const GROUP_GRAPH = 1;
@@ -116,7 +118,7 @@ export const FRAME_BINDINGS = [
 export const GRAPH_BINDINGS = [
   { binding: 0, name: "nodePos", kind: "storage-read", wgslType: "array<vec2<f32>>" },
   { binding: 1, name: "nodeStyle", kind: "storage-read", wgslType: "array<u32>" },
-  { binding: 2, name: "nodeSize", kind: "storage-read", wgslType: "array<u32>", doc: "2 x f16 packed (size, ringWidth)" },
+  { binding: 2, name: "nodeSize", kind: "storage-read", wgslType: "array<u32>", doc: "size f16 low half, icon colour index high half" },
   { binding: 3, name: "nodeColor", kind: "storage-read", wgslType: "array<u32>", doc: "rgba8unorm" },
   { binding: 4, name: "nodeState", kind: "storage-read", wgslType: "array<u32>", doc: "STATE_* bits" },
   { binding: 5, name: "edgeIdx", kind: "storage-read", wgslType: "array<vec2<u32>>" },
@@ -150,22 +152,32 @@ export const CONSTANTS = {
   STATE_HIDDEN: 1 << 3,
   STATE_NEIGHBOR: 1 << 4,
   STATE_DRAGGING: 1 << 5,
-  STATE_FOREGROUND_MASK: (1 << 0) | (1 << 1) | (1 << 5),
+  STATE_FOCUSED: 1 << 6,
+  STATE_REMOVED: 1 << 7,
+  STATE_FOREGROUND_MASK: (1 << 0) | (1 << 1) | (1 << 5) | (1 << 6),
   STATE_GROUP_SHIFT: 8,
+  FRAME_FLAG_HIDDEN: 1,
+  FRAME_FLAG_DIMMED: 2,
+  FRAME_FLAG_EDGE_LOOKS: 4,
   // nodeStyle fields
   STYLE_SHAPE_MASK: 0xff,
   STYLE_ICON_SHIFT: 8,
   STYLE_ICON_MASK: 0xffff,
   STYLE_ZLAYER_SHIFT: 24,
+  STYLE_ZLAYER_MASK: 0xf,
+  Z_LAYERS: 16,
   STYLE_FLAGS_SHIFT: 28,
   STYLE_FLAG_RING: 1 << 28,
   STYLE_FLAG_LABEL: 1 << 29,
   STYLE_FLAG_PINNED: 1 << 30,
   NO_ICON: 0xffff,
+  SIZE_ICON_COLOR_SHIFT: 16,
   SHAPE_CIRCLE: 0,
   SHAPE_SQUARE: 1,
   SHAPE_HEXAGON: 2,
   INSTANCE_SHAPE_BITS: 0xf,
+  INSTANCE_LAYER_SHIFT: 4,
+  INSTANCE_LAYER_BITS: 0xf0,
   // edgeStyle fields
   EDGE_WIDTH_MASK: 0xff,
   EDGE_CURVE_SHIFT: 8,
@@ -176,12 +188,21 @@ export const CONSTANTS = {
   EDGE_CAP_SHIFT: 24,
   EDGE_FLAG_DIRECTED: 1 << 28,
   EDGE_FLAG_DASHED: 1 << 29,
-  /** Width unit of the edgeStyle low byte: 1/8 device px. */
+  /** Width unit of the edgeStyle low byte: 1/8 CSS px. */
   EDGE_WIDTH_SCALE: 8,
+  EDGE_END_MASK: 0x0fffffff,
+  EDGE_STATE_SHIFT: 28,
+  EDGE_STATE_HIDDEN: 1,
+  EDGE_STATE_SELECTED: 2,
+  EDGE_STATE_DIMMED: 4,
+  EDGE_STATE_FOCUSED: 8,
+  EDGE_STATE_REMOVED: 1 << 4,
 } as const;
 
 /** Default nodeStyle word: shape 0 (circle), no icon, layer 0, no flags. */
 export const DEFAULT_NODE_STYLE = CONSTANTS.NO_ICON << CONSTANTS.STYLE_ICON_SHIFT;
+
+export const MAX_NODES = CONSTANTS.EDGE_END_MASK + 1;
 
 // ---------------------------------------------------------------------------
 // Engine-internal layouts (@group(2), NOT public contract)
@@ -193,7 +214,7 @@ export const DEFAULT_NODE_STYLE = CONSTANTS.NO_ICON << CONSTANTS.STYLE_ICON_SHIF
  */
 export const NODE_INSTANCE = defineStruct("NodeInstance", [
   { name: "screenPos", type: "vec2<f32>", doc: "device px" },
-  { name: "radiusPx", type: "f32", doc: "projected radius, device px; low INSTANCE_SHAPE_BITS mantissa bits hold the shape" },
+  { name: "radiusPx", type: "f32", doc: "projected radius, device px; low INSTANCE_SHAPE_BITS mantissa bits hold the shape, INSTANCE_LAYER_BITS the z layer" },
   { name: "color", type: "u32", doc: "rgba8unorm" },
 ] as const);
 
@@ -220,7 +241,7 @@ export const EDGE_CHUNK = defineStruct("EdgeChunk", [
   { name: "lo", type: "vec2<f32>", doc: "min endpoint, world" },
   { name: "hi", type: "vec2<f32>", doc: "max endpoint, world" },
   { name: "maxLen", type: "f32", doc: "longest edge, world units" },
-  { name: "maxWidthPx", type: "f32", doc: "widest per-edge style width, device px; 0 = none" },
+  { name: "maxWidthPx", type: "f32", doc: "widest per-edge style width, CSS px; 0 = none" },
   { name: "density", type: "f32", doc: "edge length per area where this length level lies, 1/world" },
   { name: "_pad", type: "f32" },
   { name: "midLo", type: "vec2<f32>" },
@@ -274,6 +295,7 @@ export const LABEL_PARAMS = defineStruct("LabelParams", [
   { name: "edgeCount", type: "u32" },
   { name: "bitsOffset", type: "u32" },
   { name: "liveCount", type: "u32" },
+  { name: "color", type: "u32", doc: "rgba8unorm node label colour" },
 ] as const);
 
 export const LABEL_CANDIDATE = defineStruct("LabelCandidate", [
@@ -340,20 +362,38 @@ export const PICK_CONSTANTS = {
   PICK_FLAG_EDGES: 2,
   PICK_FLAG_SHAPES: 4,
   PICK_FLAG_EDGE_COLORS: 8,
+  PICK_FLAG_LAYERS: 16,
+  PICK_LAYER_SHIFT: 27,
   HOVER_FLAG_SHAPES: 1,
+  HOVER_FLAG_EDGE_STYLES: 2,
 } as const;
 
 export const HOVER_PARAMS = defineStruct("HoverParams", [
   { name: "node", type: "u32" },
   { name: "lodScale", type: "f32" },
-  { name: "nodeGrow", type: "f32" },
-  { name: "nodeColor", type: "u32" },
+  { name: "nodeOutlineScale", type: "f32" },
+  { name: "nodeOutlineColor", type: "u32" },
   { name: "edgeA", type: "u32" },
   { name: "edgeB", type: "u32" },
   { name: "edgeStyle", type: "u32" },
   { name: "edgeColor", type: "u32" },
   { name: "edgeWidth", type: "f32" },
   { name: "flags", type: "u32" },
+  { name: "nodeOutlineMinPx", type: "f32" },
+  { name: "nodeOutlineMaxPx", type: "f32" },
+] as const);
+
+export const LOOK_PARAMS = defineStruct("LookParams", [
+  { name: "outlineColor", type: "u32" },
+  { name: "outlineScale", type: "f32" },
+  { name: "outlineMinPx", type: "f32" },
+  { name: "outlineMaxPx", type: "f32" },
+  { name: "bit", type: "u32", doc: "STATE_* bit the listed nodes carry" },
+  { name: "flags", type: "u32" },
+  { name: "edgeColor", type: "u32", doc: "rgba8unorm" },
+  { name: "edgeWidth", type: "f32", doc: "width factor" },
+  { name: "edgeBit", type: "u32", doc: "EDGE_STATE_* bits a listed edge carries under edgeMask" },
+  { name: "edgeMask", type: "u32" },
 ] as const);
 
 export function pickOutWords(nodeCount: number, edgeCount: number): number {
@@ -414,14 +454,27 @@ export const ENGINE_CONSTANTS = {
   SCRATCH_DRAW_ARGS: 0,
   SCRATCH_BUCKET_BASE: 16,
   SCRATCH_LIST_COUNT: 20,
+  SCRATCH_ICON_BASE: 21,
+  SCRATCH_ICON_COUNT: 22,
   SCRATCH_CHUNKS: 32,
   /** Radix sort digit width and bin count. */
   RADIX_BITS: 4,
   RADIX_BINS: 16,
   MOVE_COUNT: 0,
-  MOVE_NODE: 1,
-  MOVE_LIST: 2,
+  MOVE_LIST: 1,
   MOVE_GROUPS: 256,
+} as const;
+
+export const ICON_CONSTANTS = {
+  ICON_TILE: 64,
+  ICON_HEADER_WORDS: 4,
+  ICON_RECORD_WORDS: 4,
+  ICON_CURVE_WORDS: 6,
+  ICON_BANDS_MASK: 0xffff,
+  ICON_FLAG_EVEN_ODD: 1 << 16,
+  ICON_PALETTE_WIDTH: 256,
+  ICON_WORD_ID_MASK: 0xffff,
+  ICON_WORD_COLOR_SHIFT: 16,
 } as const;
 
 /** Workgroup size used by every engine compute pass (matches the WORKGROUP_SIZE override default). */
@@ -499,7 +552,6 @@ export const OVERRIDES = [
   { name: "WORKGROUP_SIZE", type: "u32", value: "256u" },
   { name: "RASTER_TILE_X", type: "u32", value: "1u" },
   { name: "RASTER_TILE_Y", type: "u32", value: "1u" },
-  { name: "ENABLE_ICONS", type: "bool", value: "true" },
   { name: "ENABLE_RINGS", type: "bool", value: "true" },
   { name: "ENABLE_GRADIENT_EDGES", type: "bool", value: "true" },
   { name: "SMALL_NODE_PX", type: "f32", value: "3.0" },

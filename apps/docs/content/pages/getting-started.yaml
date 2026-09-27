@@ -1,0 +1,88 @@
+title: Getting started
+description: Install the package, draw a first graph and clean up after it.
+blocks:
+  - heading: Install
+  - code: npm install @vhult/graph
+    lang: sh
+  - text: "The package has no runtime dependency. It needs a browser with WebGPU: Chrome and Edge 113 or later, Firefox 141 or later on Windows, Safari 26 or later."
+
+  - heading: A first graph
+  - text: "`Graph.create` takes a canvas, moves it to a render worker and resolves once WebGPU is ready. Nodes and edges are typed arrays: one entry per node for sizes and colors, two for positions (x, y) and two per edge for indices (source, target)."
+  - code: |
+      import { Graph, packRgba } from "@vhult/graph";
+
+      const canvas = document.querySelector("canvas")!;
+      const graph = await Graph.create(canvas);
+
+      graph.nodes.set({
+        count: 3,
+        positions: new Float32Array([0, 0, 100, 0, 50, 80]),
+        sizes: new Float32Array([10, 10, 10]),
+        colors: new Uint32Array(3).fill(packRgba(1, 0.4, 0.2)),
+      });
+      graph.edges.set({ count: 2, indices: new Uint32Array([0, 1, 1, 2]) });
+      graph.camera.fit();
+    lang: ts
+  - text: "Set the nodes before the edges: `nodes.set` starts over and removes every edge. The canvas follows its CSS size by itself, so give it a size in your layout."
+  - note: "Arrays you pass are transferred to the worker, not copied, so they are empty after the call. Pass `{ copy: true }` as the last argument to keep using them."
+
+  - heading: Clean up
+  - text: "`graph.destroy()` releases the worker, the GPU device and every listener. It is safe to call twice."
+  - code: |
+      graph.destroy();
+    lang: ts
+
+  - heading: Errors
+  - text: "`Graph.create` rejects with an `UnsupportedError` when the browser or the GPU cannot run the engine, and with a `GraphError` for other failures. Both carry a `code`. After creation, failures arrive through the `error` event."
+  - code: |
+      import { Graph, UnsupportedError } from "@vhult/graph";
+
+      try {
+        const graph = await Graph.create(canvas);
+        graph.on("error", (e) => console.error(e.code, e.message));
+      } catch (e) {
+        if (e instanceof UnsupportedError) showFallback(e.message);
+        else throw e;
+      }
+    lang: ts
+
+  - heading: With a bundler
+  - text: "The engine loads its worker with `new URL(\"./worker.js\", import.meta.url)`, which bundlers follow. With Vite, keep the package out of the dependency pre-bundling so the dev server serves the worker next to it."
+  - code: |
+      import { defineConfig } from "vite";
+
+      export default defineConfig({
+        optimizeDeps: { exclude: ["@vhult/graph"] },
+        worker: { format: "es" },
+      });
+    lang: ts
+    title: vite.config.ts
+
+  - heading: With React
+  - text: "A canvas can move to a worker only once. Create the canvas inside the effect, so the effect can run twice in strict mode without reusing it."
+  - code: |
+      import { Graph } from "@vhult/graph";
+      import { useEffect, useRef } from "react";
+
+      export function GraphView() {
+        const host = useRef<HTMLDivElement>(null);
+
+        useEffect(() => {
+          const canvas = document.createElement("canvas");
+          host.current!.append(canvas);
+          let graph: Graph | null = null;
+          let live = true;
+          Graph.create(canvas).then((g) => {
+            if (!live) return g.destroy();
+            graph = g;
+          });
+          return () => {
+            live = false;
+            graph?.destroy();
+            canvas.remove();
+          };
+        }, []);
+
+        return <div ref={host} style={{ height: 400 }} />;
+      }
+    lang: tsx

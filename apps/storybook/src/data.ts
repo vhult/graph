@@ -6,7 +6,7 @@
  * Small LRU: a 10M-node graph is ~300 MB of typed arrays.
  */
 import type { Graph } from "@vhult/graph";
-import { communities, generate, gridGraph, hierarchy, mesh, type GeneratorName, type GraphDataset, type NodeDataset } from "@vhult/graph-bench";
+import { brain, communities, cosmicWeb, deepField, generate, gridGraph, hierarchy, mesh, rivers, type GeneratorName, type GraphDataset, type NodeDataset } from "@vhult/graph-bench";
 
 const MAX_ENTRIES = 2;
 const cache = new Map<string, unknown>();
@@ -68,6 +68,21 @@ export type LayoutName = keyof typeof LAYOUTS;
 
 export const LAYOUT_OPTIONS = Object.keys(LAYOUTS) as LayoutName[];
 
+export const MAPS = {
+  "cosmic web": cosmicWeb,
+  brain,
+  rivers,
+  "deep field": deepField,
+} as const;
+
+export type MapName = keyof typeof MAPS;
+
+export const MAP_OPTIONS = Object.keys(MAPS) as MapName[];
+
+export function loadMap(name: MapName, count: number, seed: number): Loaded<GraphDataset> {
+  return cached(`map:${name}:${count}:${seed}`, () => MAPS[name](count, seed));
+}
+
 export const NODE_COUNTS = [100, 1_000, 10_000, 100_000, 1_000_000, 10_000_000] as const;
 
 export function loadLayout(name: LayoutName, count: number, seed: number): Loaded<GraphDataset> {
@@ -88,11 +103,11 @@ export function graphText(name: GraphName, count: number, g: GraphDataset): Grap
 
 export function setGraph(graph: Graph, name: GraphName, count: number, labels: { nodes: boolean; edges: boolean }): { data: GraphDataset; genMs: number } {
   const { data, genMs } = loadGraph(name, count);
-  graph.setNodes(data.nodes, { copy: true });
-  graph.setEdges(data.edges, { copy: true });
+  graph.nodes.set(data.nodes, { copy: true });
+  graph.edges.set(data.edges, { copy: true });
   const text = labels.nodes || labels.edges ? graphText(name, count, data) : null;
-  graph.setNodeLabels(labels.nodes && text ? text.nodes : []);
-  graph.setEdgeLabels(labels.edges && text ? text.edges : []);
+  graph.nodes.updateAll({ labels: labels.nodes && text ? text.nodes : null });
+  graph.edges.updateAll({ labels: labels.edges && text ? text.edges : null });
   return { data, genMs };
 }
 

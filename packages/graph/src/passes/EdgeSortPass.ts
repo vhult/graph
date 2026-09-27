@@ -17,7 +17,7 @@
  * Runs after SORT, so `rank` and node positions are this frame's.
  */
 import type { Bounds } from "../data/GraphStore";
-import { EDGE_CONSTANTS, edgeChunkCount, mortonBitsPerAxis } from "../data/Layouts";
+import { CONSTANTS, EDGE_CONSTANTS, edgeChunkCount, mortonBitsPerAxis } from "../data/Layouts";
 import { Dirty } from "../engine/Dirty";
 import { Stage, type ComputeNode, type FrameContext } from "../gpu/FrameGraph";
 import type { GraphBuffers } from "../gpu/GraphBuffers";
@@ -85,7 +85,7 @@ export class EdgeSortPass implements ComputeNode {
     const keysPipe = await device.createComputePipelineAsync({
       label: "edge/keys",
       layout: device.createPipelineLayout({ bindGroupLayouts: [keysLayout] }),
-      compute: { module, entryPoint: "edge_keys" },
+      compute: { module, entryPoint: "edge_keys", constants: { EDGE_END_MASK: CONSTANTS.EDGE_END_MASK } },
     });
     // The shuffle touches no engine bindings: groups 0 and 1 are empty.
     const emptyLayout = device.createBindGroupLayout({ label: "empty", entries: [] });

@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/html-vite";
+import { packEdgeStyle } from "@vhult/graph";
 import { PALETTE, rgbToWord } from "@vhult/graph-bench";
-import { EDGE_DIRECTED } from "../../src/graphStory";
 import { stage } from "../../src/stage";
 
 interface Edge {
@@ -12,7 +12,6 @@ interface Edge {
 }
 
 const LINE = 0xb8c4d6;
-const WIDTH_UNIT = 8;
 const COLUMN = 180;
 const LENGTH = 140;
 const ROW = 90;
@@ -44,7 +43,7 @@ function build() {
       nodeColors[a + 1] = rgbToWord(edge.to);
       indices[a] = a;
       indices[a + 1] = a + 1;
-      styles[e] = (Math.round(edge.width * WIDTH_UNIT) & 0xff) | (edge.directed ? EDGE_DIRECTED : 0);
+      styles[e] = packEdgeStyle(edge);
       colors[a] = rgbToWord(edge.from);
       colors[a + 1] = rgbToWord(edge.to);
       e++;
@@ -52,8 +51,7 @@ function build() {
   });
   return {
     nodes: { count: count * 2, positions, colors: nodeColors, sizes: new Float32Array(count * 2).fill(NODE_SIZE) },
-    edges: { count, indices, styles, colors },
-    labels: edges.map((edge) => edge.label),
+    edges: { count, indices, styles, colors, labels: edges.map((edge) => edge.label) },
   };
 }
 
@@ -61,12 +59,10 @@ const meta: Meta = {
   title: "Edges/Styles",
   render: (args, ctx) =>
     stage(args, ctx, {
-      options: () => ({ directedEdges: true, nodeDrag: true }),
       setup: (graph, _a, hud) => {
         const g = build();
-        graph.setNodes(g.nodes);
-        graph.setEdges(g.edges);
-        graph.setEdgeLabels(g.labels);
+        graph.nodes.set(g.nodes);
+        graph.edges.set(g.edges);
         graph.camera.fit();
         hud.setNote("Edge styles · width, arrowheads, per-edge colour, gradient, labels");
       },

@@ -1,0 +1,37 @@
+title: Camera
+description: Frame the graph, move and turn the view, and convert between screen and world.
+blocks:
+  - heading: Fit
+  - text: "`camera.fit()` frames every node. It can also frame a list of nodes or a world rectangle, with padding in CSS px and an animation duration in ms."
+  - code: |
+      graph.camera.fit();
+      graph.camera.fit({ nodes: new Uint32Array([4, 8, 15]), padding: 48, duration: 400 });
+    lang: ts
+
+  - heading: Move
+  - text: "A view is a center in world units, a zoom in CSS px per world unit and a rotation in radians. `camera.set` changes part of it, animated when you give a duration."
+  - code: |
+      graph.camera.set({ x: 0, y: 0, zoom: 2 }, { duration: 600, easing: "ease" });
+      graph.camera.rotate(Math.PI / 8, { duration: 300 });
+    lang: ts
+  - text: "`camera.get()` returns the last drawn view, at most one frame old. The `view` event fires when the camera moves, at most once per frame."
+
+  - heading: Limits
+  - code: |
+      graph.camera.limits({
+        minZoom: 0.05,
+        maxZoom: 20,
+        bounds: { minX: -1000, minY: -1000, maxX: 1000, maxY: 1000 },
+      });
+    lang: ts
+  - text: "`bounds` is the world rectangle the view center stays in."
+
+  - heading: Screen and world
+  - text: "`toWorld` converts a canvas point in CSS px to world units, and `toScreen` does the reverse. Both take an optional `out` object to write into."
+  - code: |
+      const out = { x: 0, y: 0 };
+      canvas.addEventListener("click", (e) => {
+        graph.camera.toWorld(e.offsetX, e.offsetY, out);
+        console.log(out.x, out.y);
+      });
+    lang: ts

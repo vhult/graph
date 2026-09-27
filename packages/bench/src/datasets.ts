@@ -15,6 +15,7 @@ export interface NodeDataset {
   /** Diameters, world units. */
   sizes: Float32Array;
   shapes?: Uint8Array;
+  zIndex?: Uint8Array;
 }
 
 // ---------------------------------------------------------------------------
@@ -63,6 +64,51 @@ export function rgbToWord(rgb: number, alpha = 1): number {
 }
 
 const PALETTE_WORDS = PALETTE.map((c) => rgbToWord(c));
+
+/** Hue, saturation, lightness (0..1) + alpha → rgba8unorm word. */
+export function hslToWord(h: number, s: number, l: number, alpha = 1): number {
+  const hue = ((h % 1) + 1) % 1;
+  const light = Math.min(1, Math.max(0, l));
+  const f = (n: number) => {
+    const k = (n + hue * 12) % 12;
+    return light - s * Math.min(light, 1 - light) * Math.max(-1, Math.min(k - 3, 9 - k, 1));
+  };
+  const a = Math.min(1, Math.max(0, alpha));
+  return (Math.round(f(0) * 255) | (Math.round(f(8) * 255) << 8) | (Math.round(f(4) * 255) << 16) | (Math.round(a * 255) << 24)) >>> 0;
+}
+
+/** Smooth 2D value noise, four octaves, in about [-1, 1]. */
+export function noise2(seed: number): (x: number, y: number) => number {
+  const hash = (i: number, j: number) => {
+    let h = (Math.imul(i, 374761393) + Math.imul(j, 668265263) + Math.imul(seed, 1442695041)) | 0;
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+  };
+  const value = (x: number, y: number) => {
+    const i = Math.floor(x);
+    const j = Math.floor(y);
+    const fx = x - i;
+    const fy = y - j;
+    const u = fx * fx * (3 - 2 * fx);
+    const v = fy * fy * (3 - 2 * fy);
+    const a = hash(i, j);
+    const b = hash(i + 1, j);
+    const c = hash(i, j + 1);
+    const d = hash(i + 1, j + 1);
+    return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+  };
+  return (x, y) => {
+    let sum = 0;
+    let amp = 0.5;
+    let f = 1;
+    for (let o = 0; o < 4; o++) {
+      sum += amp * (value(x * f, y * f) * 2 - 1);
+      f *= 2.03;
+      amp *= 0.5;
+    }
+    return sum / 0.9375;
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Generators

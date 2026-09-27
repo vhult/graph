@@ -16,8 +16,10 @@ import { GraphError } from "../api/errors";
 import {
   chunkCount, cullCellCount, cullScratchWords, drawPositions, drawTableWordOffset, ENGINE_CONSTANTS, NODE_INSTANCE } from "../data/Layouts";
 import { Dirty } from "../engine/Dirty";
+import { lodKey, type Tunable, type Tune } from "../engine/Tune";
 import type { ContractLayouts } from "../gpu/BindLayouts";
 import { Stage, type ComputeNode, type FrameContext } from "../gpu/FrameGraph";
+import { Lazy, Variants } from "../gpu/Lazy";
 import { createShaderModule } from "../gpu/ShaderModules";
 
 /** Outputs consumed by the draw passes. `version` bumps when buffers are recreated. */
@@ -35,11 +37,18 @@ interface PhaseLayouts {
   scan: GPUBindGroupLayout;
   scatter: GPUBindGroupLayout;
   list: GPUBindGroupLayout;
+  touch: GPUBindGroupLayout;
 }
 
 const BOUNDS_DIRTY = Dirty.TOPOLOGY | Dirty.POSITIONS | Dirty.STATE;
 
-export class TransformCullPass implements ComputeNode {
+interface CullPipes {
+  count: GPUComputePipeline;
+  scatter: readonly GPUComputePipeline[];
+  iconScatter: Lazy<GPUComputePipeline[]>;
+}
+
+export class TransformCullPass implements ComputeNode, Tunable {
   readonly stage = Stage.TRANSFORM_CULL;
   readonly name = "cull";
   readonly phases = ["cull.bounds", "cull.count", "cull.scan.reduce", "cull.scan.blocks", "cull.scan.down", "cull.scatter"] as const;
@@ -48,11 +57,19 @@ export class TransformCullPass implements ComputeNode {
 
   outputs: CullOutputs | null = null;
   shapes = false;
+  layers = false;
+  tailed = false;
+  private icons = false;
+  private readonly pipes = new Variants<CullPipes>();
+  private iconCount = 0;
+  private readonly scratchWords = new Uint32Array(2);
   private dispatchArgs: GPUBuffer;
-  private groups: { state: GPUBindGroup; scan: GPUBindGroup; scatter: GPUBindGroup; list: GPUBindGroup } | null = null;
-  private readonly moveList: GPUBuffer;
-  private readonly moveData = new Uint32Array(4);
+  private groups: { state: GPUBindGroup; scan: GPUBindGroup; scatter: GPUBindGroup; list: GPUBindGroup; touch: GPUBindGroup } | null = null;
+  private moveList: GPUBuffer;
+  private moveChunks = 0;
+  private readonly moveHead = new Uint32Array(1);
   private moving = false;
+  private touchPending = false;
   /** Chunk bounds / LOD clusters in the state buffer are stale (new buffer or data change). */
   private boundsStale = true;
   private capacity = 0;
@@ -69,28 +86,35 @@ export class TransformCullPass implements ComputeNode {
     private readonly layouts: PhaseLayouts,
     private readonly bounds: GPUComputePipeline,
     private readonly boundsList: GPUComputePipeline,
-    private readonly count: GPUComputePipeline,
+    private readonly touch: GPUComputePipeline,
     private readonly reduce: GPUComputePipeline,
     private readonly scan: GPUComputePipeline,
     private readonly down: GPUComputePipeline,
-    private readonly scatter: readonly GPUComputePipeline[],
+    private readonly make: (t: Tune) => Promise<CullPipes>,
   ) {
     this.maxGroupsX = device.limits.maxComputeWorkgroupsPerDimension;
     // Separate buffer: indirect args must not be bound in the dispatch that consumes them.
     this.dispatchArgs = device.createBuffer({ label: "cull/dispatchArgs", size: 16, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.INDIRECT });
-    this.moveList = device.createBuffer({ label: "cull/moveList", size: 16, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+    this.moveList = this.createMoveList(0);
   }
 
-  moveNode(engine: number): void {
+  moveNodes(): void {
     this.moving = true;
-    const d = this.moveData;
-    d[ENGINE_CONSTANTS.MOVE_COUNT] = 1;
-    d[ENGINE_CONSTANTS.MOVE_NODE] = engine;
-    d[ENGINE_CONSTANTS.MOVE_LIST] = Math.floor(engine / ENGINE_CONSTANTS.CHUNK_SIZE);
-    this.device.queue.writeBuffer(this.moveList, 0, d);
+    this.touchPending = true;
+    this.device.queue.writeBuffer(this.moveList, ENGINE_CONSTANTS.MOVE_COUNT * 4, this.moveHead);
   }
 
-  static async create(device: GPUDevice, layouts: ContractLayouts, lodTargetPx: number): Promise<TransformCullPass> {
+  endMove(): void {
+    this.moving = false;
+    this.touchPending = false;
+  }
+
+  private createMoveList(chunks: number): GPUBuffer {
+    this.moveChunks = chunks;
+    return this.device.createBuffer({ label: "cull/moveList", size: Math.max(16, (ENGINE_CONSTANTS.MOVE_LIST + chunks) * 4), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+  }
+
+  static async create(device: GPUDevice, layouts: ContractLayouts, tune: Tune): Promise<TransformCullPass> {
     const [module, boundsModule] = await Promise.all([
       createShaderModule(device, "passes/transform_cull.wgsl"),
       createShaderModule(device, "passes/chunk_bounds.wgsl"),
@@ -103,6 +127,7 @@ export class TransformCullPass implements ComputeNode {
       scan: device.createBindGroupLayout({ label: "group2/cull.scan", entries: [e(0, "storage"), e(2, "storage")] }),
       scatter: device.createBindGroupLayout({ label: "group2/cull.scatter", entries: [e(0, "storage"), e(3, "storage")] }),
       list: device.createBindGroupLayout({ label: "group2/cull.list", entries: [e(0, "storage"), e(1, "read-only-storage")] }),
+      touch: device.createBindGroupLayout({ label: "group2/cull.touch", entries: [e(2, "storage")] }),
     };
     const make = (m: GPUShaderModule, entryPoint: string, layout: GPUBindGroupLayout, constants?: Record<string, number>) =>
       device.createComputePipelineAsync({
@@ -110,30 +135,74 @@ export class TransformCullPass implements ComputeNode {
         layout: device.createPipelineLayout({ bindGroupLayouts: [layouts.frame, layouts.graph, layout] }),
         compute: { module: m, entryPoint, constants },
       });
-    const [bounds, boundsList, count, reduce, scan, down, scatter, scatterShapes] = await Promise.all([
+    const makePipes = async (t: Tune): Promise<CullPipes> => {
+      const lod = t.lodTargetPx;
+      const scatterVariant = (shapes: number, layers: number, icons = 0) =>
+        make(module, "cull_scatter", phase.scatter, {
+          LOD_TARGET_PX: lod,
+          NODE_SHAPES: shapes,
+          NODE_LAYERS: layers,
+          ...(icons ? { NODE_ICONS: 1 } : {}),
+        });
+      const [count, ...scatter] = await Promise.all([
+        make(module, "cull_count", phase.state, { LOD_TARGET_PX: lod }),
+        scatterVariant(0, 0),
+        scatterVariant(1, 0),
+        scatterVariant(0, 1),
+        scatterVariant(1, 1),
+      ]);
+      const iconScatter = new Lazy(() => Promise.all([scatterVariant(0, 0, 1), scatterVariant(1, 0, 1), scatterVariant(0, 1, 1), scatterVariant(1, 1, 1)]));
+      return { count, scatter, iconScatter };
+    };
+    const [bounds, boundsList, touch, reduce, scan, down] = await Promise.all([
       make(boundsModule, "chunk_bounds", phase.state),
       make(boundsModule, "chunk_bounds_list", phase.list),
-      make(module, "cull_count", phase.state, { LOD_TARGET_PX: lodTargetPx }),
+      make(boundsModule, "chunk_touch", phase.touch),
       make(module, "scan_reduce", phase.state),
       make(module, "scan_blocks", phase.scan),
       make(module, "scan_down", phase.state),
-      make(module, "cull_scatter", phase.scatter, { LOD_TARGET_PX: lodTargetPx }),
-      make(module, "cull_scatter", phase.scatter, { LOD_TARGET_PX: lodTargetPx, NODE_SHAPES: 1 }),
     ]);
-    return new TransformCullPass(device, phase, bounds, boundsList, count, reduce, scan, down, [scatter, scatterShapes]);
+    const pass = new TransformCullPass(device, phase, bounds, boundsList, touch, reduce, scan, down, makePipes);
+    await pass.loadTune(tune);
+    pass.useTune(tune);
+    return pass;
+  }
+
+  loadTune(t: Tune): Promise<unknown> {
+    return this.pipes.load(lodKey(t), () => this.make(t)).then((p): Promise<unknown> | CullPipes => (this.icons ? p.iconScatter.load() : p));
+  }
+
+  hasTune(t: Tune): boolean {
+    const p = this.pipes.get(lodKey(t));
+    return p !== null && (!this.icons || p.iconScatter.value !== null);
+  }
+
+  useTune(t: Tune): void {
+    this.pipes.use(lodKey(t));
+  }
+
+  loadIcons(): Promise<unknown> {
+    this.icons = true;
+    return this.pipes.value!.iconScatter.load();
+  }
+
+  fits(nodeCount: number, icons: boolean): boolean {
+    const bytes = instanceBytes(capacityFor(nodeCount), icons);
+    const limits = this.device.limits;
+    return bytes <= limits.maxStorageBufferBindingSize && bytes <= limits.maxBufferSize;
   }
 
   /** Ensure buffers fit `nodeCount`. Old buffers go to `retire`. */
-  reserve(nodeCount: number, retire: (b: GPUBuffer) => void): void {
-    if (nodeCount <= this.capacity && this.outputs) return;
-    const cap = Math.max(1024, Math.ceil(nodeCount * GROWTH));
-    const instanceBytes = cap * NODE_INSTANCE.size;
+  reserve(nodeCount: number, retire: (b: GPUBuffer) => void, icons: boolean): void {
+    if (nodeCount <= this.capacity && this.outputs && icons === this.tailed) return;
+    const cap = capacityFor(nodeCount);
+    const bytes = instanceBytes(cap, icons);
     const limits = this.device.limits;
-    if (instanceBytes > limits.maxStorageBufferBindingSize || instanceBytes > limits.maxBufferSize) {
+    if (bytes > limits.maxStorageBufferBindingSize || bytes > limits.maxBufferSize) {
       // Buffer chunking above binding limits is milestone 9.
       throw new GraphError(
         "limits-exceeded",
-        `${nodeCount.toLocaleString("en-US")} nodes need a ${(instanceBytes / 2 ** 20).toFixed(0)} MiB instance buffer; ` +
+        `${nodeCount.toLocaleString("en-US")} nodes need a ${(bytes / 2 ** 20).toFixed(0)} MiB instance buffer; ` +
           `this GPU binds at most ${(limits.maxStorageBufferBindingSize / 2 ** 20).toFixed(0)} MiB.`,
       );
     }
@@ -146,21 +215,34 @@ export class TransformCullPass implements ComputeNode {
       size: cullScratchWords(cap) * 4,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.INDIRECT | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
     });
-    const instances = this.device.createBuffer({ label: "cull/instances", size: instanceBytes, usage: GPUBufferUsage.STORAGE });
+    const instances = this.device.createBuffer({ label: "cull/instances", size: bytes, usage: GPUBufferUsage.STORAGE });
     this.outputs = { scratch, instances, version: (this.outputs?.version ?? 0) + 1 };
     this.capacity = cap;
+    this.tailed = icons;
+    this.iconCount = -1;
     this.groups = null; // rebuilt in prepare()
     this.boundsStale = true;
     this.tableChunks = -1;
-
+    if (chunkCount(cap) > this.moveChunks) {
+      retire(this.moveList);
+      this.moveList = this.createMoveList(chunkCount(cap));
+      if (this.moving) this.moveNodes();
+    }
   }
 
   phaseActive(phase: number, ctx: FrameContext): boolean {
-    return phase !== 0 || this.boundsStale || (ctx.dirty & BOUNDS_DIRTY) !== 0 || (this.moving && (ctx.dirty & Dirty.MOVED) !== 0);
+    return phase !== 0 || this.boundsStale || this.touchPending || (ctx.dirty & BOUNDS_DIRTY) !== 0 || (this.moving && (ctx.dirty & Dirty.MOVED) !== 0);
   }
 
   prepare(ctx: FrameContext): void {
     const out = this.outputs!;
+    const iconCount = ctx.icons?.count ?? 0;
+    if (iconCount !== this.iconCount) {
+      this.iconCount = iconCount;
+      this.scratchWords[0] = this.capacity;
+      this.scratchWords[1] = iconCount;
+      this.device.queue.writeBuffer(out.scratch, ENGINE_CONSTANTS.SCRATCH_ICON_BASE * 4, this.scratchWords);
+    }
     if (!this.groups) {
       const bg = (layout: GPUBindGroupLayout, entries: [number, GPUBuffer][]) =>
         this.device.createBindGroup({ layout, entries: entries.map(([binding, buffer]) => ({ binding, resource: { buffer } })) });
@@ -169,6 +251,7 @@ export class TransformCullPass implements ComputeNode {
         scan: bg(this.layouts.scan, [[0, out.scratch], [2, this.dispatchArgs]]),
         scatter: bg(this.layouts.scatter, [[0, out.scratch], [3, out.instances]]),
         list: bg(this.layouts.list, [[0, out.scratch], [1, this.moveList]]),
+        touch: this.device.createBindGroup({ layout: this.layouts.touch, entries: [{ binding: 2, resource: { buffer: this.moveList } }] }),
       };
     }
     const chunks = chunkCount(ctx.nodeCount);
@@ -189,10 +272,16 @@ export class TransformCullPass implements ComputeNode {
     pass.setBindGroup(1, ctx.graphBindGroup);
     switch (phase) {
       case 0:
+        if (this.touchPending) {
+          pass.setPipeline(this.touch);
+          pass.setBindGroup(2, g.touch);
+          pass.dispatchWorkgroups(this.gx, this.gy);
+          this.touchPending = false;
+        }
         if (!this.boundsStale && (ctx.dirty & BOUNDS_DIRTY) === 0) {
           pass.setPipeline(this.boundsList);
           pass.setBindGroup(2, g.list);
-          pass.dispatchWorkgroups(1);
+          pass.dispatchWorkgroups(ENGINE_CONSTANTS.MOVE_GROUPS);
           return;
         }
         pass.setPipeline(this.bounds);
@@ -201,7 +290,7 @@ export class TransformCullPass implements ComputeNode {
         this.boundsStale = false;
         return;
       case 1:
-        pass.setPipeline(this.count);
+        pass.setPipeline(this.pipes.value!.count);
         pass.setBindGroup(2, g.state);
         pass.dispatchWorkgroups(this.gx, this.gy);
         return;
@@ -220,11 +309,13 @@ export class TransformCullPass implements ComputeNode {
         pass.setBindGroup(2, g.state);
         pass.dispatchWorkgroups(this.sx, this.sy);
         return;
-      case 5:
-        pass.setPipeline(this.scatter[this.shapes ? 1 : 0]!);
+      case 5: {
+        const pipes = this.pipes.value!;
+        pass.setPipeline(((ctx.icons && pipes.iconScatter.value) || pipes.scatter)[(this.shapes ? 1 : 0) + (this.layers ? 2 : 0)]!);
         pass.setBindGroup(2, g.scatter);
         pass.dispatchWorkgroupsIndirect(this.dispatchArgs, 0);
         return;
+      }
     }
   }
 
@@ -239,4 +330,12 @@ export class TransformCullPass implements ComputeNode {
     this.dispatchArgs.destroy();
     this.moveList.destroy();
   }
+}
+
+function capacityFor(nodeCount: number): number {
+  return Math.ceil(Math.max(1024, Math.ceil(nodeCount * GROWTH)) / 4) * 4;
+}
+
+function instanceBytes(capacity: number, icons: boolean): number {
+  return capacity * NODE_INSTANCE.size + (icons ? capacity * 4 : 0);
 }

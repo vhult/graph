@@ -4,7 +4,10 @@
  */
 import camera from "./common/camera.wgsl";
 import cullState from "./common/cull_state.wgsl";
+import edgeSegment from "./common/edge_segment.wgsl";
 import edges from "./common/edges.wgsl";
+import iconCurves from "./common/icon_curves.wgsl";
+import icons from "./common/icons.wgsl";
 import labels from "./common/labels.wgsl";
 import layouts from "./common/layouts.wgsl";
 import morton from "./common/morton.wgsl";
@@ -18,15 +21,20 @@ import edgeExpand from "./passes/edge_expand.wgsl";
 import edgeGeometry from "./passes/edge_geometry.wgsl";
 import edgeSort from "./passes/edge_sort.wgsl";
 import gather from "./passes/gather.wgsl";
+import mergeLayers from "./passes/merge_layers.wgsl";
 import hover from "./passes/hover.wgsl";
+import iconSdf from "./passes/icon_sdf.wgsl";
 import labelDraw from "./passes/label_draw.wgsl";
 import labelMark from "./passes/label_mark.wgsl";
 import labelPlace from "./passes/label_place.wgsl";
 import labelTree from "./passes/label_tree.wgsl";
 import nodeGeometry from "./passes/node_geometry.wgsl";
+import nodeOrder from "./passes/node_order.wgsl";
 import pickEdges from "./passes/pick_edges.wgsl";
 import pickNodes from "./passes/pick_nodes.wgsl";
+import queryInside from "./passes/query_inside.wgsl";
 import scatterUpdate from "./passes/scatter_update.wgsl";
+import selectionShape from "./passes/selection_shape.wgsl";
 import shuffleChunks from "./passes/shuffle_chunks.wgsl";
 import sort from "./passes/sort.wgsl";
 import transformCull from "./passes/transform_cull.wgsl";
@@ -38,6 +46,9 @@ export const SHADERS: ShaderFs = {
   "common/sdf.wgsl": sdf,
   "common/nodes.wgsl": nodes,
   "common/edges.wgsl": edges,
+  "common/edge_segment.wgsl": edgeSegment,
+  "common/icon_curves.wgsl": iconCurves,
+  "common/icons.wgsl": icons,
   "common/labels.wgsl": labels,
   "common/morton.wgsl": morton,
   "common/scan.wgsl": scan,
@@ -49,15 +60,20 @@ export const SHADERS: ShaderFs = {
   "passes/edge_geometry.wgsl": edgeGeometry,
   "passes/edge_sort.wgsl": edgeSort,
   "passes/gather.wgsl": gather,
+  "passes/merge_layers.wgsl": mergeLayers,
   "passes/hover.wgsl": hover,
+  "passes/icon_sdf.wgsl": iconSdf,
   "passes/label_draw.wgsl": labelDraw,
   "passes/label_mark.wgsl": labelMark,
   "passes/label_place.wgsl": labelPlace,
   "passes/label_tree.wgsl": labelTree,
   "passes/node_geometry.wgsl": nodeGeometry,
+  "passes/node_order.wgsl": nodeOrder,
   "passes/pick_edges.wgsl": pickEdges,
   "passes/pick_nodes.wgsl": pickNodes,
+  "passes/query_inside.wgsl": queryInside,
   "passes/scatter_update.wgsl": scatterUpdate,
+  "passes/selection_shape.wgsl": selectionShape,
   "passes/shuffle_chunks.wgsl": shuffleChunks,
   "passes/sort.wgsl": sort,
   "passes/transform_cull.wgsl": transformCull,
