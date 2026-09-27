@@ -531,6 +531,8 @@ export interface OutlineLook {
 export function packEdgeStyle(style: {
     width?: number;
     directed?: boolean;
+    pattern?: "solid" | "dashed" | "dotted" | "dashDot" | "double";
+    tapered?: boolean;
 }): number;
 
 // @public

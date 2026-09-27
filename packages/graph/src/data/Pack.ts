@@ -118,10 +118,20 @@ export function packRgba(r: number, g: number, b: number, a = 1): number {
   return (c(r) | (c(g) << 8) | (c(b) << 16) | (c(a) << 24)) >>> 0;
 }
 
-/** Packs one edge style word from a width in CSS px and whether the edge is directed. */
-export function packEdgeStyle(style: { width?: number; directed?: boolean }): number {
-  const w = Math.min(255, Math.max(0, Math.round((style.width ?? 0) * CONSTANTS.EDGE_WIDTH_SCALE)));
-  return (w | (style.directed ? CONSTANTS.EDGE_FLAG_DIRECTED : 0)) >>> 0;
+const EDGE_PATTERNS = {
+  solid: CONSTANTS.EDGE_PATTERN_SOLID,
+  dashed: CONSTANTS.EDGE_PATTERN_DASHED,
+  dotted: CONSTANTS.EDGE_PATTERN_DOTTED,
+  dashDot: CONSTANTS.EDGE_PATTERN_DASH_DOT,
+  double: CONSTANTS.EDGE_PATTERN_DOUBLE,
+};
+
+/** Packs one edge style word from a width in CSS px, whether the edge is directed, its line pattern and whether it is tapered. */
+export function packEdgeStyle(style: { width?: number; directed?: boolean; pattern?: "solid" | "dashed" | "dotted" | "dashDot" | "double"; tapered?: boolean }): number {
+  const c = CONSTANTS;
+  const w = Math.min(255, Math.max(0, Math.round((style.width ?? 0) * c.EDGE_WIDTH_SCALE)));
+  const pattern = EDGE_PATTERNS[style.pattern ?? "solid"] << c.EDGE_PATTERN_SHIFT;
+  return (w | pattern | (style.tapered ? c.EDGE_FLAG_TAPERED : 0) | (style.directed ? c.EDGE_FLAG_DIRECTED : 0)) >>> 0;
 }
 
 export function edgeStateBits(flags: number): number {

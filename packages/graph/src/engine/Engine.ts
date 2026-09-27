@@ -1187,6 +1187,7 @@ export class Engine {
     ctx.dirty = this.dirty;
     ctx.icons = icons && this.passes.cull.tailed ? atlas : null;
     this.passes.edges.perEdgeStyle = this.store.hasEdgeStyles;
+    this.passes.edges.linePatterns = this.store.hasLinePatterns;
     this.passes.edges.perEdgeColor = this.store.hasEdgeColors;
     this.passes.cull.shapes = this.store.hasNodeShapes;
     this.passes.cull.layers = this.store.hasZLayers;

@@ -8,6 +8,31 @@ bandwidth), Edge 153, 1M nodes / 3M edges at fit unless stated.
 
 ---
 
+## 0075 — Edge line patterns and taper live in the style word, in their own shader variant
+
+`packEdgeStyle` takes `pattern` (`solid`, `dashed`, `dotted`, `dashDot`,
+`double`) and `tapered`, in the bits the unused curve fields held (pattern at
+bit 8, taper at bit 12). Curves and multi-edge grouping were dropped: they
+touch cull, pick, labels and arrowheads for little gain. Edges stay one quad;
+the pattern is a distance in the fragment shader, sized from the edge width
+with a 2 CSS px unit, starting at the source, stopping before the arrowhead.
+A thinned stand-in edge closes its gaps as its weight nears 2 and is solid
+from there, so crowded areas keep their ink and skip the pattern work.
+`double` needs 3 CSS px. The store counts patterned edges like directed ones;
+the pattern code is a third style level of the edge pipeline (6 variants, 12
+with arrows), so graphs without patterns run the same shader as before. The
+hover and look highlights stay a plain solid line: they are drawn over the
+edge, twice its width, which covers any pattern or taper.
+
+AMD Radeon 890M, 2 alternating rounds per side, 3 runs each, edge pass
+mean / p95 ms, old -> new. No patterns: `large` 2.159 / 3.551 -> 2.112 / 3.460,
+`large-zoom` 2.749 / 4.152 -> 2.651 / 4.084; suite GPU within -2.8% to +1.4%
+on every case. Cost of a pattern on every edge, `large`, against solid of the
+same width: dashed 2.121 -> 2.200, dotted 2.188, dashDot 2.230, tapered 2.141,
+double (3 px) 2.071 -> 2.173.
+
+---
+
 ## 0074 — The build strips comments, indentation and blank lines from WGSL
 
 `scripts/build.mjs` strips comments, indentation and blank lines from every

@@ -83,4 +83,15 @@ describe("Pack", () => {
     expect(packEdgeStyle({})).toBe(0);
     expect(packEdgeStyle({ width: 100 })).toBe(255);
   });
+
+  it("packs the line pattern and the tapered flag", () => {
+    const P = CONSTANTS.EDGE_PATTERN_SHIFT;
+    expect(packEdgeStyle({ pattern: "solid" })).toBe(0);
+    expect(packEdgeStyle({ pattern: "dashed" })).toBe(1 << P);
+    expect(packEdgeStyle({ pattern: "dotted" })).toBe(2 << P);
+    expect(packEdgeStyle({ pattern: "dashDot" })).toBe(3 << P);
+    expect(packEdgeStyle({ pattern: "double" })).toBe(4 << P);
+    expect(packEdgeStyle({ tapered: true })).toBe(CONSTANTS.EDGE_FLAG_TAPERED);
+    expect(packEdgeStyle({ width: 2, directed: true, pattern: "dotted", tapered: true })).toBe((16 | (2 << P) | CONSTANTS.EDGE_FLAG_TAPERED | CONSTANTS.EDGE_FLAG_DIRECTED) >>> 0);
+  });
 });
