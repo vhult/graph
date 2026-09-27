@@ -38,14 +38,16 @@
     "access": "public"
   },
   "scripts": {
-    "build": "node scripts/build.mjs",
+    "build": "node scripts/build.mjs && api-extractor run --local",
     "watch": "node scripts/build.mjs --watch",
     "gen": "node scripts/build.mjs --gen-only",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
-    "prepublishOnly": "npm run typecheck && npm test && npm run build"
+    "api": "api-extractor run --local",
+    "prepublishOnly": "npm run build && npm run typecheck && npm test"
   },
   "devDependencies": {
+    "@microsoft/api-extractor": "^7.59.2",
     "@webgpu/types": "^0.1.74",
     "esbuild": "^0.28.2",
     "happy-dom": "^20.14.5",

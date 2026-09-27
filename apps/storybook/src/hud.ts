@@ -35,10 +35,10 @@ export class Hud {
     this.load = `gen ${genMs.toFixed(0)} ms`;
     this.render();
     const t0 = performance.now();
-    const startFrames = graph.readStats(this.stats).renderedFrames;
+    const startFrames = graph.stats(this.stats).renderedFrames;
     const check = (): void => {
       if (this.graph !== graph) return;
-      const st = graph.readStats(this.stats);
+      const st = graph.stats(this.stats);
       if (st.renderedFrames > startFrames && st.nodeCount === expectedNodes) {
         this.load = `load ${(performance.now() - t0).toFixed(0)} ms upload→frame (gen ${genMs.toFixed(0)} ms)`;
         this.render();

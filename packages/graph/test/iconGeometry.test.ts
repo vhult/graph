@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { GraphError } from "../src/api/errors";
 import type { IconSource } from "../src/api/types";
 import { ICON_CONSTANTS } from "../src/data/Layouts";
-import { buildIcons, type IconSet } from "../src/icons/IconGeometry";
+import { packIcons, parseIcons, type IconSet } from "../src/icons/IconGeometry";
 
 const { ICON_HEADER_WORDS, ICON_RECORD_WORDS, ICON_CURVE_WORDS, ICON_BANDS_MASK, ICON_FLAG_EVEN_ODD } = ICON_CONSTANTS;
 
@@ -20,9 +19,11 @@ function points(set: IconSet, icon: number): [number, number][] {
   return out;
 }
 
-const one = (icon: IconSource) => buildIcons([icon]);
+const build = (icons: IconSource[]) => packIcons(parseIcons(icons).icons);
+const one = (icon: IconSource) => build([icon]);
+const fails = (icon: IconSource) => parseIcons([icon]).failed.length === 1;
 
-describe("buildIcons", () => {
+describe("parseIcons", () => {
   it("turns a square path into four line curves inside the unit box", () => {
     const set = one({ path: "M4 4H20V20H4Z" });
     expect(set.count).toBe(1);
@@ -59,14 +60,14 @@ describe("buildIcons", () => {
 
   it("rejects anything but a command after Z instead of looping", () => {
     for (const path of ["M0 0L10 0L10 10Z 5", "M0 0L10 0L10 10Z5", "M0 0L10 0L10 10z;"]) {
-      expect(() => one({ path })).toThrow(GraphError);
+      expect(fails({ path })).toBe(true);
     }
   });
 
   it("rejects geometry that is not finite", () => {
-    expect(() => one({ path: "M0 0H1V1Z", viewBox: [0, 0, 0, 24] })).toThrow(GraphError);
-    expect(() => one({ path: "M0 0H1V1Z", viewBox: [0, 0, -24, 24] })).toThrow(GraphError);
-    expect(() => one({ path: "M0 0L1e999 0L0 1Z" })).toThrow(GraphError);
+    expect(fails({ path: "M0 0H1V1Z", viewBox: [0, 0, 0, 24] })).toBe(true);
+    expect(fails({ path: "M0 0H1V1Z", viewBox: [0, 0, -24, 24] })).toBe(true);
+    expect(fails({ path: "M0 0L1e999 0L0 1Z" })).toBe(true);
   });
 
   it("applies SVG transforms and turns shapes into paths", () => {
@@ -86,7 +87,7 @@ describe("buildIcons", () => {
   });
 
   it("rejects markup with nothing filled", () => {
-    expect(() => one({ svg: '<svg viewBox="0 0 24 24"><path fill="none" d="M0 0H4V4Z"/></svg>' })).toThrow(GraphError);
+    expect(fails({ svg: '<svg viewBox="0 0 24 24"><path fill="none" d="M0 0H4V4Z"/></svg>' })).toBe(true);
   });
 
   it("flags even-odd only when every path is even-odd", () => {
@@ -114,7 +115,7 @@ describe("buildIcons", () => {
   });
 
   it("writes one record per icon and counts every curve in the header", () => {
-    const set = buildIcons([{ path: "M0 0H24V24Z" }, { path: "M0 0H24V24H0Z" }]);
+    const set = build([{ path: "M0 0H24V24Z" }, { path: "M0 0H24V24H0Z" }]);
     expect(set.data[0]).toBe(2);
     expect(set.data[1]).toBe(record(set, 0).curves);
     expect(set.data[2]).toBe(7);
@@ -122,7 +123,22 @@ describe("buildIcons", () => {
     expect(set.maxCurves).toBe(4);
   });
 
+  it("packs a free id as an empty record and keeps the other icons whole", () => {
+    const [square] = parseIcons([{ path: "M0 0H24V24H0Z" }]).icons;
+    const set = packIcons([null, square!]);
+    expect(set.count).toBe(2);
+    expect(set.data[0]).toBe(2);
+    expect(record(set, 0)).toMatchObject({ nb: 1, count: 0 });
+    expect(record(set, 1).count).toBe(4);
+    expect(set.curves).toBe(4);
+    expect(set.data[1]).toBe(record(set, 1).curves);
+    const alone = packIcons([square!]);
+    expect(points(set, 1)).toEqual(points(alone, 0));
+  });
+
   it("names the icon that failed", () => {
-    expect(() => buildIcons([{ path: "M0 0H1V1Z" }, { path: "X" }])).toThrow(/icon 1/);
+    const { icons, failed } = parseIcons([{ path: "M0 0H1V1Z" }, { path: "X" }]);
+    expect(icons[1]).toBeNull();
+    expect(failed).toEqual([expect.stringMatching(/icon 1/)]);
   });
 });

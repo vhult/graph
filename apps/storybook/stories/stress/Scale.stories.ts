@@ -33,6 +33,7 @@ const meta: Meta<Args> = {
     describe: (a) => `Scale · communities, ${a.neighbours} nearest neighbours${a.dangerZone ? " · danger zone" : ""}`,
     load: (a) => cached(`communities:${a.nodes}:${a.neighbours}:${a.seed}`, () => communities(a.nodes, a.neighbours, a.seed)),
     dataArgs: ["neighbours", "dangerZone", "vramGB"],
+    options: () => ({ input: { pick: { edges: false } } }),
     gate: (graph, a, root) => danger.gate(graph, a, root),
     onLoad: (graph, g, a) => {
       showIcons(graph, g.nodes.count);

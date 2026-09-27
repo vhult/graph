@@ -1,3 +1,4 @@
+/** What went wrong in a `GraphError`. */
 export type GraphErrorCode =
   | "webgpu-unavailable"
   | "offscreen-canvas-unavailable"
@@ -12,9 +13,13 @@ export type GraphErrorCode =
   | "destroyed"
   | "internal";
 
+/** An engine error with a code. */
 export class GraphError extends Error {
+  /** Error class name. */
   override readonly name: string = "GraphError";
+  /** Makes an error with a code and a message. */
   constructor(
+    /** What went wrong. */
     readonly code: GraphErrorCode,
     message: string,
   ) {
@@ -22,8 +27,9 @@ export class GraphError extends Error {
   }
 }
 
-/** The platform cannot run the engine (no WebGPU, no adapter, compat-only adapter…). */
+/** This browser or GPU cannot run the engine. */
 export class UnsupportedError extends GraphError {
+  /** Error class name. */
   override readonly name = "UnsupportedError";
 }
 
@@ -38,4 +44,8 @@ const UNSUPPORTED: ReadonlySet<GraphErrorCode> = new Set([
 /** Rebuild a typed error from its serialized form (worker → main). */
 export function errorFromCode(code: GraphErrorCode, message: string): GraphError {
   return UNSUPPORTED.has(code) ? new UnsupportedError(code, message) : new GraphError(code, message);
+}
+
+export function toGraphError(e: unknown, prefix = ""): GraphError {
+  return e instanceof GraphError ? e : new GraphError("internal", prefix + (e instanceof Error ? e.message : String(e)));
 }

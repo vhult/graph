@@ -1,0 +1,12 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/api-extractor/v7/api-extractor.schema.json",
+  "mainEntryPointFilePath": "<projectFolder>/dist/types/index.d.ts",
+  "apiReport": { "enabled": true, "reportFolder": "<projectFolder>/api/", "reportTempFolder": "<projectFolder>/temp/" },
+  "docModel": { "enabled": true, "apiJsonFilePath": "<projectFolder>/temp/graph.api.json" },
+  "dtsRollup": { "enabled": false },
+  "tsdocMetadata": { "enabled": false },
+  "messages": {
+    "extractorMessageReporting": { "ae-missing-release-tag": { "logLevel": "none" }, "default": { "logLevel": "warning" } },
+    "tsdocMessageReporting": { "default": { "logLevel": "none" } }
+  }
+}

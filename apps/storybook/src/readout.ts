@@ -1,4 +1,4 @@
-import type { Graph, NodeDragEvent } from "@vhult/graph";
+import type { Graph, Hit } from "@vhult/graph";
 
 export interface ReadoutText {
   node?: (i: number) => string;
@@ -8,7 +8,7 @@ export interface ReadoutText {
 const readouts = new WeakMap<Graph, (text: ReadoutText) => void>();
 
 const numbered = (i: number) => `#${i}`;
-const at = (e: NodeDragEvent) => `${e.x.toFixed(1)}, ${e.y.toFixed(1)}`;
+const at = (x: number, y: number) => `${x.toFixed(1)}, ${y.toFixed(1)}`;
 
 export function showReadout(graph: Graph, root: HTMLElement, text: ReadoutText = {}): void {
   const retext = readouts.get(graph);
@@ -19,18 +19,15 @@ export function showReadout(graph: Graph, root: HTMLElement, text: ReadoutText =
   root.append(box);
   let node = text.node ?? numbered;
   let edge = text.edge ?? numbered;
-  let hoverNode: number | null = null;
-  let hoverEdge: number | null = null;
-  let clickNode: number | null = null;
-  let clickEdge: number | null = null;
-  let clicked = false;
+  let hover: Hit | null = null;
+  let click: Hit | null = null;
   let drag = "—";
+  let from = { x: 0, y: 0, who: "" };
+  const name = (h: Hit, empty: string) => (h.node !== null ? node(h.node) : h.edge !== null ? edge(h.edge) : empty);
   const render = () => {
-    const click = !clicked ? "—" : clickNode !== null ? node(clickNode) : clickEdge !== null ? edge(clickEdge) : "empty space";
     box.textContent = [
-      `hover node: ${hoverNode === null ? "—" : node(hoverNode)}`,
-      `hover edge: ${hoverEdge === null ? "—" : edge(hoverEdge)}`,
-      `click: ${click}`,
+      `hover: ${hover ? name(hover, "—") : "—"}`,
+      `click: ${click ? name(click, "empty space") : "—"}`,
       `drag: ${drag}`,
     ].join("\n");
   };
@@ -39,34 +36,25 @@ export function showReadout(graph: Graph, root: HTMLElement, text: ReadoutText =
     edge = t.edge ?? numbered;
     render();
   });
-  graph.on("nodeHover", (i) => {
-    hoverNode = i;
+  graph.on("hover", (h) => {
+    hover = h;
     render();
   });
-  graph.on("edgeHover", (i) => {
-    hoverEdge = i;
+  graph.on("click", (h) => {
+    click = h;
     render();
   });
-  graph.on("nodeClick", (i) => {
-    clicked = true;
-    clickNode = i;
+  graph.on("dragStart", (e) => {
+    from = { x: e.x, y: e.y, who: e.nodes.length > 1 ? `${node(e.index)} +${e.nodes.length - 1}` : node(e.index) };
+    drag = `${from.who} from ${at(e.x, e.y)}`;
     render();
   });
-  graph.on("edgeClick", (i) => {
-    clicked = true;
-    clickEdge = i;
+  graph.on("drag", (e) => {
+    drag = `${from.who} at ${at(from.x + e.dx, from.y + e.dy)}`;
     render();
   });
-  graph.on("nodeDragStart", (e) => {
-    drag = `${node(e.index)} from ${at(e)}`;
-    render();
-  });
-  graph.on("nodeDrag", (e) => {
-    drag = `${node(e.index)} at ${at(e)}`;
-    render();
-  });
-  graph.on("nodeDragEnd", (e) => {
-    drag = `${node(e.index)} dropped at ${at(e)}`;
+  graph.on("dragEnd", (e) => {
+    drag = `${from.who} dropped at ${at(from.x + e.dx, from.y + e.dy)}`;
     render();
   });
   render();

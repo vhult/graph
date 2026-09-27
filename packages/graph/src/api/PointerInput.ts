@@ -6,15 +6,18 @@
  */
 import { INPUT, MOD } from "../bridge/InputRing";
 
-export type InputSink = (type: number, t: number, x: number, y: number, dx: number, dy: number, buttons: number, mods: number) => void;
+export type InputSink = (type: number, t: number, x: number, y: number, dx: number, dy: number, buttons: number, mods: number, button: number) => void;
 
 const LINE_PX = 16;
 
 function mods(e: MouseEvent): number {
-  return (e.shiftKey ? MOD.SHIFT : 0) | (e.ctrlKey ? MOD.CTRL : 0) | (e.altKey ? MOD.ALT : 0) | (e.metaKey ? MOD.META : 0);
+  const touch = (e as PointerEvent).pointerType === "touch" ? MOD.TOUCH : 0;
+  return (e.shiftKey ? MOD.SHIFT : 0) | (e.ctrlKey ? MOD.CTRL : 0) | (e.altKey ? MOD.ALT : 0) | (e.metaKey ? MOD.META : 0) | touch;
 }
 
 export class PointerInput {
+  menu = false;
+  zoom = true;
   private left = 0;
   private top = 0;
   private readonly controller = new AbortController();
@@ -37,6 +40,8 @@ export class PointerInput {
     canvas.addEventListener("pointercancel", this.onUp, passive);
     canvas.addEventListener("pointerleave", this.onLeave, passive);
     canvas.addEventListener("wheel", this.onWheel, { signal: this.controller.signal, passive: false });
+    canvas.addEventListener("dblclick", this.onDoubleClick, passive);
+    canvas.addEventListener("contextmenu", this.onMenu, opts);
     window.addEventListener("scroll", this.refreshRect, { signal: this.controller.signal, passive: true, capture: true });
     this.refreshRect();
   }
@@ -51,13 +56,13 @@ export class PointerInput {
     this.controller.abort();
   }
 
-  private emit(type: number, e: MouseEvent, x: number, y: number, dx: number, dy: number, buttons: number): void {
+  private emit(type: number, e: MouseEvent, x: number, y: number, dx: number, dy: number, buttons: number, button: number): void {
     const k = this.pixelRatio();
-    this.sink(type, e.timeStamp, (x - this.left) * k, (y - this.top) * k, dx, dy, buttons, mods(e));
+    this.sink(type, e.timeStamp, (x - this.left) * k, (y - this.top) * k, dx, dy, buttons, mods(e), button);
   }
 
   private push(type: number, e: MouseEvent, dx = 0, dy = 0): void {
-    this.emit(type, e, e.clientX, e.clientY, dx, dy, e.buttons);
+    this.emit(type, e, e.clientX, e.clientY, dx, dy, e.buttons, e.button);
   }
 
   private pushPinch(e: PointerEvent): void {
@@ -68,7 +73,7 @@ export class PointerInput {
     const by = this.touchY[1]!;
     const dx = bx - ax;
     const dy = by - ay;
-    this.sink(INPUT.PINCH, e.timeStamp, ((ax + bx) * 0.5 - this.left) * k, ((ay + by) * 0.5 - this.top) * k, Math.sqrt(dx * dx + dy * dy) * k, 0, e.buttons, mods(e));
+    this.sink(INPUT.PINCH, e.timeStamp, ((ax + bx) * 0.5 - this.left) * k, ((ay + by) * 0.5 - this.top) * k, Math.sqrt(dx * dx + dy * dy) * k, Math.atan2(dy, dx), e.buttons, mods(e), e.button);
   }
 
   private slotOf(id: number): number {
@@ -118,7 +123,7 @@ export class PointerInput {
       this.touchId[slot] = -1;
       if (pinching) {
         const other = slot ^ 1;
-        this.emit(INPUT.POINTER_DOWN, e, this.touchX[other]!, this.touchY[other]!, 0, 0, 1);
+        this.emit(INPUT.POINTER_DOWN, e, this.touchX[other]!, this.touchY[other]!, 0, 0, 1, 0);
         return;
       }
     }
@@ -130,7 +135,18 @@ export class PointerInput {
     this.push(INPUT.POINTER_LEAVE, e);
   };
 
+  private readonly onDoubleClick = (e: MouseEvent): void => {
+    this.push(INPUT.DBLCLICK, e);
+  };
+
+  private readonly onMenu = (e: MouseEvent): void => {
+    if (!this.menu) return;
+    e.preventDefault();
+    this.push(INPUT.MENU, e);
+  };
+
   private readonly onWheel = (e: WheelEvent): void => {
+    if (!this.zoom) return;
     e.preventDefault();
     const scale = e.deltaMode === 1 ? LINE_PX : e.deltaMode === 2 ? this.canvas.clientHeight : 1;
     this.push(INPUT.WHEEL, e, e.deltaX * scale, e.deltaY * scale);

@@ -4,45 +4,32 @@
  * and never produce a message in steady state.
  */
 import type { GraphErrorCode } from "../api/errors";
-import type { BenchmarkOptions, BenchmarkResult, CameraView, EdgeDebugMode, GraphCaps, HoverStyle, IconSource, LabelSnapshot, RGBA } from "../api/types";
-import type { NodeArrays } from "../data/GraphStore";
+import type { ResolvedInput } from "../api/input";
+import type { ResolvedStyle } from "../api/style";
+import type { BenchmarkOptions, CameraEasing, CameraView, DebugTune, GraphCaps, GraphInput, GraphStyle, Hit, IconSource, PanEvent, RotateEvent, SelectEvent, WorldBounds, ZoomEvent } from "../api/types";
+import type { EdgeArrays, NodeArrays } from "../data/GraphStore";
 
 export type DebugLevel = 0 | 1 | 2;
 
-export type DragEventName = "nodeDragStart" | "nodeDrag" | "nodeDragEnd";
+export type DragEventName = "dragStart" | "drag" | "dragEnd";
+
+export type HitEventName = "hover" | "click" | "doubleClick" | "contextMenu";
+
+export type GestureEventName = "pan" | "zoom" | "rotate";
+
+export type WorkerEventName = HitEventName | DragEventName | GestureEventName | "select" | "view";
+
+export const WORKER_EVENTS: readonly WorkerEventName[] = ["hover", "click", "doubleClick", "contextMenu", "dragStart", "drag", "dragEnd", "select", "pan", "zoom", "rotate", "view"];
+
+export type GestureMessage = { t: "pan"; event: PanEvent } | { t: "zoom"; event: ZoomEvent } | { t: "rotate"; event: RotateEvent };
 
 export type MessageTotals = Record<string, [count: number, totalMs: number, maxMs: number]>;
 
 export interface InitOptions {
-  background: RGBA;
-  transparent: boolean;
-  controls: boolean;
-  nodeScale: number;
-  /** Device-px spacing below which nodes merge into LOD clusters; 0 disables. */
-  lodTargetPx: number;
-  /** Width of an edge with no per-edge width, device px. */
-  edgeWidth: number;
-  /** Tint for edges with no per-edge colour, straight alpha. */
-  edgeColor: RGBA;
-  /** Compile the arrowhead into the edge pipeline (wider quad, more fill). */
-  directedEdges: boolean;
-  /** How much crowded areas of edges are thinned: lower draws fewer edges; 0 = never. */
-  edgeMaxOverdraw: number;
-  /** Edges this short on screen or shorter are not drawn, CSS px. */
-  edgeMinLengthPx: number;
-  edgeDebug: EdgeDebugMode;
-  /** Node label size, CSS px; edge labels are a little smaller. */
-  labelSize: number;
-  labelPadding: number;
-  labelFont: string;
-  pickRate: number;
-  pickRadius: number;
-  edgePickRadius: number;
-  hoverStyle: Required<HoverStyle> | null;
-  nodeDrag: boolean;
-  iconScale: number;
-  iconMinPx: number;
+  style: ResolvedStyle;
+  input: ResolvedInput;
   timeOrigin: number;
+  nodeReserve: number;
 }
 
 export type ToWorker =
@@ -61,23 +48,39 @@ export type ToWorker =
   | { t: "resize"; width: number; height: number; pixelRatio: number }
   | { t: "wake" }
   /** Fallback input path (no SharedArrayBuffer): numbers only, same fields as a ring record. */
-  | { t: "input"; r: [type: number, time: number, x: number, y: number, dx: number, dy: number, buttons: number, mods: number] }
-  | ({ t: "nodes"; count: number } & NodeArrays)
-  | ({ t: "updateNodes"; start: number } & NodeArrays)
+  | { t: "inputRecord"; r: [type: number, time: number, x: number, y: number, dx: number, dy: number, buttons: number, mods: number, button: number] }
+  | { t: "input"; input: GraphInput }
+  | ({ t: "nodes"; count: number; labels?: string[] } & NodeArrays)
+  | ({ t: "updateNodes"; start: number; labels?: string[] | null } & NodeArrays)
+  | ({ t: "updateNodesAt"; indices: Uint32Array; labels?: string[] } & NodeArrays)
+  | ({ t: "addNodes"; indices: Uint32Array; slots: number; labels?: string[] } & NodeArrays)
+  | { t: "removeNodes"; id: number; indices: Uint32Array }
+  | { t: "compactNodes"; remap: Uint32Array }
+  | { t: "flagNodes"; indices: Uint32Array | null; flags: number; on: boolean }
   | { t: "defineIcons"; id: number; icons: IconSource[] }
-  | { t: "edges"; count: number; indices?: Uint32Array; styles?: Uint32Array; colors?: Uint32Array }
-  | { t: "nodeLabels"; labels: string[] }
-  | { t: "edgeLabels"; labels: string[] }
+  | { t: "setIcons"; id: number; ids: Uint16Array; icons: IconSource[] }
+  | { t: "removeIcons"; ids: Uint16Array }
+  | ({ t: "edges"; count: number; labels?: string[] } & EdgeArrays)
+  | ({ t: "addEdges"; at: Uint32Array; count: number; labels?: string[] } & EdgeArrays)
+  | { t: "removeEdges"; indices: Uint32Array }
+  | ({ t: "updateEdgesAt"; at: Uint32Array; labels?: string[] } & EdgeArrays)
+  | ({ t: "updateEdges"; labels?: string[] | null } & EdgeArrays)
+  | { t: "flagEdges"; indices: Uint32Array | null; flags: number; on: boolean }
+  | { t: "compactEdges"; remap: Uint32Array }
   | { t: "nodeStream"; buffer: SharedArrayBuffer; count: number; positions: boolean; colors: boolean; zIndex: boolean }
-  | { t: "view"; view: Partial<CameraView> }
-  | { t: "fit"; padding: number }
-  | { t: "background"; rgba: RGBA }
-  | { t: "nodeScale"; value: number }
+  | { t: "view"; view: Partial<CameraView>; duration?: number; easing?: CameraEasing }
+  | { t: "fit"; padding: number; nodes?: Uint32Array; bounds?: WorldBounds; duration: number }
+  | { t: "rotate"; angle: number; x?: number; y?: number; duration: number }
+  | { t: "limits"; minZoom: number; maxZoom: number; bounds: WorldBounds | null }
+  | { t: "listen"; events: WorkerEventName[] }
+  | { t: "style"; style: GraphStyle }
   | { t: "render" }
   | { t: "benchmark"; id: number; options: BenchmarkOptions }
   | { t: "labelSnapshot"; id: number }
-  | { t: "pick"; hover: number; click: number; drag: boolean }
-  | { t: "nodeDrag"; on: boolean }
+  | { t: "snapshot"; id: number; type: string }
+  | { t: "queryAt"; id: number; x: number; y: number }
+  | { t: "queryInside"; id: number; points: Float32Array }
+  | { t: "tune"; tune: DebugTune }
   | { t: "debug"; level: DebugLevel }
   | { t: "debugRecord"; on: boolean }
   | { t: "destroy" };
@@ -87,12 +90,14 @@ export type FromWorker =
   | { t: "error"; code: GraphErrorCode; message: string; fatal: boolean }
   /** Fallback state snapshot when the state block is not shared. */
   | { t: "state"; data: Float64Array }
-  | { t: "benchmark"; id: number; result: BenchmarkResult }
-  | { t: "labelSnapshot"; id: number; snapshot: LabelSnapshot }
-  | { t: "defineIcons"; id: number; code?: GraphErrorCode; message?: string }
-  | { t: "hover"; node?: number; edge?: number }
-  | { t: "click"; node?: number; edge?: number }
-  | { t: "drag"; event: DragEventName; index: number; x: number; y: number }
+  | { t: "reply"; id: number; value?: unknown; code?: GraphErrorCode; message?: string }
+  | { t: "edgesRemoved"; id: number; edges: Uint32Array }
+  | { t: HitEventName; hit: Hit }
+  | GestureMessage
+  | { t: "dragStart"; index: number; nodes: Uint32Array; x: number; y: number }
+  | { t: "drag" | "dragEnd"; index: number; dx: number; dy: number }
+  | ({ t: "select" } & SelectEvent)
+  | { t: "view"; x: number; y: number; zoom: number; rotation: number }
   | { t: "debugRing"; columns: string[]; gpuGroups: string[]; frames: number; buffer: SharedArrayBuffer | null }
   | { t: "debugRows"; data: Float64Array }
   | { t: "debugTotals"; messages: MessageTotals }

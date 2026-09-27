@@ -112,13 +112,13 @@ export class Water {
       this.edgeX[e] = dx / l2;
       this.edgeY[e] = dy / l2;
     }
-    this.stream = graph.streamNodes({ colors: true });
+    this.stream = graph.nodes.stream({ colors: true });
     this.box = document.createElement("div");
     this.box.className = "stage-note";
     this.box.style.cssText = "top: 8px; right: 8px; left: auto; bottom: auto";
     root.append(this.box);
-    this.offHover = graph.on("nodeHover", (i) => {
-      if (i !== null) this.pending.push(i);
+    this.offHover = graph.on("hover", (h) => {
+      if (h.node !== null) this.pending.push(h.node);
     });
     this.raf = requestAnimationFrame(this.tick);
   }

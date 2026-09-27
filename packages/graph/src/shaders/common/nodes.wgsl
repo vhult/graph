@@ -47,15 +47,12 @@ fn unpackInstance(w : vec4<u32>) -> NodeInstance {
   return NodeInstance(bitcast<vec2<f32>>(w.xy), bitcast<f32>(w.z), w.w);
 }
 
-override ICON_SCALE : f32 = 0.6;
-override ICON_MIN_PX : f32 = 6.0;
-
 fn iconSidePx(radiusPx : f32) -> f32 {
-  return 2.0 * ICON_SCALE * radiusPx;
+  return 2.0 * frame.iconScale * radiusPx;
 }
 
 fn hasIconRoom(radiusPx : f32) -> bool {
-  return iconSidePx(radiusPx) >= ICON_MIN_PX;
+  return iconSidePx(radiusPx) >= frame.iconMinPx;
 }
 
 fn nodeIconWord(i : u32, count : u32) -> u32 {

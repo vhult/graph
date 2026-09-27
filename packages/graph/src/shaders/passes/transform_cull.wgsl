@@ -405,7 +405,11 @@ fn cull_scatter(
       if (NODE_LAYERS) {
         r = packInstanceLayer(r, nodeLayer(i));
       }
-      let w = packInstance(worldToScreen(nodePos[i]), r, lodFade(nodeColor[i], p.y));
+      var fade = p.y;
+      if ((frame.flags & FRAME_FLAG_DIMMED) != 0u && (nodeState[i] & STATE_DIMMED) != 0u) {
+        fade *= frame.dimmedAlpha;
+      }
+      let w = packInstance(worldToScreen(nodePos[i]), r, lodFade(nodeColor[i], fade));
       let at = slot * 4u;
       instances[at] = w.x;
       instances[at + 1u] = w.y;

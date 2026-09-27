@@ -30,11 +30,11 @@ const meta: Meta<Args> = {
   render: renderGraph<Args>({
     describe: () => "Galaxy · stars on density-wave orbits, positions computed on the GPU and streamed",
     load,
-    options: () => ({ nodeDrag: false }),
+    options: () => ({ input: { drag: false, select: false } }),
     onLoad: (graph, g, a) => {
       stop();
       const id = run;
-      graph.setBackground([0, 0, 0.012, 1]);
+      graph.style.set({ background: [0, 0, 0.012, 1] });
       const orbits = stars(a).data.orbits;
       void GpuMotion.start(graph, { count: g.nodes.count, data: orbits, params: GALAXY_PARAMS, wgsl: GALAXY_WGSL }).then((m) => {
         if (id !== run) return m.stop();

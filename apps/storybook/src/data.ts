@@ -103,11 +103,11 @@ export function graphText(name: GraphName, count: number, g: GraphDataset): Grap
 
 export function setGraph(graph: Graph, name: GraphName, count: number, labels: { nodes: boolean; edges: boolean }): { data: GraphDataset; genMs: number } {
   const { data, genMs } = loadGraph(name, count);
-  graph.setNodes(data.nodes, { copy: true });
-  graph.setEdges(data.edges, { copy: true });
+  graph.nodes.set(data.nodes, { copy: true });
+  graph.edges.set(data.edges, { copy: true });
   const text = labels.nodes || labels.edges ? graphText(name, count, data) : null;
-  graph.setNodeLabels(labels.nodes && text ? text.nodes : []);
-  graph.setEdgeLabels(labels.edges && text ? text.edges : []);
+  graph.nodes.updateAll({ labels: labels.nodes && text ? text.nodes : null });
+  graph.edges.updateAll({ labels: labels.edges && text ? text.edges : null });
   return { data, genMs };
 }
 

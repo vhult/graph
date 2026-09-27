@@ -27,7 +27,7 @@ const meta: Meta<Args> = {
   title: "Experiments/Black hole",
   render: renderGraph<Args>({
     describe: () => "Black hole · lensed accretion disk, positions computed on the GPU and streamed",
-    options: () => ({ controls: false, transparent: true, nodeDrag: false }),
+    options: () => ({ input: { pan: false, zoom: false, drag: false, select: false }, style: { background: [0, 0, 0, 0] } }),
     backdrop: "radial-gradient(ellipse at center, #5a4744 0%, #33282a 22%, #1a1517 48%, #0b090a 80%)",
     load: (a) => {
       const l = hole(a);
@@ -36,8 +36,7 @@ const meta: Meta<Args> = {
     onLoad: (graph, g, a) => {
       stop();
       const id = run;
-      graph.setBackground([0, 0, 0, 0]);
-      frame = () => graph.camera.setView({ x: 0, y: 0, rotation: 0, zoom: (innerWidth * devicePixelRatio) / (2 * HOLE.frame * HOLE.scale) });
+      frame = () => graph.camera.set({ x: 0, y: 0, rotation: 0, zoom: innerWidth / (2 * HOLE.frame * HOLE.scale) });
       frame();
       addEventListener("resize", frame);
       const h = hole(a).data;

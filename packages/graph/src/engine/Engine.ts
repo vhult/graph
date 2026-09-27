@@ -7,31 +7,39 @@
  *   - Input wakes it via the InputRing's SLEEPING flag (one message per wake)
  *     or via any API message.
  */
-import { GraphError } from "../api/errors";
-import type { BenchmarkOptions, BenchmarkResult, CameraView, GraphCaps, IconSource, LabelSnapshot, RGBA } from "../api/types";
-import { INPUT, type InputRing, type InputRecord } from "../bridge/InputRing";
+import { GraphError, toGraphError } from "../api/errors";
+import { mergeInput, type ResolvedInput } from "../api/input";
+import { mergeStyle, type ResolvedStyle } from "../api/style";
+import type { BenchmarkOptions, CameraEasing, CameraView, DebugTune, GesturePhase, GraphCaps, GraphInput, GraphStyle, Hit, IconSource, SelectEvent, WorldBounds } from "../api/types";
+import { INPUT, modKeys, type InputRing, type InputRecord } from "../bridge/InputRing";
 import type { StreamSlots } from "../bridge/StreamSlots";
-import type { DragEventName, InitOptions } from "../bridge/protocol";
+import type { GestureMessage, HitEventName, InitOptions, WorkerEventName } from "../bridge/protocol";
 import { STATE_SLOT } from "../bridge/SharedState";
-import { Camera2D } from "../camera/Camera2D";
+import { Camera2D, nearestAngle, wrapAngle } from "../camera/Camera2D";
+import { CameraAnimation } from "../camera/CameraAnimation";
 import { CameraPath } from "../camera/CameraPath";
-import { Controls } from "../camera/Controls";
+import { Controls, type Gesture } from "../camera/Controls";
 import { GraphStore, type EdgeArrays, type NodeArrays } from "../data/GraphStore";
+import { packRgba } from "../data/Pack";
+import { CONSTANTS, PICK_CONSTANTS } from "../data/Layouts";
 import { createContractLayouts } from "../gpu/BindLayouts";
 import { readCaps } from "../gpu/Caps";
 import { createGpu, type Gpu } from "../gpu/Device";
 import { FrameGraph, type EncodeTimes, type FrameContext } from "../gpu/FrameGraph";
 import { FrameUniform, type FrameInputs } from "../gpu/FrameUniform";
 import { GraphBuffers } from "../gpu/GraphBuffers";
+import { Lazy } from "../gpu/Lazy";
 import { PermuteKernels } from "../gpu/PermuteKernels";
 import { Profiler, type ProfileSample } from "../gpu/Profiler";
 import { IconAtlas } from "../icons/IconAtlas";
 import { Labels } from "../labels/Labels";
-import { EDGE_DEBUG_MODES, EdgeCullPass } from "../passes/EdgeCullPass";
+import { EdgeCullPass, RESTYLE_STATES, RESTYLE_STYLES } from "../passes/EdgeCullPass";
 import { LabelDrawPass } from "../passes/LabelDrawPass";
 import { LabelPass } from "../passes/LabelPass";
 import { HoverPass } from "../passes/HoverPass";
-import { PICKED_EDGES, PICKED_NODES, PickPass, type PickRequest } from "../passes/PickPass";
+import { PickPass, type PickRequest } from "../passes/PickPass";
+import { QueryPass, type QueryDone, type QueryFail } from "../passes/QueryPass";
+import { SelectionShapePass } from "../passes/SelectionShapePass";
 import { EdgeGeometryPass } from "../passes/EdgeGeometryPass";
 import { EdgeSortPass } from "../passes/EdgeSortPass";
 import { NodeGeometryPass } from "../passes/NodeGeometryPass";
@@ -40,10 +48,11 @@ import { SortPass } from "../passes/SortPass";
 import { TransformCullPass } from "../passes/TransformCullPass";
 import { UploadPass } from "../passes/UploadPass";
 import { Benchmark } from "./Benchmark";
-import { Dirty } from "./Dirty";
-import { Press } from "./Press";
+import { Dirty, edgeUpdateDirty } from "./Dirty";
+import { Interaction } from "./Interaction";
 import { CPU, Probe, type ProbeSink } from "./Probe";
 import { Telemetry } from "./Telemetry";
+import { applyTune, DEFAULT_TUNE, sameTune, type Tunable, type Tune } from "./Tune";
 
 export interface EngineInit {
   canvas: OffscreenCanvas;
@@ -56,12 +65,13 @@ export interface EngineInit {
   gpu: GPU | undefined;
   requestFrame: (cb: (t: number) => void) => void;
   onError: (e: GraphError, fatal: boolean) => void;
-  onBenchmark: (id: number, result: BenchmarkResult, transfer: ArrayBuffer[]) => void;
-  onLabelSnapshot: (id: number, snapshot: LabelSnapshot, transfer: ArrayBuffer[]) => void;
-  onIcons: (id: number, error: GraphError | null) => void;
-  onHover: (node: number | undefined, edge: number | undefined) => void;
-  onClick: (node: number | undefined, edge: number | undefined) => void;
-  onDrag: (event: DragEventName, index: number, x: number, y: number) => void;
+  onReply: (id: number, value: unknown, error: GraphError | null, transfer?: ArrayBuffer[]) => void;
+  onHit: (event: HitEventName, hit: Hit) => void;
+  onGesture: (msg: GestureMessage) => void;
+  onDragStart: (index: number, nodes: Uint32Array, x: number, y: number) => void;
+  onDrag: (event: "drag" | "dragEnd", index: number, dx: number, dy: number) => void;
+  onView: (x: number, y: number, zoom: number, rotation: number) => void;
+  onSelect: (event: SelectEvent) => void;
   probeSink: ProbeSink;
 }
 
@@ -72,14 +82,13 @@ interface Passes {
   edges: EdgeGeometryPass;
   edgeCull: EdgeCullPass;
   labels: LabelPass;
+  labelDraw: LabelDrawPass;
 }
 
 const CPU_EMA = 0.1;
 const DEFAULT_WARMUP_FRAMES = 10;
 const FIT_PADDING_CSS_PX = 24;
 const BENCH_TIMING = { off: 0, passes: 1, full: 2 } as const;
-const CAMERA_SETTLE_MS = 50;
-const CLICK_SLOP_CSS_PX = 3;
 const NODE_DIRTY = [
   ["positions", Dirty.TOPOLOGY],
   ["sizes", Dirty.TOPOLOGY],
@@ -99,11 +108,20 @@ const UPDATE_DIRTY = [
   ["iconColors", Dirty.STYLE],
 ] as const satisfies readonly (readonly [keyof NodeArrays, number])[];
 const PICK_DIRTY = Dirty.TOPOLOGY | Dirty.POSITIONS | Dirty.MOVED | Dirty.CAMERA | Dirty.STYLE | Dirty.STATE | Dirty.RESIZE | Dirty.EDGES | Dirty.LABELLED;
+const TEXT_DIRTY = Dirty.LABEL_QUERY | Dirty.LABELS | Dirty.LABELLED;
+const LOOK_FLAGS = CONSTANTS.STATE_SELECTED | CONSTANTS.STATE_FOCUSED;
 
-/** Straight-alpha RGBA in 0..1 to an rgba8unorm word (R in the low byte). */
-function packRgbaTuple(c: RGBA): number {
-  const q = (v: number) => Math.max(0, Math.min(255, Math.round(v * 255)));
-  return (q(c[0]) | (q(c[1]) << 8) | (q(c[2]) << 16) | (q(c[3]) << 24)) >>> 0;
+function dirtyFor(table: readonly (readonly [keyof NodeArrays, number])[], arrays: NodeArrays): number {
+  let dirty = 0;
+  for (const [k, flag] of table) if (arrays[k]) dirty |= flag;
+  return dirty;
+}
+
+function readView(c: Camera2D, out: CameraView): void {
+  out.x = c.x;
+  out.y = c.y;
+  out.zoom = c.zoom;
+  out.rotation = c.rotation;
 }
 
 export class Engine {
@@ -111,6 +129,19 @@ export class Engine {
   readonly probe: Probe;
   private readonly camera = new Camera2D();
   private readonly controls = new Controls();
+  private readonly anim = new CameraAnimation();
+  private readonly animFrom: CameraView = { x: 0, y: 0, zoom: 1, rotation: 0 };
+  private readonly animTo: CameraView = { x: 0, y: 0, zoom: 1, rotation: 0 };
+  private readonly animView: CameraView = { x: 0, y: 0, zoom: 1, rotation: 0 };
+  private readonly pivot = { wx: 0, wy: 0, sx: 0, sy: 0, on: false };
+  private viewEvents = false;
+  private panEvents = false;
+  private zoomEvents = false;
+  private rotateEvents = false;
+  private gestureTimer: ReturnType<typeof setTimeout> | undefined;
+  private minZoomCss = 0;
+  private maxZoomCss = Infinity;
+  private limitBounds: WorldBounds | null = null;
   private readonly frameGraph: FrameGraph;
   private readonly frameUniform: FrameUniform;
   private readonly telemetry: Telemetry;
@@ -118,12 +149,15 @@ export class Engine {
   private readonly frameCtx: FrameContext;
   private readonly frameInputs: FrameInputs;
   private readonly submitList: GPUCommandBuffer[] = [];
-  private readonly inputRec: InputRecord = { type: 0, t: 0, x: 0, y: 0, dx: 0, dy: 0, buttons: 0, mods: 0 };
+  private readonly inputRec: InputRecord = { type: 0, t: 0, x: 0, y: 0, dx: 0, dy: 0, buttons: 0, mods: 0, button: -1 };
   private readonly applyInput = (rec: InputRecord): void => this.input(rec);
+  private readonly softFail = (e: unknown): void => this.init.onError(toGraphError(e), false);
   private readonly startTime = performance.now();
   private readonly encodeTimes: EncodeTimes;
 
   private dirty = Dirty.RESIZE;
+  private style: ResolvedStyle;
+  private transparent: boolean;
   private framePending = false;
   private stream: StreamSlots | null = null;
   private streamedPositions: Float32Array | null = null;
@@ -148,38 +182,23 @@ export class Engine {
   private bench: Benchmark | null = null;
   private labelSolves = 0;
   private benchTimer: ReturnType<typeof setTimeout> | undefined;
-  private pick: PickPass | null = null;
-  private hover: HoverPass | null = null;
-  private pickLoading = false;
+  private readonly pick = new Lazy(() => PickPass.create(this.gpu.device, this.layouts, this.active).then((p) => this.adopt(p, p.pipelines)));
+  private readonly hover = new Lazy(() =>
+    HoverPass.create(this.gpu.device, this.gpu.format, this.layouts, this.graph, this.active, (b) => this.graph.retireAfterSubmit(b)).then((h) => this.adopt(h, h.edgePipes)),
+  );
+  private readonly shapePass = new Lazy(() => SelectionShapePass.create(this.gpu.device, this.gpu.format, this.layouts));
+  private readonly interaction: Interaction;
+  private query: QueryPass | null = null;
+  private readonly snapJobs: { id: number; type: string }[] = [];
+  private inputState: ResolvedInput;
   private pickEdges = false;
-  private hoverKinds = 0;
-  private clickKinds = 0;
-  private dragEvents = false;
-  private nodeDrag = false;
-  private dragNode = -1;
-  private pressEngine = -1;
-  private grabX = 0;
-  private grabY = 0;
-  private dragX = 0;
-  private dragY = 0;
-  private readonly dragPos = new Float32Array(2);
+  private moveEnding = false;
   private readonly world = { x: 0, y: 0 };
-  private readonly press = new Press({
-    startDrag: (node, nodeScale) => this.startDrag(node, nodeScale),
-    endDrag: () => this.endDrag(),
-    stopHold: (pan) => this.stopHold(pan),
-    click: (node, edge) => this.emitClick(node, edge),
-  });
-  private pickWanted = false;
-  private pickDue = 0;
-  private pickTimer: ReturnType<typeof setTimeout> | undefined;
-  private pickSeq = 0;
-  private readonly pickInterval: number;
+  private readonly wanted: Tune = { ...DEFAULT_TUNE };
+  private active: Tune = { ...DEFAULT_TUNE };
+  private pipesLoading = false;
   private dataGen = 0;
-  private cameraMs = -Infinity;
   private frameGen = -1;
-  private hoverNode = -1;
-  private hoverEdge = -1;
   private readonly pickRequest: PickRequest = { x: 0, y: 0, radiusPx: 0, edgeRadiusPx: 0, nodes: false, edges: false, shapes: false, layers: false, edgeColors: false, token: 0 };
 
   private constructor(
@@ -197,8 +216,11 @@ export class Engine {
     this.frameGraph = frameGraph;
     this.caps = readCaps(gpu.adapter, device, init.ring !== null, profiler.slotNames);
 
+    this.style = init.options.style;
+    this.inputState = init.options.input;
+    this.transparent = this.style.background[3] < 1;
     this.context = init.canvas.getContext("webgpu") as GPUCanvasContext;
-    this.context.configure({ device, format, alphaMode: init.options.transparent ? "premultiplied" : "opaque" });
+    this.context.configure({ device, format, alphaMode: this.transparent ? "premultiplied" : "opaque" });
 
     this.frameUniform = new FrameUniform(device, layouts.frame);
     graph.flush(); // create the (empty) graph buffers + bind group
@@ -216,9 +238,44 @@ export class Engine {
     );
     this.encodeTimes = { row: this.probe.row, base: this.probe.encodeBase };
 
-    this.controls.enabled = init.options.controls;
-    this.pickInterval = 1000 / Math.max(1, init.options.pickRate);
     this.pixelRatio = init.pixelRatio;
+    this.interaction = new Interaction(
+      {
+        store,
+        camera: this.camera,
+        controls: this.controls,
+        events: init,
+        streamed: () => this.streamedPositions,
+        pickFree: () => this.pickFree(),
+        submitPick: (x, y, nodes, edges, token) => this.submitPick(x, y, nodes, edges, token),
+        findInside: (points, done, fail) => this.findInside(points, done, fail),
+        loadShape: () =>
+          this.lazyPass(this.shapePass, (p) => {
+            p.setColors(this.style.selection.fill, this.style.selection.stroke);
+            this.passes.labelDraw.overlay = p;
+            this.interaction.redrawShape();
+          }),
+        drawShape: (points, count) => this.drawShape(points, count),
+        hideShape: () => {
+          this.shapePass.value?.hide();
+          this.markDirty(Dirty.HOVER);
+        },
+        showHover: (node, edge, which, nodeScale) => this.showHover(node, edge, which, nodeScale),
+        flagNodes: (indices, flags, on) => this.flagNodes(indices, flags, on),
+        markDirty: (flags) => this.markDirty(flags),
+        startMove: (auto) => {
+          this.moveEnding = false;
+          if (!auto) return;
+          this.passes.cull.moveNodes();
+          this.passes.edgeCull.moveNodes(store.edgeCount);
+        },
+        endMove: () => (this.moveEnding = true),
+        stopHold: (pan, x, y) => this.stopHold(pan, x, y),
+        wake: () => this.wake(),
+      },
+      this.inputState,
+    );
+    this.interaction.setHoverLook(this.style.hover !== false);
     this.frameCtx = {
       frameBindGroup: this.frameUniform.bindGroup,
       graphBindGroup: graph.bindGroup,
@@ -236,10 +293,13 @@ export class Engine {
       pointerY: -1,
       nodeCount: 0,
       edgeCount: 0,
-      nodeScale: init.options.nodeScale,
-      edgeWidth: init.options.edgeWidth,
-      edgeColor: packRgbaTuple(init.options.edgeColor),
+      nodeScale: this.style.nodeScale,
+      edgeWidth: this.style.edge.width,
+      edgeColor: packRgba(...this.style.edge.color),
       flags: 0,
+      iconScale: this.style.icon.scale,
+      iconMinPx: this.style.icon.minPx,
+      dimmedAlpha: this.style.dimmed.alpha,
     };
 
     passes.labels.onShown = (shown, count) => {
@@ -250,11 +310,14 @@ export class Engine {
     };
     passes.labels.requestSolve = () => this.markDirty(Dirty.LABEL_QUERY);
     passes.labels.onSnapshot = (id, snapshot) =>
-      init.onLabelSnapshot(id, snapshot, [snapshot.center.buffer, snapshot.halfWidth.buffer, snapshot.halfHeight.buffer, snapshot.rank.buffer, snapshot.size.buffer, snapshot.index.buffer, snapshot.decision.buffer] as ArrayBuffer[]);
+      init.onReply(id, snapshot, null, [snapshot.center.buffer, snapshot.halfWidth.buffer, snapshot.halfHeight.buffer, snapshot.rank.buffer, snapshot.size.buffer, snapshot.index.buffer, snapshot.decision.buffer] as ArrayBuffer[]);
 
-    this.setBackground(init.options.background);
+    const bg = this.style.background;
+    this.frameGraph.setClearColor(bg[0], bg[1], bg[2], bg[3]);
+    this.labels.setColor(packRgba(...this.style.label.color));
     this.resize(init.width, init.height, init.pixelRatio);
-    if (init.options.nodeDrag) this.setNodeDrag(true);
+    this.syncModes();
+    this.syncPick();
 
     device.lost.then((info) => {
       if (this.destroyed) return;
@@ -271,25 +334,18 @@ export class Engine {
     const layouts = createContractLayouts(device);
     const profiler = new Profiler(device, device.features.has("timestamp-query"));
     const frameGraph = new FrameGraph(profiler);
-    const store = new GraphStore();
+    const store = new GraphStore(init.options.nodeReserve);
     const kernels = await PermuteKernels.create(device);
     const graph = new GraphBuffers(device, layouts.graph, store, kernels);
-    const edgeOpts = {
-      directed: init.options.directedEdges,
-      maxOverdraw: init.options.edgeMaxOverdraw,
-      minLengthPx: init.options.edgeMinLengthPx,
-      debug: Math.max(0, EDGE_DEBUG_MODES.indexOf(init.options.edgeDebug)),
-    };
-    const iconOpts = { scale: init.options.iconScale, minPx: init.options.iconMinPx };
     const [sort, cull, nodes, edgeSort, edgeCull, edges] = await Promise.all([
       SortPass.create(device, layouts, graph, store.bounds),
-      TransformCullPass.create(device, layouts, init.options.lodTargetPx, iconOpts),
-      NodeGeometryPass.create(device, format, layouts, iconOpts),
+      TransformCullPass.create(device, layouts, DEFAULT_TUNE),
+      NodeGeometryPass.create(device, format, layouts),
       EdgeSortPass.create(device, graph, store.bounds),
-      EdgeCullPass.create(device, layouts, edgeOpts),
-      EdgeGeometryPass.create(device, format, layouts, edgeOpts),
+      EdgeCullPass.create(device, layouts, DEFAULT_TUNE),
+      EdgeGeometryPass.create(device, format, layouts, DEFAULT_TUNE),
     ]);
-    const order = await NodeOrderPass.create(device, cull, (b) => graph.retireAfterSubmit(b), iconOpts);
+    const order = await NodeOrderPass.create(device, layouts.frame, cull, (b) => graph.retireAfterSubmit(b));
     nodes.order = order;
     // Compute runs in stage order: upload, node sort, edge sort, node cull, edge cull.
     frameGraph.addCompute(new UploadPass(graph));
@@ -298,7 +354,8 @@ export class Engine {
     frameGraph.addCompute(cull);
     frameGraph.addCompute(order);
     frameGraph.addCompute(edgeCull);
-    const labelState = new Labels(device, { sizeCssPx: init.options.labelSize, paddingCssPx: init.options.labelPadding, font: init.options.labelFont });
+    const label = init.options.style.label;
+    const labelState = new Labels(device, { sizeCssPx: label.size, paddingCssPx: label.padding, font: label.font });
     const [labels, labelDraw] = await Promise.all([
       LabelPass.create(device, layouts, graph, cull, edgeCull, labelState),
       LabelDrawPass.create(device, format, layouts, graph, labelState),
@@ -307,7 +364,7 @@ export class Engine {
     frameGraph.addRender(edges);
     frameGraph.addRender(nodes);
     frameGraph.addRender(labelDraw);
-    return new Engine(gpu, store, graph, profiler, frameGraph, { cull, order, nodes, edges, edgeCull, labels }, layouts, init, labelState);
+    return new Engine(gpu, store, graph, profiler, frameGraph, { cull, order, nodes, edges, edgeCull, labels, labelDraw }, layouts, init, labelState);
   }
 
   // ---- API (called from worker message dispatch) ----------------------------
@@ -319,52 +376,127 @@ export class Engine {
     this.init.canvas.width = w;
     this.init.canvas.height = h;
     this.camera.setViewport(w, h);
+    if (pixelRatio !== this.pixelRatio) {
+      this.stopAnim();
+      this.camera.zoom *= pixelRatio / this.pixelRatio;
+    }
     this.pixelRatio = pixelRatio;
+    this.interaction.pixelRatio = pixelRatio;
+    this.applyLimits();
     this.labels.setPixelRatio(pixelRatio);
     this.passes.labels.setViewport(w, h);
     this.markDirty(Dirty.RESIZE);
   }
 
-  setNodes(count: number, arrays: NodeArrays): void {
-    let dirty = count !== this.store.nodeCount ? Dirty.TOPOLOGY : 0;
-    for (const [k, flag] of NODE_DIRTY) if (arrays[k]) dirty |= flag;
+  setNodes(count: number, arrays: NodeArrays, labels: string[]): void {
+    const store = this.store;
+    let dirty = Dirty.STATE | (store.withReserve(count) !== store.nodeCount ? Dirty.TOPOLOGY : 0) | dirtyFor(NODE_DIRTY, arrays);
     const topology = (dirty & Dirty.TOPOLOGY) !== 0;
-    if (topology) this.press.cancel();
+    this.interaction.cancel();
     this.syncStreamed(arrays);
-    this.store.setNodes(count, arrays);
-    if (topology) {
-      this.labels.setNodeCount(count);
+    if (count !== store.nodeSlots) this.stream = null;
+    store.setNodes(count, arrays);
+    if (store.edgeCount > 0) {
+      store.setEdges(0, {});
+      if (this.labels.hasEdgeText) dirty |= Dirty.LABEL_QUERY | Dirty.LABELS;
+      this.labels.clearEdges();
+      dirty |= Dirty.EDGES;
+    }
+    if (topology) this.labels.setNodeCount(store.nodeCount);
+    if (this.labels.setNodeText(labels)) dirty |= TEXT_DIRTY;
+    if (topology || (dirty & Dirty.EDGES) !== 0) this.newData();
+    this.syncPipes();
+    this.markDirty(dirty);
+  }
+
+  addNodes(indices: Uint32Array, slots: number, arrays: NodeArrays, labels?: string[]): void {
+    const store = this.store;
+    this.syncStreamed({});
+    if (slots !== store.nodeSlots) this.stream = null;
+    const grow = store.needsGrowth(slots);
+    if (grow) {
+      this.interaction.cancel();
+      store.growNodes(slots);
+      this.labels.setNodeCount(store.nodeCount);
       this.newData();
     }
-    this.markDirty(dirty);
+    store.addNodes(indices, slots, arrays);
+    const dirty = grow ? Dirty.TOPOLOGY : Dirty.STYLE | Dirty.STATE;
+    this.markDirty(dirty | (this.labels.textAt("nodes", indices, labels ?? null) ? TEXT_DIRTY : 0));
   }
 
-  updateNodes(start: number, arrays: NodeArrays): void {
+  removeNodes(indices: Uint32Array): Uint32Array {
+    if (this.interaction.dragging && this.store.anyFlagged(indices, CONSTANTS.STATE_DRAGGING)) this.interaction.cancel();
+    const edges = this.store.removeNodes(indices);
+    if (edges.length > 0) this.store.hideEdges(edges);
+    this.newData();
+    this.syncPipes();
+    this.markDirty(Dirty.STATE);
+    return edges;
+  }
+
+  compactNodes(remap: Uint32Array): void {
+    const store = this.store;
+    this.interaction.cancel();
+    this.syncStreamed({});
+    const slots = store.nodeSlots;
+    store.compactNodes(remap);
+    if (store.nodeSlots !== slots) this.stream = null;
+    this.labels.setNodeCount(store.nodeCount);
+    this.labels.compactText("nodes", remap);
+    this.newData();
+    this.markDirty(Dirty.TOPOLOGY | Dirty.EDGES);
+  }
+
+  updateNodes(start: number, arrays: NodeArrays, labels?: string[] | null): void {
     this.store.updateNodes(start, arrays);
-    let dirty = 0;
-    for (const [k, flag] of UPDATE_DIRTY) if (arrays[k]) dirty |= flag;
+    let dirty = dirtyFor(UPDATE_DIRTY, arrays);
+    if (labels !== undefined && this.labels.setNodeText(labels ?? [])) dirty |= TEXT_DIRTY;
     this.markDirty(dirty);
   }
 
-  defineIcons(id: number, icons: readonly IconSource[]): void {
+  updateNodesAt(indices: Uint32Array, arrays: NodeArrays, labels?: string[]): void {
+    this.store.updateNodesAt(indices, arrays);
+    const text = labels !== undefined && this.labels.textAt("nodes", indices, labels);
+    this.markDirty(dirtyFor(UPDATE_DIRTY, arrays) | (text ? TEXT_DIRTY : 0));
+  }
+
+  flagNodes(indices: Uint32Array | null, flags: number, on: boolean): void {
+    this.store.flagNodes(indices, flags, on);
+    if (on && (flags & LOOK_FLAGS) !== 0) this.loadHover();
+    this.markDirty(Dirty.STATE);
+  }
+
+  defineIcons(id: number, icons: readonly IconSource[], ids: Uint16Array | null = null): void {
     this.iconChain = this.iconChain
       .then(() => this.loadIcons())
       .then((atlas) => {
         if (this.destroyed) return;
-        atlas.define(icons);
+        for (const f of ids ? atlas.defineAt(ids, icons) : atlas.define(icons)) this.init.onError(new GraphError("invalid-argument", f), false);
         this.markDirty(Dirty.STYLE);
-        this.init.onIcons(id, null);
+        this.init.onReply(id, undefined, null);
       })
-      .catch((e: unknown) => this.init.onIcons(id, e instanceof GraphError ? e : new GraphError("internal", String(e))));
+      .catch((e: unknown) => this.init.onReply(id, undefined, toGraphError(e)));
+  }
+
+  removeIcons(ids: Uint16Array): void {
+    if (this.store.clearIcons(ids)) this.markDirty(Dirty.STYLE);
+    this.iconChain = this.iconChain
+      .then(() => {
+        if (this.destroyed || !this.iconAtlas) return;
+        this.iconAtlas.clear(ids);
+        this.markDirty(Dirty.STYLE);
+      })
+      .catch(this.softFail);
   }
 
   private loadIcons(): Promise<IconAtlas> {
     this.iconLoad ??= Promise.allSettled([
       IconAtlas.create(this.gpu),
-      this.passes.cull.iconScatter.load(),
+      this.passes.cull.loadIcons(),
       this.passes.order.iconScatter.load(),
       this.passes.nodes.iconVariant.load(),
-      this.hover?.iconPipe.load(),
+      this.hover.value?.iconPipe.load(),
     ]).then(([atlas, ...rest]) => {
       const failed = [atlas, ...rest].find((r) => r.status === "rejected");
       if (failed || this.destroyed) {
@@ -379,32 +511,74 @@ export class Engine {
     return this.iconLoad;
   }
 
-  setEdges(count: number, arrays: EdgeArrays): void {
-    this.press.cancel();
+  setEdges(count: number, arrays: EdgeArrays, labels: string[]): void {
+    this.interaction.cancel();
     this.store.setEdges(count, arrays);
     this.labels.setEdgeCount(count);
-    this.newData();
-    this.markDirty(Dirty.EDGES);
-  }
-
-  /** Label text per node, in the user's order; empty clears. */
-  setNodeLabels(labels: string[]): void {
-    this.store.nodeLabels = labels.length > 0 ? labels : null;
-    this.labels.setNodeText(labels);
-    this.markDirty(Dirty.LABEL_QUERY | Dirty.LABELS | Dirty.LABELLED);
-  }
-
-  /** Label text per edge, in the user's order; empty clears. */
-  setEdgeLabels(labels: string[]): void {
-    this.store.edgeLabels = labels.length > 0 ? labels : null;
+    const text = this.labels.setEdgeText(labels);
     this.syncEdgeOrder();
-    this.labels.setEdgeText(labels);
-    this.markDirty(Dirty.EDGES | Dirty.LABEL_QUERY | Dirty.LABELS);
+    this.newData();
+    this.syncPipes();
+    this.markDirty(Dirty.EDGES | (text ? Dirty.LABEL_QUERY | Dirty.LABELS : 0));
+  }
+
+  addEdges(indices: Uint32Array, slots: number, arrays: EdgeArrays, labels?: string[]): void {
+    this.interaction.cancel();
+    this.store.addEdges(indices, slots, arrays);
+    this.labels.setEdgeCount(slots);
+    this.newData();
+    this.syncPipes();
+    const text = this.labels.textAt("edges", indices, labels ?? null);
+    if (text && !this.graph.keepEdgeOrder) this.syncEdgeOrder();
+    this.markDirty(Dirty.EDGES | (text ? Dirty.LABEL_QUERY | Dirty.LABELS : 0));
+  }
+
+  hideEdges(indices: Uint32Array): void {
+    this.store.hideEdges(indices);
+    this.syncPipes();
+    this.markDirty(Dirty.STATE);
+  }
+
+  flagEdges(indices: Uint32Array | null, flags: number, on: boolean): void {
+    this.store.flagEdges(indices, flags, on);
+    if (on && (flags & LOOK_FLAGS) !== 0) this.loadHover();
+    this.markDirty(Dirty.STATE);
+  }
+
+  updateEdgesAt(indices: Uint32Array, arrays: EdgeArrays, labels?: string[]): void {
+    if (arrays.indices) this.newData();
+    this.store.updateEdgesAt(indices, arrays);
+    this.syncPipes();
+    const text = labels !== undefined && this.labels.textAt("edges", indices, labels);
+    if (text && !this.graph.keepEdgeOrder) this.syncEdgeOrder();
+    this.markDirty(edgeUpdateDirty(arrays, false) | (text ? Dirty.LABEL_QUERY | Dirty.LABELS : 0));
+  }
+
+  updateEdges(arrays: EdgeArrays, labels?: string[] | null): void {
+    if (arrays.indices) this.newData();
+    this.store.updateEdges(arrays);
+    this.syncPipes();
+    let dirty = edgeUpdateDirty(arrays, true);
+    if (labels !== undefined) {
+      if (this.labels.setEdgeText(labels ?? [])) dirty |= Dirty.LABEL_QUERY | Dirty.LABELS;
+      this.syncEdgeOrder();
+    }
+    this.markDirty(dirty);
+  }
+
+  compactEdges(remap: Uint32Array): void {
+    this.interaction.cancel();
+    this.store.compactEdges(remap);
+    this.labels.setEdgeCount(this.store.edgeCount);
+    this.labels.compactText("edges", remap);
+    this.newData();
+    this.syncPipes();
+    this.markDirty(Dirty.EDGES);
   }
 
   private syncEdgeOrder(): void {
     const store = this.store;
-    const keep = store.edgeLabels !== null || this.pickEdges;
+    const keep = this.labels.hasEdgeText || this.pickEdges;
     this.graph.keepEdgeOrder = keep;
     if (!keep) this.graph.setEdgeOrder(null);
     else if (!this.graph.edgeOrder && store.edgeCount > 0) {
@@ -414,254 +588,175 @@ export class Engine {
     }
   }
 
-  setPicking(hover: number, click: number, drag: boolean): void {
-    this.hoverKinds = hover;
-    this.clickKinds = click;
-    this.dragEvents = drag;
+  setInput(partial: GraphInput): void {
+    this.inputState = mergeInput(this.inputState, partial);
+    this.interaction.setInput(this.inputState);
+    this.syncModes();
     this.syncPick();
   }
 
-  setNodeDrag(on: boolean): void {
-    if (!on) this.press.cancel();
-    this.nodeDrag = on;
-    this.syncPick();
+  private syncModes(): void {
+    const c = this.controls;
+    const s = this.inputState;
+    c.panMode = s.pan;
+    c.zoomMode = s.zoom;
+    c.rotateMode = s.rotate;
+    if (s.zoom !== "auto") c.cancelZoom();
+  }
+
+  tune(t: DebugTune): void {
+    applyTune(this.wanted, t);
+    if (t.pickRate !== undefined) this.interaction.pickInterval = 1000 / t.pickRate;
+    this.syncPipes();
+  }
+
+  private tunables(): Tunable[] {
+    const list: Tunable[] = [this.passes.cull, this.passes.edgeCull.cull, this.passes.edges.pipelines];
+    if (this.pick.value) list.push(this.pick.value.pipelines);
+    if (this.hover.value) list.push(this.hover.value.edgePipes);
+    return list;
+  }
+
+  private syncPipes(): void {
+    this.wanted.arrows = this.store.hasDirected;
+    if (this.pipesLoading || sameTune(this.wanted, this.active)) return;
+    const t = { ...this.wanted };
+    this.pipesLoading = true;
+    Promise.all(this.tunables().map((p) => p.loadTune(t))).then(
+      () => {
+        this.pipesLoading = false;
+        if (this.destroyed) return;
+        const passes = this.tunables();
+        if (passes.every((p) => p.hasTune(t))) {
+          for (const p of passes) p.useTune(t);
+          this.active = t;
+          this.markDirty(Dirty.STYLE);
+        }
+        this.syncPipes();
+      },
+      (e: unknown) => {
+        this.pipesLoading = false;
+        this.init.onError(toGraphError(e), false);
+      },
+    );
+  }
+
+  private adopt<P>(pass: P, tuned: Tunable): Promise<P> {
+    const t = this.active;
+    return tuned.loadTune(t).then(() => {
+      if (t !== this.active) return this.adopt(pass, tuned);
+      tuned.useTune(t);
+      return pass;
+    });
+  }
+
+  private lazyPass<T extends { destroy(): void }>(lazy: Lazy<T>, ready: (value: T) => void): void {
+    if (lazy.value || lazy.loading) return;
+    lazy.load().then(
+      (value) => {
+        if (this.destroyed) value.destroy();
+        else ready(value);
+      },
+      this.softFail,
+    );
   }
 
   private syncPick(): void {
-    const hoverNodes = (this.hoverKinds & PICKED_NODES) !== 0;
-    const hoverEdges = (this.hoverKinds & PICKED_EDGES) !== 0;
-    if (!hoverNodes) this.hoverNode = -1;
-    if (!hoverEdges) this.hoverEdge = -1;
-    if (!hoverNodes && this.hover?.setNode(-1, 0, false, this.pixelRatio)) this.markDirty(Dirty.HOVER);
-    if (!hoverEdges && this.hover?.setEdge(-1, 0, 0, 0)) this.markDirty(Dirty.HOVER);
-    const edges = hoverEdges || (this.clickKinds & PICKED_EDGES) !== 0;
-    const any = this.hoverKinds !== 0 || this.clickKinds !== 0 || this.nodeDrag;
-    const edgesChanged = edges !== this.pickEdges;
-    this.pickEdges = edges;
-    this.pickSeq++;
-    if (edgesChanged) {
+    const s = this.inputState;
+    const edges = s.pick.edges;
+    if (edges !== this.pickEdges) {
+      this.pickEdges = edges;
       this.passes.edgeCull.setLines(edges, (b) => this.graph.retireAfterSubmit(b));
       this.syncEdgeOrder();
       this.markDirty(Dirty.STYLE);
     }
-    if (any && !this.pick && !this.pickLoading) {
-      this.pickLoading = true;
-      const o = this.init.options;
-      const edgeOpts = {
-        directed: o.directedEdges,
-        maxOverdraw: o.edgeMaxOverdraw,
-        minLengthPx: o.edgeMinLengthPx,
-        debug: Math.max(0, EDGE_DEBUG_MODES.indexOf(o.edgeDebug)),
-      };
-      const style = o.hoverStyle;
-      const hover = style
-        ? HoverPass.create(
-            this.gpu.device,
-            this.gpu.format,
-            this.layouts,
-            this.graph,
-            o.directedEdges,
-            {
-              nodeOutlineColor: packRgbaTuple(style.nodeOutlineColor),
-              nodeOutlineScale: style.nodeOutlineScale,
-              nodeOutlineMinWidth: style.nodeOutlineMinWidth,
-              nodeOutlineMaxWidth: style.nodeOutlineMaxWidth,
-              edgeColor: packRgbaTuple(style.edgeColor),
-              edgeWidth: style.edgeWidth,
-            },
-            { scale: o.iconScale, minPx: o.iconMinPx },
-          )
-        : Promise.resolve(null);
-      Promise.all([PickPass.create(this.gpu.device, this.layouts, o.lodTargetPx, edgeOpts), hover]).then(
-        ([pick, hover]) => {
-          if (this.destroyed) {
-            pick.destroy();
-            hover?.destroy();
-            return;
-          }
-          pick.onResult = this.onPick;
-          this.pick = pick;
-          this.hover = hover;
-          this.passes.nodes.hover = hover;
-          this.passes.edges.hover = hover;
-          if (hover && this.iconLoad) {
-            hover.iconPipe.load().then(
-              () => this.markDirty(Dirty.HOVER),
-              (e: unknown) => this.init.onError(e instanceof GraphError ? e : new GraphError("internal", String(e)), false),
-            );
-          }
-          this.pickWanted = this.hoverKinds !== 0;
-          this.wake();
-        },
-        (e) => this.init.onError(e instanceof GraphError ? e : new GraphError("internal", String(e)), false),
-      );
-    }
-    this.pickWanted = this.hoverKinds !== 0;
-    this.wake();
+    if (!s.pick.nodes && !edges && s.drag === false && s.select === false) return;
+    this.lazyPass(this.pick, (pick) => {
+      pick.onResult = this.interaction.onPick;
+      this.interaction.wantHover();
+      this.wake();
+    });
+    this.loadHover();
+  }
+
+  private loadHover(): void {
+    this.lazyPass(this.hover, (hover) => {
+      hover.setHoverLook(this.style.hover);
+      hover.setLooks(this.style.selected, this.style.focused);
+      this.passes.nodes.hover = hover;
+      this.passes.edges.hover = hover;
+      if (this.iconLoad) {
+        hover.iconPipe.load().then(
+          () => this.markDirty(Dirty.HOVER),
+          this.softFail,
+        );
+      }
+      this.markDirty(Dirty.HOVER);
+    });
   }
 
   private newData(): void {
     this.dataGen++;
-    this.clearHover();
+    this.interaction.clearHover();
   }
 
-  private clearHover(): void {
-    this.pickSeq++;
-    if (this.hoverNode !== -1 || this.hoverEdge !== -1) this.emitHover(-1, -1, PICKED_NODES | PICKED_EDGES, 1);
+  private pickFree(): boolean {
+    const pick = this.pick.value;
+    return pick !== null && this.frameGen === this.dataGen && pick.free;
   }
 
-  private maybePick(now: number): void {
-    if (!this.pickWanted || this.bench || this.press.waiting || this.dragNode >= 0) return;
-    const x = this.controls.pointerX;
-    const y = this.controls.pointerY;
-    if (x < 0 || y < 0) {
-      this.pickWanted = false;
-      this.pickSeq++;
-      this.emitHover(-1, -1, PICKED_NODES | PICKED_EDGES, 1);
-      return;
-    }
-    const pick = this.pick;
-    if (!pick || this.frameGen !== this.dataGen || !pick.free) return;
-    const due = Math.max(this.pickDue, this.cameraMs + CAMERA_SETTLE_MS);
-    if (now < due) {
-      if (this.pickTimer === undefined) this.pickTimer = setTimeout(this.pickWake, due - now);
-      return;
-    }
-    if (this.submitPick(pick, x, y, (this.hoverKinds & PICKED_NODES) !== 0, (this.hoverKinds & PICKED_EDGES) !== 0, this.pickSeq) === 0) return;
-    this.pickWanted = false;
-    this.pickDue = now + this.pickInterval;
-  }
-
-  private pressPick(): void {
-    const pick = this.pick;
-    if (!pick || this.frameGen !== this.dataGen || !pick.free) return;
-    const p = this.press;
-    const seq = this.pickSeq + 1;
-    if (this.submitPick(pick, p.x, p.y, true, (this.clickKinds & PICKED_EDGES) !== 0, seq) === 0) {
-      p.resolve(-1, -1, 1, this.nodeDrag);
-      return;
-    }
-    this.pickSeq = seq;
-    p.seq = seq;
-  }
-
-  private submitPick(pick: PickPass, x: number, y: number, nodes: boolean, edges: boolean, token: number): number {
+  private submitPick(x: number, y: number, nodes: boolean, edges: boolean, token: number): boolean {
     const req = this.pickRequest;
     req.x = x;
     req.y = y;
-    req.radiusPx = this.init.options.pickRadius * this.pixelRatio;
-    req.edgeRadiusPx = this.init.options.edgePickRadius * this.pixelRatio;
+    req.radiusPx = this.inputState.pickRadius * this.pixelRatio;
+    req.edgeRadiusPx = this.inputState.edgePickRadius * this.pixelRatio;
     req.nodes = nodes;
     req.edges = edges;
     req.shapes = this.store.hasNodeShapes;
     req.layers = this.store.hasZLayers;
     req.edgeColors = this.store.hasEdgeColors;
     req.token = token;
+    const pick = this.pick.value!;
     const device = this.gpu.device;
     const encoder = device.createCommandEncoder();
-    const picked = pick.encode(encoder, this.frameCtx, this.graph, this.passes.cull, this.passes.edgeCull, req);
-    if (picked === 0) return 0;
+    if (pick.encode(encoder, this.frameCtx, this.graph, this.passes.cull, this.passes.edgeCull, req) === 0) return false;
     device.queue.submit([encoder.finish()]);
     pick.afterSubmit();
-    return picked;
+    return true;
   }
 
-  private readonly pickWake = (): void => {
-    this.pickTimer = undefined;
-    this.wake();
-  };
-
-  private readonly onPick = (node: number, edge: number, nodeScale: number, engine: number, token: number): void => {
-    if (this.destroyed) return;
-    const seq = Math.floor(token / 4);
-    const picked = token % 4;
-    const p = this.press;
-    if (p.waiting && p.seq !== 0 && seq === p.seq) {
-      this.pressEngine = engine;
-      p.resolve((picked & PICKED_NODES) !== 0 ? node : -1, (picked & PICKED_EDGES) !== 0 ? edge : -1, nodeScale, this.nodeDrag);
-    } else if (seq === this.pickSeq) this.emitHover(node, edge, picked, nodeScale);
-    if (this.pickWanted || p.waiting) this.wake();
-  };
-
-  private startDrag(node: number, nodeScale: number): void {
-    const pos = this.streamedPositions ?? (this.store.channels.nodePos.data as Float32Array);
-    const x = pos[node * 2]!;
-    const y = pos[node * 2 + 1]!;
-    this.camera.screenToWorld(this.press.x, this.press.y, this.world);
-    this.grabX = x - this.world.x;
-    this.grabY = y - this.world.y;
-    this.dragNode = node;
-    this.dragX = x;
-    this.dragY = y;
-    this.passes.cull.moveNode(this.pressEngine);
-    this.passes.edgeCull.moveNode(this.pressEngine, this.store.edgeCount);
-    if (this.dragEvents) this.init.onDrag("nodeDragStart", node, x, y);
-    this.emitHover(node, -1, PICKED_NODES | PICKED_EDGES, nodeScale);
-    this.moveDragged();
+  private stopHold(pan: boolean, x: number, y: number): void {
+    if (!pan) {
+      this.controls.hold = false;
+      return;
+    }
+    if (this.controls.release(x, y, this.camera)) {
+      this.stopAnim();
+      this.dirty |= Dirty.CAMERA;
+    }
     this.wake();
   }
 
-  private moveDragged(): void {
-    const i = this.dragNode;
-    const px = this.controls.pointerX;
-    const py = this.controls.pointerY;
-    if (i < 0 || i >= this.store.nodeCount || px < 0 || py < 0) return;
-    this.camera.screenToWorld(px, py, this.world);
-    const d = this.dragPos;
-    d[0] = this.world.x + this.grabX;
-    d[1] = this.world.y + this.grabY;
-    const x = d[0]!;
-    const y = d[1]!;
-    if (x === this.dragX && y === this.dragY) return;
-    this.dragX = x;
-    this.dragY = y;
-    this.store.updatePositions(i, d);
-    this.store.growBounds(x, y);
-    this.dirty |= Dirty.MOVED;
-    if (this.dragEvents) this.init.onDrag("nodeDrag", i, x, y);
+  private drawShape(points: Float32Array, count: number): void {
+    const pass = this.shapePass.value;
+    if (!pass) return;
+    pass.setShape(points, count, Math.max(1, this.pixelRatio));
+    this.markDirty(Dirty.HOVER);
   }
 
-  private endDrag(): void {
-    const i = this.dragNode;
-    if (i < 0) return;
-    this.moveDragged();
-    this.dragNode = -1;
-    this.controls.hold = false;
-    if (this.dragEvents) this.init.onDrag("nodeDragEnd", i, this.dragX, this.dragY);
-    if (this.hoverKinds !== 0) this.pickWanted = true;
-    this.wake();
-  }
-
-  private stopHold(pan: boolean): void {
-    if (!pan) this.controls.hold = false;
-    else if (this.controls.release(this.press.x, this.press.y, this.camera)) this.markDirty(Dirty.CAMERA);
-  }
-
-  private emitClick(node: number, edge: number): void {
-    const n = (this.clickKinds & PICKED_NODES) !== 0 ? node : undefined;
-    const e = (this.clickKinds & PICKED_EDGES) !== 0 ? edge : undefined;
-    if (n !== undefined || e !== undefined) this.init.onClick(n, e);
-  }
-
-  private emitHover(node: number, edge: number, picked: number, nodeScale: number): void {
-    let n: number | undefined;
-    let e: number | undefined;
-    const hoverNodes = (picked & PICKED_NODES) !== 0 && (this.hoverKinds & PICKED_NODES) !== 0;
-    const hoverEdges = (picked & PICKED_EDGES) !== 0 && (this.hoverKinds & PICKED_EDGES) !== 0;
-    if (hoverNodes && node !== this.hoverNode) n = this.hoverNode = node;
-    if (hoverEdges && edge !== this.hoverEdge) e = this.hoverEdge = edge;
-    if (n !== undefined || e !== undefined) this.init.onHover(n, e);
-    const hover = this.hover;
+  private showHover(node: number, edge: number, which: number, nodeScale: number): void {
+    const hover = this.hover.value;
     if (!hover) return;
+    const store = this.store;
     let changed = false;
-    if (hoverNodes) changed = hover.setNode(node, nodeScale, this.store.hasNodeShapes, this.pixelRatio) || changed;
-    if (hoverEdges) {
-      const ch = this.store.channels;
-      const ends = ch.edgeIdx.data as Uint32Array;
-      const style = edge >= 0 && this.store.hasEdgeStyles ? ch.edgeStyle.data[edge]! : 0;
+    if ((which & PICK_CONSTANTS.PICK_FLAG_NODES) !== 0) changed = hover.setNode(node, nodeScale, store.hasNodeShapes, this.pixelRatio) || changed;
+    if ((which & PICK_CONSTANTS.PICK_FLAG_EDGES) !== 0) {
+      const ends = store.channels.edgeIdx.data as Uint32Array;
+      const style = edge >= 0 && store.hasEdgeStyles ? store.channels.edgeStyle.data[edge]! : 0;
       changed = hover.setEdge(edge, edge >= 0 ? ends[edge * 2]! : 0, edge >= 0 ? ends[edge * 2 + 1]! : 0, style) || changed;
     }
-    if (changed) this.markDirty(Dirty.HOVER);
+    if (changed && this.style.hover) this.markDirty(Dirty.HOVER);
   }
 
   setStream(stream: StreamSlots): void {
@@ -672,7 +767,7 @@ export class Engine {
   private takeStream(): number {
     const s = this.stream;
     const n = this.store.nodeCount;
-    if (!s || !s.pending || s.count !== n) return 0;
+    if (!s || !s.pending || s.count !== this.store.nodeSlots) return 0;
     if ((s.positions && !this.graph.canStream("nodePos", n)) || (s.colors && !this.graph.canStream("nodeColor", n))) return 0;
     if (s.zIndex && !this.graph.canStream("nodeStyle", n)) return 0;
     const slot = s.take()!;
@@ -697,7 +792,7 @@ export class Engine {
   }
 
   private syncStreamed(arrays: NodeArrays): void {
-    const n = this.store.nodeCount;
+    const n = this.store.nodeSlots;
     const p = this.streamedPositions;
     if (p && !arrays.positions && p.length === n * 2) this.store.updatePositions(0, p);
     const c = this.streamedColors;
@@ -709,26 +804,181 @@ export class Engine {
     this.streamedZIndex = null;
   }
 
-  setView(view: Partial<CameraView>): void {
-    this.controls.cancelZoom();
-    this.camera.setView(view);
+  setView(view: Partial<CameraView>, duration: number, easing: CameraEasing): void {
+    this.beginMove();
+    const r = view.rotation;
+    const rotation = r === undefined ? undefined : nearestAngle(this.animFrom.rotation, r);
+    const zoom = view.zoom === undefined ? undefined : view.zoom * this.pixelRatio;
+    this.camera.setView({ x: view.x, y: view.y, zoom, rotation });
+    this.endMove(duration, easing);
+  }
+
+  fit(padding: number, nodes: Uint32Array | null, bounds: WorldBounds | null, duration: number): void {
+    const nodeScale = this.frameInputs.nodeScale;
+    const b = nodes ? this.store.nodeBounds(nodes, nodeScale, this.streamedPositions) : (bounds ?? this.store.drawnBounds(nodeScale));
+    if (!b) return;
+    this.beginMove();
+    this.camera.fitRotated(b, padding * this.pixelRatio);
+    this.endMove(duration, "ease");
+  }
+
+  rotate(angle: number, x: number | undefined, y: number | undefined, duration: number): void {
+    const c = this.camera;
+    const sx = x === undefined ? c.viewportW * 0.5 : x * this.pixelRatio;
+    const sy = y === undefined ? c.viewportH * 0.5 : y * this.pixelRatio;
+    this.beginMove();
+    c.screenToWorld(sx, sy, this.world);
+    c.rotateAround(angle, sx, sy);
+    this.endMove(duration, "ease");
+    const p = this.pivot;
+    if (!this.anim.active) return;
+    p.wx = this.world.x;
+    p.wy = this.world.y;
+    p.sx = sx;
+    p.sy = sy;
+    p.on = true;
+  }
+
+  limits(minZoom: number, maxZoom: number, bounds: WorldBounds | null): void {
+    this.minZoomCss = minZoom;
+    this.maxZoomCss = maxZoom;
+    this.limitBounds = bounds;
+    this.applyLimits();
     this.markDirty(Dirty.CAMERA);
   }
 
-  fit(padding: number): void {
+  listen(events: readonly WorkerEventName[]): void {
+    this.viewEvents = events.includes("view");
+    this.panEvents = events.includes("pan");
+    this.zoomEvents = events.includes("zoom");
+    this.rotateEvents = events.includes("rotate");
+    this.interaction.listen(events);
+  }
+
+  private flushGestures(nowMs: number): void {
+    const c = this.controls;
+    const due = c.settleWheel(nowMs);
+    if (due > 0 && this.zoomEvents && this.gestureTimer === undefined) this.gestureTimer = setTimeout(this.gestureWake, due);
+    this.flushGesture(c.panGesture, "pan", this.panEvents);
+    this.flushGesture(c.zoomGesture, "zoom", this.zoomEvents);
+    this.flushGesture(c.rotateGesture, "rotate", this.rotateEvents);
+  }
+
+  private flushGesture(g: Gesture, t: GestureMessage["t"], listen: boolean): void {
+    if (g.dirty) {
+      if (listen) this.postGesture(g, t, g.sent ? "move" : "start");
+      g.sent = true;
+      g.clear();
+    }
+    if (g.ended) {
+      if (listen && g.sent) this.postGesture(g, t, "end");
+      g.ended = false;
+      g.sent = false;
+    }
+  }
+
+  private postGesture(g: Gesture, t: GestureMessage["t"], phase: GesturePhase): void {
+    const r = this.pixelRatio;
+    const m = g.mods;
+    const x = g.x / r;
+    const y = g.y / r;
+    if (t === "pan") this.init.onGesture({ t, event: modKeys(m, { phase, dx: g.dx / r, dy: g.dy / r, x, y }) });
+    else if (t === "zoom") this.init.onGesture({ t, event: modKeys(m, { phase, factor: g.factor, x, y }) });
+    else this.init.onGesture({ t, event: modKeys(m, { phase, angle: g.angle, x, y }) });
+  }
+
+  private readonly gestureWake = (): void => {
+    this.gestureTimer = undefined;
+    this.wake();
+  };
+
+  private applyLimits(): void {
+    this.camera.setLimits(this.minZoomCss * this.pixelRatio, this.maxZoomCss * this.pixelRatio, this.limitBounds);
+  }
+
+  private stopAnim(): void {
+    this.anim.cancel();
+    this.pivot.on = false;
+  }
+
+  private beginMove(): void {
     this.controls.cancelZoom();
-    this.camera.fit(this.store.drawnBounds(this.frameInputs.nodeScale), padding * this.pixelRatio);
+    this.stopAnim();
+    readView(this.camera, this.animFrom);
+  }
+
+  private endMove(duration: number, easing: CameraEasing): void {
+    if (duration > 0) {
+      const c = this.camera;
+      readView(c, this.animTo);
+      const f = this.animFrom;
+      c.x = f.x;
+      c.y = f.y;
+      c.zoom = f.zoom;
+      c.rotation = f.rotation;
+      this.anim.start(f, this.animTo, duration, easing, performance.now());
+    } else this.camera.rotation = wrapAngle(this.camera.rotation);
     this.markDirty(Dirty.CAMERA);
   }
 
-  setBackground(c: RGBA): void {
-    this.frameGraph.setClearColor(c[0], c[1], c[2], c[3]);
-    this.markDirty(Dirty.CLEAR_COLOR);
+  private stepCamera(nowMs: number): void {
+    const v = this.animView;
+    const more = this.anim.step(nowMs, v);
+    const c = this.camera;
+    c.setView(v);
+    if (!more) c.rotation = wrapAngle(c.rotation);
+    const p = this.pivot;
+    if (p.on) c.pin(p.wx, p.wy, p.sx, p.sy);
+    if (!more) p.on = false;
+    this.dirty |= Dirty.CAMERA;
   }
 
-  setNodeScale(v: number): void {
-    this.frameInputs.nodeScale = v;
-    this.markDirty(Dirty.STYLE);
+  setStyle(partial: GraphStyle): void {
+    const s = mergeStyle(this.style, partial);
+    this.style = s;
+    const fi = this.frameInputs;
+    let dirty = 0;
+    if (partial.background) {
+      const bg = s.background;
+      const transparent = bg[3] < 1;
+      if (transparent !== this.transparent) {
+        this.transparent = transparent;
+        this.context.configure({ device: this.gpu.device, format: this.gpu.format, alphaMode: transparent ? "premultiplied" : "opaque" });
+        dirty |= Dirty.FORCED;
+      }
+      this.frameGraph.setClearColor(bg[0], bg[1], bg[2], bg[3]);
+      dirty |= Dirty.CLEAR_COLOR;
+    }
+    if (partial.nodeScale !== undefined || partial.edge || partial.icon) {
+      fi.nodeScale = s.nodeScale;
+      fi.edgeWidth = s.edge.width;
+      fi.edgeColor = packRgba(...s.edge.color);
+      fi.iconScale = s.icon.scale;
+      fi.iconMinPx = s.icon.minPx;
+      dirty |= Dirty.STYLE;
+    }
+    if (partial.hover !== undefined || partial.selected || partial.focused || partial.dimmed) {
+      fi.dimmedAlpha = s.dimmed.alpha;
+      this.hover.value?.setHoverLook(s.hover);
+      this.hover.value?.setLooks(s.selected, s.focused);
+      dirty |= Dirty.STYLE | Dirty.HOVER;
+      if (partial.hover !== undefined) this.interaction.setHoverLook(s.hover !== false);
+    }
+    const shape = this.shapePass.value;
+    if (partial.selection && shape) {
+      shape.setColors(s.selection.fill, s.selection.stroke);
+      if (this.interaction.shaping) dirty |= Dirty.HOVER;
+    }
+    if (partial.label) {
+      const l = s.label;
+      if (this.labels.setStyle({ sizeCssPx: l.size, paddingCssPx: l.padding, font: l.font })) {
+        this.passes.labels.setViewport(this.camera.viewportW, this.camera.viewportH);
+        dirty |= TEXT_DIRTY;
+      }
+      this.labels.setColor(packRgba(...l.color));
+      dirty |= Dirty.LABELS;
+    }
+    this.markDirty(dirty);
   }
 
   labelSnapshot(id: number): void {
@@ -740,10 +990,51 @@ export class Engine {
     this.markDirty(Dirty.FORCED);
   }
 
+  snapshot(id: number, type: string): void {
+    this.snapJobs.push({ id, type });
+    this.markDirty(Dirty.FORCED);
+  }
+
+  private takeSnapshots(): void {
+    const canvas = this.init.canvas;
+    for (const job of this.snapJobs.splice(0)) {
+      canvas.convertToBlob({ type: job.type }).then(
+        (blob) => {
+          if (!this.destroyed) this.init.onReply(job.id, blob, null);
+        },
+        (e: unknown) => {
+          if (!this.destroyed) this.init.onReply(job.id, undefined, toGraphError(e));
+        },
+      );
+    }
+  }
+
+  queryAt(id: number, x: number, y: number): void {
+    this.interaction.queryAt(id, x, y);
+  }
+
+  queryInside(id: number, points: Float32Array): void {
+    this.findInside(
+      points,
+      (nodes) => this.init.onReply(id, nodes, null, [nodes.buffer as ArrayBuffer]),
+      (e) => this.init.onReply(id, undefined, e),
+    );
+  }
+
+  private findInside(points: Float32Array, done: QueryDone, fail: QueryFail): void {
+    this.query ??= new QueryPass(this.gpu.device, this.layouts, () => this.wake(), (e) => this.init.onError(e, false));
+    this.query.request(points, done, fail);
+  }
+
+  private runQuery(): void {
+    this.query!.run(this.frameUniform.bindGroup, this.graph, this.store.nodeCount);
+  }
+
   /** Play `opts.path` one step per rendered frame and record per-frame timings. */
   benchmark(id: number, opts: BenchmarkOptions): void {
-    if (this.bench) throw new GraphError("invalid-argument", "A benchmark is already running");
-    const fitZoom = this.camera.fitZoom(this.store.bounds, FIT_PADDING_CSS_PX * this.pixelRatio);
+    if (this.bench) return this.init.onReply(id, undefined, new GraphError("invalid-argument", "A benchmark is already running"));
+    const c = this.camera;
+    const fitZoom = Camera2D.fitZoomIn(this.store.bounds, FIT_PADDING_CSS_PX * this.pixelRatio, c.viewportW, c.viewportH);
     const path = new CameraPath(opts.path, opts.frames, this.store.bounds, fitZoom);
     this.bench = new Benchmark(id, path, opts.warmup ?? DEFAULT_WARMUP_FRAMES, this.profiler.slotNames);
     this.probe.setOverride(BENCH_TIMING[opts.timing ?? "passes"]);
@@ -754,20 +1045,14 @@ export class Engine {
   input(rec: InputRecord): void {
     if (this.probe.full) this.probe.input(rec.t);
     const handoff = this.controls.pinching;
-    if (this.controls.apply(rec, this.camera)) this.dirty |= Dirty.CAMERA;
-    const p = this.press;
-    if (rec.type === INPUT.POINTER_DOWN) {
-      if (!handoff && (rec.buttons & 1) !== 0 && (this.nodeDrag || this.clickKinds !== 0)) {
-        p.down(rec.x, rec.y, this.nodeDrag);
-        this.controls.hold = this.nodeDrag;
-      } else p.cancel();
-    } else if (rec.type === INPUT.POINTER_MOVE) p.move(rec.x, rec.y, CLICK_SLOP_CSS_PX * this.pixelRatio);
-    else if (rec.type === INPUT.POINTER_UP) p.up();
-    else if (rec.type === INPUT.PINCH) p.cancel();
+    if (this.controls.apply(rec, this.camera)) {
+      this.stopAnim();
+      this.dirty |= Dirty.CAMERA;
+    }
+    this.interaction.input(rec, handoff);
     if (rec.type === INPUT.POINTER_MOVE || rec.type === INPUT.POINTER_LEAVE || rec.type === INPUT.POINTER_DOWN) {
       this.frameInputs.pointerX = this.controls.pointerX;
       this.frameInputs.pointerY = this.controls.pointerY;
-      if (this.hoverKinds !== 0) this.pickWanted = true;
     }
   }
 
@@ -780,9 +1065,12 @@ export class Engine {
   destroy(): void {
     this.destroyed = true;
     clearTimeout(this.benchTimer);
-    clearTimeout(this.pickTimer);
-    this.pick?.destroy();
-    this.hover?.destroy();
+    clearTimeout(this.gestureTimer);
+    this.interaction.destroy();
+    this.pick.value?.destroy();
+    this.query?.destroy();
+    this.shapePass.value?.destroy();
+    this.hover.value?.destroy();
     this.probe.destroy();
     this.passes.cull.destroy();
     this.passes.order.destroy();
@@ -826,8 +1114,9 @@ export class Engine {
     const dt = this.lastTickMs === 0 ? 0 : (t0 - this.lastTickMs) / 1000;
     this.lastTickMs = t0;
     if (dt > 0 && this.controls.advance(dt, this.camera)) this.dirty |= Dirty.CAMERA;
-    if (this.dragNode >= 0) this.moveDragged();
-    if (this.press.active && this.press.seq === 0) this.pressPick();
+    this.flushGestures(t0);
+    if (this.anim.active) this.stepCamera(t0);
+    this.interaction.step(streamedBytes > 0 && this.stream?.positions === true);
     if (full) probe.mark(CPU.INPUT);
     const now = this.clock();
     if (this.labels.stepWidths()) this.dirty |= Dirty.LABEL_QUERY;
@@ -842,16 +1131,11 @@ export class Engine {
       this.dirty |= Dirty.CAMERA;
     }
 
-    if ((this.dirty & (Dirty.CAMERA | Dirty.RESIZE)) !== 0) {
-      this.cameraMs = t0;
-      if (this.dragNode < 0 && (this.hoverNode !== -1 || this.hoverEdge !== -1)) {
-        this.clearHover();
-        this.pickWanted = true;
-      }
-    }
-    if (this.pickWanted) this.maybePick(t0);
+    if ((this.dirty & (Dirty.CAMERA | Dirty.RESIZE)) !== 0) this.interaction.cameraMoved(t0);
+    this.interaction.pumpPick(t0, bench !== null);
 
     if (this.dirty === 0) {
+      if (this.query?.ready) this.runQuery();
       // Idle: skip the frame entirely. Sleep unless input raced in.
       if (!ring) return;
       if (!ring.trySleep()) {
@@ -867,12 +1151,18 @@ export class Engine {
     this.profiler.setTimed(probe.on);
     this.frameGraph.split = full;
     const uploaded = this.graph.flush();
+    if (this.graph.edgesUnsorted) this.dirty |= Dirty.EDGES;
     if (full) probe.mark(CPU.UPLOAD);
     const atlas = this.iconAtlas;
     if (atlas && atlas.paletteVersion !== this.store.paletteVersion) atlas.setPalette(this.store.iconPalette, this.store.paletteVersion);
     const icons = this.store.hasIcons && atlas !== null && atlas.count > 0;
     const nodeCount = this.reserveNodes(icons);
     const edgeCount = this.reserveEdges();
+    const graph = this.graph;
+    if (graph.edgeRank) {
+      this.passes.edgeCull.restyle(RESTYLE_STYLES, graph.edgeRank, graph.restyleSlot, graph.restyledEdges, edgeCount);
+      this.passes.edgeCull.restyle(RESTYLE_STATES, graph.edgeRank, graph.stateSlot, graph.restyledStates, edgeCount);
+    }
     if (full) probe.mark(CPU.RESERVE);
 
     const fi = this.frameInputs;
@@ -881,6 +1171,13 @@ export class Engine {
     fi.pixelRatio = this.pixelRatio;
     fi.nodeCount = nodeCount;
     fi.edgeCount = edgeCount;
+    fi.flags = (this.store.hiddenCount > 0 ? CONSTANTS.FRAME_FLAG_HIDDEN : 0) | (this.store.dimmedCount > 0 ? CONSTANTS.FRAME_FLAG_DIMMED : 0);
+    const hover = this.hover.value;
+    if (hover) {
+      hover.syncLists(this.store.looks);
+      hover.syncLooks(this.store.hasNodeShapes, this.store.hasEdgeStyles, this.pixelRatio);
+      fi.flags |= CONSTANTS.FRAME_FLAG_EDGE_LOOKS;
+    }
     this.frameUniform.write(fi);
 
     const ctx = this.frameCtx;
@@ -905,9 +1202,14 @@ export class Engine {
     const target = this.context.getCurrentTexture().createView();
     if (full) probe.mark(CPU.TEXTURE);
     this.frameGraph.execute(encoder, target, ctx, full ? this.encodeTimes : null);
+    if (this.moveEnding) {
+      this.moveEnding = false;
+      this.passes.cull.endMove();
+      this.passes.edgeCull.endMove();
+    }
     if (full) probe.sync();
     this.passes.labels.recordFrame(this.frameIndex);
-    this.passes.labels.recordReadback(encoder);
+    this.passes.labels.recordReadback(encoder, ctx);
     this.profiler.endFrame(
       encoder,
       this.frameIndex,
@@ -918,10 +1220,12 @@ export class Engine {
     this.submitList[0] = encoder.finish();
     if (full) probe.mark(CPU.FINISH);
     device.queue.submit(this.submitList);
+    if (this.snapJobs.length > 0) this.takeSnapshots();
     if (full) probe.mark(CPU.SUBMIT);
     this.profiler.afterSubmit();
     this.passes.labels.afterSubmit();
     this.graph.afterSubmit();
+    if (this.query?.ready) this.runQuery();
     if (full) probe.mark(CPU.AFTER);
 
     const cpuMs = performance.now() - t0;
@@ -939,9 +1243,13 @@ export class Engine {
     this.renderedFrames++;
     this.cpuMsAvg = this.renderedFrames === 1 ? cpuMs : this.cpuMsAvg + (cpuMs - this.cpuMsAvg) * CPU_EMA;
     this.publishState(cpuMs, (uploaded ? this.graph.lastUploadBytes : 0) + streamedBytes);
+    if (this.viewEvents && (frameDirty & (Dirty.CAMERA | Dirty.RESIZE)) !== 0) {
+      const c = this.camera;
+      this.init.onView(c.x, c.y, c.zoom, c.rotation);
+    }
     if (bench && !bench.driving) this.scheduleBenchCheck();
     this.frameGen = this.dataGen;
-    if ((frameDirty & PICK_DIRTY) !== 0 && this.hoverKinds !== 0) this.pickWanted = true;
+    if ((frameDirty & PICK_DIRTY) !== 0) this.interaction.wantHover();
 
     // One more tick to pick up input that arrived during this frame; it sleeps if there is none.
     this.wake();
@@ -965,7 +1273,7 @@ export class Engine {
         this.reservedFor = n;
       } catch (e) {
         this.reservedFor = n;
-        this.init.onError(e instanceof GraphError ? e : new GraphError("internal", String(e)), false);
+        this.init.onError(toGraphError(e), false);
         this.passes.cull.outputs = null;
       }
     }
@@ -981,7 +1289,7 @@ export class Engine {
         this.passes.edgeCull.reserve(e, (b) => this.graph.retireAfterSubmit(b));
         this.passes.edges.bind(this.passes.edgeCull.outputs!);
       } catch (err) {
-        this.init.onError(err instanceof GraphError ? err : new GraphError("internal", String(err)), false);
+        this.init.onError(toGraphError(err), false);
         this.passes.edgeCull.outputs = null;
       }
     }
@@ -1020,12 +1328,12 @@ export class Engine {
     this.bench = null;
     this.probe.setOverride(null);
     const result = b.result({
-      nodeCount: this.store.nodeCount,
+      nodeCount: this.store.nodeSlots,
       viewport: [this.camera.viewportW, this.camera.viewportH],
       adapter: this.caps.adapter,
       timestampQuery: this.caps.timestampQuery,
     });
-    this.init.onBenchmark(b.id, result, b.transferables());
+    this.init.onReply(b.id, result, null, b.transferables());
   }
 
   private publishState(cpuMs: number, uploadBytes: number): void {
@@ -1035,8 +1343,8 @@ export class Engine {
     s[STATE_SLOT.RENDERED_FRAMES] = this.renderedFrames;
     s[STATE_SLOT.CPU_MS_LAST] = cpuMs;
     s[STATE_SLOT.CPU_MS_AVG] = this.cpuMsAvg;
-    s[STATE_SLOT.NODE_COUNT] = this.store.nodeCount;
-    s[STATE_SLOT.EDGE_COUNT] = this.store.edgeCount;
+    s[STATE_SLOT.NODE_COUNT] = this.store.nodeSlots;
+    s[STATE_SLOT.EDGE_COUNT] = this.store.liveEdges;
     s[STATE_SLOT.VIEWPORT_W] = c.viewportW;
     s[STATE_SLOT.VIEWPORT_H] = c.viewportH;
     s[STATE_SLOT.CAMERA_X] = c.x;

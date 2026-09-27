@@ -211,7 +211,7 @@ fn label_edge_tops(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_
 }
 
 fn edgeLength(e : u32) -> f32 {
-  let ij = ends[e];
+  let ij = edgeEnds(ends[e]);
   return distance(positions[ij.x], positions[ij.y]);
 }
 

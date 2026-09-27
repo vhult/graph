@@ -17,13 +17,14 @@ const meta: Meta<GraphArgs> = {
   render: renderGraph<GraphArgs>({
     describe: () =>
       `Doom · one square node per pixel, colours streamed ${DOOM.rate} times a second\nclick the graph, then: arrows move · Ctrl fire · Space use · Enter / Esc menu · scroll to zoom`,
-    options: () => ({ hoverStyle: false, nodeDrag: false }),
+    options: () => ({ input: { drag: false, select: false }, style: { hover: false } }),
+    tune: () => ({ lodTargetPx: 0 }),
     gate: (_graph, a, root) => askToDownload(root).then((ok) => (ok ? a : null)),
     load: () => cached("doom:screen", () => screen()),
     onLoad: (graph) => {
       stop();
       const id = run;
-      graph.setBackground([0, 0, 0, 1]);
+      graph.style.set({ background: [0, 0, 0, 1] });
       void DoomGame.start(graph).then((g) => {
         if (id !== run) return g.stop();
         game = g;

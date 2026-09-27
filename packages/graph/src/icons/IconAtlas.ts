@@ -1,16 +1,16 @@
-import { GraphError } from "../api/errors";
 import type { IconSource } from "../api/types";
 import { ICON_CONSTANTS } from "../data/Layouts";
 import { maxIcons } from "../gpu/Caps";
 import type { Gpu } from "../gpu/Device";
 import { createShaderModule } from "../gpu/ShaderModules";
-import { buildIcons } from "./IconGeometry";
+import { packIcons, parseIcons, type BuiltIcon } from "./IconGeometry";
 
 const { ICON_TILE, ICON_PALETTE_WIDTH } = ICON_CONSTANTS;
 const LEVELS = 4;
 const ROW_BYTES = 256;
 const SDF_WG = 64;
 const SDF_TEXEL_BYTES = 2;
+const FAR_HALF = 0x3c00;
 
 export class IconAtlas {
   count = 0;
@@ -22,6 +22,7 @@ export class IconAtlas {
   private sdf: GPUTexture;
   private palette: GPUTexture;
   private paletteRows = 0;
+  private built: (BuiltIcon | null)[] = [];
 
   private constructor(
     private readonly device: GPUDevice,
@@ -50,20 +51,50 @@ export class IconAtlas {
     return new IconAtlas(device, gpu.memory, layout, boundary, field, device.createBindGroup({ layout: emptyLayout, entries: [] }));
   }
 
-  define(sources: readonly IconSource[]): void {
-    const max = maxIcons(this.device);
-    if (sources.length > max) throw new GraphError("limits-exceeded", `defineIcons: this GPU holds at most ${max} icons`);
-    const set = buildIcons(sources);
-    const data = this.dataBuffer(set.data);
-    const sdf = this.sdfTexture(Math.max(1, set.count));
-    if (set.count > 0) this.generate(data, sdf, set.count, set.curves, set.maxCurves);
-    this.data.destroy();
+  define(sources: readonly IconSource[]): string[] {
     this.dropSdf();
-    this.data = data;
-    this.sdf = sdf;
-    this.sdfView = sdf.createView({ dimension: "2d-array" });
-    this.count = set.count;
-    this.version++;
+    this.setSdf(this.sdfTexture(Math.max(1, sources.length)));
+    this.built = [];
+    return this.defineAt(Uint16Array.from(sources.keys()), sources);
+  }
+
+  defineAt(ids: Uint16Array, sources: readonly IconSource[]): string[] {
+    const { icons, failed } = parseIcons(sources);
+    let top = 0;
+    for (let k = 0; k < ids.length; k++) top = Math.max(top, ids[k]! + 1);
+    while (this.built.length < top) this.built.push(null);
+    const good: number[] = [];
+    const bad: number[] = [];
+    for (let k = 0; k < ids.length; k++) {
+      this.built[ids[k]!] = icons[k]!;
+      (icons[k] ? good : bad).push(k);
+    }
+    const layers = this.sdf.depthOrArrayLayers;
+    if (top > layers) this.grow(Math.min(maxIcons(this.device), Math.max(top, layers * 2)));
+    if (bad.length > 0) this.blank(Uint16Array.from(bad, (k) => ids[k]!));
+    this.build(Uint16Array.from(good, (k) => ids[k]!), good.map((k) => icons[k]!));
+    return failed;
+  }
+
+  clear(ids: Uint16Array): void {
+    if (this.blank(ids)) this.pack();
+  }
+
+  private blank(ids: Uint16Array): boolean {
+    const blank = new Uint16Array(ICON_TILE * ICON_TILE).fill(FAR_HALF);
+    const queue = this.device.queue;
+    let any = false;
+    for (let k = 0; k < ids.length; k++) {
+      const id = ids[k]!;
+      if (id >= this.built.length) continue;
+      this.built[id] = null;
+      any = true;
+      for (let level = 0; level < LEVELS; level++) {
+        const res = ICON_TILE >> level;
+        queue.writeTexture({ texture: this.sdf, mipLevel: level, origin: { x: 0, y: 0, z: id } }, blank, { bytesPerRow: res * SDF_TEXEL_BYTES, rowsPerImage: res }, [res, res, 1]);
+      }
+    }
+    return any;
   }
 
   setPalette(colors: Uint32Array, version: number): void {
@@ -89,7 +120,45 @@ export class IconAtlas {
     this.data.destroy();
   }
 
-  private generate(data: GPUBuffer, sdf: GPUTexture, layers: number, curves: number, maxCurves: number): void {
+  private build(ids: Uint16Array, built: readonly BuiltIcon[]): void {
+    if (built.length > 0) {
+      const set = packIcons(built);
+      const data = this.dataBuffer(set.data);
+      this.generate(data, ids, set.curves, set.maxCurves);
+      data.destroy();
+    }
+    this.pack();
+  }
+
+  private pack(): void {
+    const set = packIcons(this.built);
+    this.data.destroy();
+    this.data = this.dataBuffer(set.data);
+    this.count = set.count;
+    this.version++;
+  }
+
+  private grow(layers: number): void {
+    const old = this.sdf;
+    const next = this.sdfTexture(layers);
+    const encoder = this.device.createCommandEncoder({ label: "icons/grow" });
+    for (let level = 0; level < LEVELS; level++) {
+      const res = ICON_TILE >> level;
+      encoder.copyTextureToTexture({ texture: old, mipLevel: level }, { texture: next, mipLevel: level }, [res, res, old.depthOrArrayLayers]);
+    }
+    this.device.queue.submit([encoder.finish()]);
+    this.dropSdf();
+    this.setSdf(next);
+  }
+
+  private setSdf(sdf: GPUTexture): void {
+    this.sdf = sdf;
+    this.sdfView = sdf.createView({ dimension: "2d-array" });
+  }
+
+  private generate(data: GPUBuffer, ids: Uint16Array, curves: number, maxCurves: number): void {
+    const layers = ids.length;
+    const sdf = this.sdf;
     const device = this.device;
     const maxX = device.limits.maxComputeWorkgroupsPerDimension;
     const offsets: number[] = [];
@@ -129,9 +198,18 @@ export class IconAtlas {
       pass.dispatchWorkgroups(gx, Math.ceil(groups / gx));
     }
     pass.end();
-    for (let level = 0; level < LEVELS; level++) {
-      const res = ICON_TILE >> level;
-      encoder.copyBufferToTexture({ buffer: out, offset: offsets[level]!, bytesPerRow: ROW_BYTES, rowsPerImage: res }, { texture: sdf, mipLevel: level }, [res, res, layers]);
+    for (let k = 0; k < layers; ) {
+      let run = 1;
+      while (k + run < layers && ids[k + run] === ids[k]! + run) run++;
+      for (let level = 0; level < LEVELS; level++) {
+        const res = ICON_TILE >> level;
+        encoder.copyBufferToTexture(
+          { buffer: out, offset: offsets[level]! + k * ROW_BYTES * res, bytesPerRow: ROW_BYTES, rowsPerImage: res },
+          { texture: sdf, mipLevel: level, origin: { x: 0, y: 0, z: ids[k]! } },
+          [res, res, run],
+        );
+      }
+      k += run;
     }
     device.queue.writeBuffer(params, 0, words);
     device.queue.submit([encoder.finish()]);
@@ -149,7 +227,7 @@ export class IconAtlas {
       size: [ICON_TILE, ICON_TILE, layers],
       mipLevelCount: LEVELS,
       format: "r16float",
-      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.COPY_SRC,
     });
   }
 

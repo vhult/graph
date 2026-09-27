@@ -5,13 +5,13 @@
  */
 import { ENGINE_CONSTANTS } from "../data/Layouts";
 import type { ContractLayouts } from "../gpu/BindLayouts";
-import { Stage, type FrameContext, type RenderNode } from "../gpu/FrameGraph";
+import { PREMULTIPLIED, Stage, type FrameContext, type RenderNode } from "../gpu/FrameGraph";
 import { Lazy } from "../gpu/Lazy";
 import { createShaderModule } from "../gpu/ShaderModules";
 import type { IconAtlas } from "../icons/IconAtlas";
 import type { HoverPass } from "./HoverPass";
 import type { NodeOrderPass } from "./NodeOrderPass";
-import type { CullOutputs, IconOptions } from "./TransformCullPass";
+import type { CullOutputs } from "./TransformCullPass";
 
 const DRAW_ARGS_BYTES = 16;
 const BUCKETS = [ENGINE_CONSTANTS.BUCKET_NORMAL, ENGINE_CONSTANTS.BUCKET_FOREGROUND] as const;
@@ -53,12 +53,8 @@ export class NodeGeometryPass implements RenderNode {
     this.iconVariant = new Lazy(makeIcons);
   }
 
-  static async create(device: GPUDevice, format: GPUTextureFormat, layouts: ContractLayouts, icon: IconOptions): Promise<NodeGeometryPass> {
+  static async create(device: GPUDevice, format: GPUTextureFormat, layouts: ContractLayouts): Promise<NodeGeometryPass> {
     const module = await createShaderModule(device, "passes/node_geometry.wgsl");
-    const blend: GPUBlendState = {
-      color: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
-      alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
-    };
     const V = GPUShaderStage.VERTEX;
     const F = GPUShaderStage.FRAGMENT;
     const variant = async (icons: boolean): Promise<Variant> => {
@@ -75,13 +71,12 @@ export class NodeGeometryPass implements RenderNode {
       }
       const layout = device.createBindGroupLayout({ label: icons ? "group2/nodes.icons" : "group2/nodes", entries });
       const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [layouts.frame, layouts.graph, layout] });
-      const iconConstants: Record<string, number> = icons ? { ICON_SCALE: icon.scale, ICON_MIN_PX: icon.minPx } : {};
       const make = (bucket: number, shapes: number) =>
         device.createRenderPipelineAsync({
           label: `nodes/bucket${bucket}#${shapes}${icons ? "#icons" : ""}`,
           layout: pipelineLayout,
-          vertex: { module, entryPoint: icons ? "vs_icons" : "vs", constants: { BUCKET: bucket, NODE_SHAPES: shapes, ...iconConstants } },
-          fragment: { module, entryPoint: icons ? "fs_icons" : "fs", targets: [{ format, blend }], constants: { NODE_SHAPES: shapes, ...iconConstants } },
+          vertex: { module, entryPoint: icons ? "vs_icons" : "vs", constants: { BUCKET: bucket, NODE_SHAPES: shapes } },
+          fragment: { module, entryPoint: icons ? "fs_icons" : "fs", targets: [{ format, blend: PREMULTIPLIED }], constants: { NODE_SHAPES: shapes } },
           primitive: { topology: "triangle-strip" },
         });
       const byShapes = async (shapes: number) => {

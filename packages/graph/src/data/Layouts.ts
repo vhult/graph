@@ -78,17 +78,19 @@ export const FRAME = defineStruct("Frame", [
   { name: "nodeCount", type: "u32" },
   { name: "edgeCount", type: "u32" },
   { name: "globalNodeScale", type: "f32" },
-  { name: "globalEdgeWidth", type: "f32" },
+  { name: "globalEdgeWidth", type: "f32", doc: "CSS px" },
   { name: "flags", type: "u32", doc: "FRAME_* bits" },
   { name: "globalEdgeColor", type: "u32", doc: "rgba8unorm tint for edges with no per-edge colour" },
+  { name: "iconScale", type: "f32", doc: "icon side / node diameter" },
+  { name: "iconMinPx", type: "f32", doc: "smallest icon side drawn, device px" },
+  { name: "dimmedAlpha", type: "f32", doc: "alpha factor of dimmed nodes and edges" },
 ] as const);
 
 // ---------------------------------------------------------------------------
 // Binding contract — PUBLIC API, versioned
 // ---------------------------------------------------------------------------
 
-/** 3: the high half of `nodeSize` holds the icon colour index instead of a ring width. */
-export const BINDING_CONTRACT_VERSION = 3;
+export const BINDING_CONTRACT_VERSION = 4;
 
 export const GROUP_FRAME = 0;
 export const GROUP_GRAPH = 1;
@@ -150,8 +152,13 @@ export const CONSTANTS = {
   STATE_HIDDEN: 1 << 3,
   STATE_NEIGHBOR: 1 << 4,
   STATE_DRAGGING: 1 << 5,
-  STATE_FOREGROUND_MASK: (1 << 0) | (1 << 1) | (1 << 5),
+  STATE_FOCUSED: 1 << 6,
+  STATE_REMOVED: 1 << 7,
+  STATE_FOREGROUND_MASK: (1 << 0) | (1 << 1) | (1 << 5) | (1 << 6),
   STATE_GROUP_SHIFT: 8,
+  FRAME_FLAG_HIDDEN: 1,
+  FRAME_FLAG_DIMMED: 2,
+  FRAME_FLAG_EDGE_LOOKS: 4,
   // nodeStyle fields
   STYLE_SHAPE_MASK: 0xff,
   STYLE_ICON_SHIFT: 8,
@@ -181,12 +188,21 @@ export const CONSTANTS = {
   EDGE_CAP_SHIFT: 24,
   EDGE_FLAG_DIRECTED: 1 << 28,
   EDGE_FLAG_DASHED: 1 << 29,
-  /** Width unit of the edgeStyle low byte: 1/8 device px. */
+  /** Width unit of the edgeStyle low byte: 1/8 CSS px. */
   EDGE_WIDTH_SCALE: 8,
+  EDGE_END_MASK: 0x0fffffff,
+  EDGE_STATE_SHIFT: 28,
+  EDGE_STATE_HIDDEN: 1,
+  EDGE_STATE_SELECTED: 2,
+  EDGE_STATE_DIMMED: 4,
+  EDGE_STATE_FOCUSED: 8,
+  EDGE_STATE_REMOVED: 1 << 4,
 } as const;
 
 /** Default nodeStyle word: shape 0 (circle), no icon, layer 0, no flags. */
 export const DEFAULT_NODE_STYLE = CONSTANTS.NO_ICON << CONSTANTS.STYLE_ICON_SHIFT;
+
+export const MAX_NODES = CONSTANTS.EDGE_END_MASK + 1;
 
 // ---------------------------------------------------------------------------
 // Engine-internal layouts (@group(2), NOT public contract)
@@ -225,7 +241,7 @@ export const EDGE_CHUNK = defineStruct("EdgeChunk", [
   { name: "lo", type: "vec2<f32>", doc: "min endpoint, world" },
   { name: "hi", type: "vec2<f32>", doc: "max endpoint, world" },
   { name: "maxLen", type: "f32", doc: "longest edge, world units" },
-  { name: "maxWidthPx", type: "f32", doc: "widest per-edge style width, device px; 0 = none" },
+  { name: "maxWidthPx", type: "f32", doc: "widest per-edge style width, CSS px; 0 = none" },
   { name: "density", type: "f32", doc: "edge length per area where this length level lies, 1/world" },
   { name: "_pad", type: "f32" },
   { name: "midLo", type: "vec2<f32>" },
@@ -279,6 +295,7 @@ export const LABEL_PARAMS = defineStruct("LabelParams", [
   { name: "edgeCount", type: "u32" },
   { name: "bitsOffset", type: "u32" },
   { name: "liveCount", type: "u32" },
+  { name: "color", type: "u32", doc: "rgba8unorm node label colour" },
 ] as const);
 
 export const LABEL_CANDIDATE = defineStruct("LabelCandidate", [
@@ -348,6 +365,7 @@ export const PICK_CONSTANTS = {
   PICK_FLAG_LAYERS: 16,
   PICK_LAYER_SHIFT: 27,
   HOVER_FLAG_SHAPES: 1,
+  HOVER_FLAG_EDGE_STYLES: 2,
 } as const;
 
 export const HOVER_PARAMS = defineStruct("HoverParams", [
@@ -363,6 +381,19 @@ export const HOVER_PARAMS = defineStruct("HoverParams", [
   { name: "flags", type: "u32" },
   { name: "nodeOutlineMinPx", type: "f32" },
   { name: "nodeOutlineMaxPx", type: "f32" },
+] as const);
+
+export const LOOK_PARAMS = defineStruct("LookParams", [
+  { name: "outlineColor", type: "u32" },
+  { name: "outlineScale", type: "f32" },
+  { name: "outlineMinPx", type: "f32" },
+  { name: "outlineMaxPx", type: "f32" },
+  { name: "bit", type: "u32", doc: "STATE_* bit the listed nodes carry" },
+  { name: "flags", type: "u32" },
+  { name: "edgeColor", type: "u32", doc: "rgba8unorm" },
+  { name: "edgeWidth", type: "f32", doc: "width factor" },
+  { name: "edgeBit", type: "u32", doc: "EDGE_STATE_* bits a listed edge carries under edgeMask" },
+  { name: "edgeMask", type: "u32" },
 ] as const);
 
 export function pickOutWords(nodeCount: number, edgeCount: number): number {
@@ -430,8 +461,7 @@ export const ENGINE_CONSTANTS = {
   RADIX_BITS: 4,
   RADIX_BINS: 16,
   MOVE_COUNT: 0,
-  MOVE_NODE: 1,
-  MOVE_LIST: 2,
+  MOVE_LIST: 1,
   MOVE_GROUPS: 256,
 } as const;
 

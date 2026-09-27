@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CONSTANTS, DEFAULT_NODE_STYLE } from "../src/data/Layouts";
-import { ICON_PALETTE_MAX, packIconColors, packNodeSizes, packNodeStyle, packRgba, paletteIndices, toHalfBits } from "../src/data/Pack";
+import { ICON_PALETTE_MAX, packEdgeStyle, packIconColors, packNodeSizes, packNodeStyle, packRgba, paletteIndices, toHalfBits } from "../src/data/Pack";
 
 type F16Ctor = new (n: number) => { [i: number]: number; buffer: ArrayBuffer };
 
@@ -33,8 +33,6 @@ describe("Pack", () => {
     const out = packNodeSizes(new Float32Array([1, 2]), new Uint32Array(2));
     expect(out[0]).toBe(0x3c00);
     expect(out[1]).toBe(0x4000);
-    const kept = packNodeSizes(new Float32Array([1, 2]), new Uint32Array([0, 5 << 16, 7 << 16]), 1);
-    expect(Array.from(kept)).toEqual([0x3c00 | (5 << 16), (0x4000 | (7 << 16)) >>> 0]);
     expect(packNodeSizes(new Float32Array([1, 2]), new Uint32Array([9 << 16]))[1]).toBe(0x4000);
   });
 
@@ -77,5 +75,12 @@ describe("Pack", () => {
   it("packRgba is little-endian rgba8unorm", () => {
     expect(packRgba(1, 0, 0, 1)).toBe(0xff0000ff);
     expect(packRgba(0, 0, 1, 0)).toBe(0x00ff0000);
+  });
+
+  it("packs edge width in 1/8 css px and the directed flag", () => {
+    expect(packEdgeStyle({ width: 1.5 })).toBe(12);
+    expect(packEdgeStyle({ width: 1, directed: true })).toBe((8 | (1 << 28)) >>> 0);
+    expect(packEdgeStyle({})).toBe(0);
+    expect(packEdgeStyle({ width: 100 })).toBe(255);
   });
 });

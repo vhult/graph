@@ -1,5 +1,4 @@
 /** UPLOAD (stage 0): GPU half of data uploads — permutes replaced channels, applies partial updates. */
-import { Dirty } from "../engine/Dirty";
 import { Stage, type ComputeNode, type FrameContext } from "../gpu/FrameGraph";
 import type { GraphBuffers } from "../gpu/GraphBuffers";
 
@@ -7,7 +6,7 @@ export class UploadPass implements ComputeNode {
   readonly stage = Stage.UPLOAD;
   readonly name = "upload";
   readonly phases = ["upload"] as const;
-  readonly runsOn = Dirty.TOPOLOGY | Dirty.POSITIONS | Dirty.MOVED | Dirty.STYLE | Dirty.STATE;
+  readonly runsOn = ~0;
 
   constructor(private readonly graph: GraphBuffers) {}
 

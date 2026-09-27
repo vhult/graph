@@ -153,7 +153,7 @@ export class DoomGame {
 
   static async start(graph: Graph): Promise<DoomGame> {
     if (!compiled) throw new Error("Doom is not downloaded");
-    const game = new DoomGame(graph.streamNodes({ colors: true }));
+    const game = new DoomGame(graph.nodes.stream({ colors: true }));
     const text = (ptr: number, length: number) => new TextDecoder().decode(new Uint8Array(game.exports.memory.buffer, ptr, length).slice());
     const imports = {
       loading: {

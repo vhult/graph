@@ -28,6 +28,7 @@ interface Args {
   nodeLabels: boolean;
   edgeLabels: boolean;
   icons: number;
+  nodeReserve: number;
 }
 
 /** Latest args, read by the panel when "Run" is clicked. */
@@ -45,10 +46,10 @@ const meta: Meta<Args> = {
   title: "Developer/Benchmark",
   render: (args, ctx) =>
     stage(args, ctx, {
-      // Changing this recreates the engine, so LOD on/off is a clean A/B.
-      options: (a) => ({ lodTargetPx: a.lodTargetPx, controls: false }),
+      options: (a) => ({ nodeReserve: a.nodeReserve, input: { pan: false, zoom: false, drag: false, select: false, pick: { edges: false } } }),
       setup: (graph, a, hud, root) => {
         current = a;
+        graph.debug.tune({ lodTargetPx: a.lodTargetPx });
         load(graph, a, hud);
         new BenchPanel(root, graph, () => ({
           name: "custom",
@@ -62,6 +63,7 @@ const meta: Meta<Args> = {
       },
       update: (graph, a, prev, hud) => {
         current = a;
+        if (a.lodTargetPx !== prev.lodTargetPx) graph.debug.tune({ lodTargetPx: a.lodTargetPx });
         if (a.dataset !== prev.dataset || a.count !== prev.count || a.nodeLabels !== prev.nodeLabels || a.edgeLabels !== prev.edgeLabels || a.icons !== prev.icons) load(graph, a, hud);
         else if (a.path !== prev.path) hud.setNote(`${a.dataset} · path ${a.path}`);
       },
@@ -78,6 +80,7 @@ const meta: Meta<Args> = {
     nodeLabels: { control: "boolean" },
     edgeLabels: { control: "boolean" },
     icons: { control: "select", options: [0, 8, 64, 256] },
+    nodeReserve: { control: { type: "number", min: 0, step: 1 } },
   },
   args: {
     dataset: "communities",
@@ -87,6 +90,7 @@ const meta: Meta<Args> = {
     nodeLabels: true,
     edgeLabels: true,
     icons: 0,
+    nodeReserve: 100,
   },
 };
 

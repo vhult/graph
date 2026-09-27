@@ -10,6 +10,11 @@
 import type { IconAtlas } from "../icons/IconAtlas";
 import type { Profiler } from "./Profiler";
 
+export const PREMULTIPLIED: GPUBlendState = {
+  color: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
+  alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
+};
+
 export const Stage = {
   UPLOAD: 0,
   PRE_COMPUTE: 1,

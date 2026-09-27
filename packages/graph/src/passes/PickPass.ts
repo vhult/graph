@@ -1,9 +1,11 @@
 import { PICK_CONSTANTS, PICK_PARAMS, pickOutWords } from "../data/Layouts";
+import { edgeConstants, edgeKey, lodKey, type Tune } from "../engine/Tune";
 import type { ContractLayouts } from "../gpu/BindLayouts";
 import type { FrameContext } from "../gpu/FrameGraph";
 import type { GraphBuffers } from "../gpu/GraphBuffers";
+import { Tuned } from "../gpu/Lazy";
 import { createShaderModule } from "../gpu/ShaderModules";
-import type { EdgeCullOptions, EdgeCullPass } from "./EdgeCullPass";
+import type { EdgeCullPass } from "./EdgeCullPass";
 import type { TransformCullPass } from "./TransformCullPass";
 
 export interface PickRequest {
@@ -19,7 +21,7 @@ export interface PickRequest {
   token: number;
 }
 
-export type PickResult = (node: number, edge: number, nodeScale: number, engine: number, token: number) => void;
+export type PickResult = (node: number, edge: number, nodeScale: number, token: number) => void;
 
 interface Slot {
   buffer: GPUBuffer;
@@ -41,6 +43,7 @@ interface Groups {
   nodeGraph: GPUBindGroup;
   nodeState: GPUBindGroup;
   edgeGraph: GPUBindGroup | null;
+  edgeSelectGraph: GPUBindGroup;
   edgeState: GPUBindGroup | null;
   select: GPUBindGroup;
   test: GPUBindGroup;
@@ -53,8 +56,9 @@ const SLOTS = 3;
 const KEY_SIZE = 14;
 const READBACK_BYTES = 20;
 
-export const PICKED_NODES = 1;
-export const PICKED_EDGES = 2;
+function pickKey(t: Tune): string {
+  return `${lodKey(t)}|${edgeKey(t)}`;
+}
 
 export class PickPass {
   private readonly params: GPUBuffer;
@@ -72,8 +76,8 @@ export class PickPass {
 
   private constructor(
     private readonly device: GPUDevice,
-    private readonly layouts: Record<"nodeGraph" | "nodeState" | "edgeGraph" | "edgeState" | "select" | "test" | "resolve" | "empty", GPUBindGroupLayout>,
-    private readonly pipelines: Pipelines,
+    private readonly layouts: Record<"nodeGraph" | "nodeState" | "edgeGraph" | "edgeSelectGraph" | "edgeState" | "select" | "test" | "resolve" | "empty", GPUBindGroupLayout>,
+    readonly pipelines: Tuned<Pipelines>,
   ) {
     this.params = device.createBuffer({ label: "pick/params", size: PICK_PARAMS.size, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.args = device.createBuffer({ label: "pick/args", size: 16, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.INDIRECT });
@@ -89,17 +93,16 @@ export class PickPass {
           const node = w[0]! - 1;
           const edge = w[1]! - 1;
           const scale = new Float32Array(range)[3]!;
-          const engine = w[4]!;
           slot.buffer.unmap();
           slot.busy = false;
-          this.onResult?.(node, edge, scale, engine, slot.token);
+          this.onResult?.(node, edge, scale, slot.token);
         },
       };
       this.slots.push(slot);
     }
   }
 
-  static async create(device: GPUDevice, contract: ContractLayouts, lodTargetPx: number, edge: EdgeCullOptions): Promise<PickPass> {
+  static async create(device: GPUDevice, contract: ContractLayouts, tune: Tune): Promise<PickPass> {
     const [nodeModule, edgeModule] = await Promise.all([createShaderModule(device, "passes/pick_nodes.wgsl"), createShaderModule(device, "passes/pick_edges.wgsl")]);
     const STAGE = GPUShaderStage.COMPUTE;
     const ro = (binding: number): GPUBindGroupLayoutEntry => ({ binding, visibility: STAGE, buffer: { type: "read-only-storage" } });
@@ -109,19 +112,13 @@ export class PickPass {
     const layouts = {
       nodeGraph: L("nodeGraph", [ro(0), ro(1), ro(2), ro(3), ro(4)]),
       nodeState: L("nodeState", [rw(0)]),
-      edgeGraph: L("edgeGraph", [ro(0), ro(1), ro(2), ro(5), ro(6), ro(7)]),
+      edgeGraph: L("edgeGraph", [ro(0), ro(1), ro(2), ro(4), ro(5), ro(6), ro(7)]),
+      edgeSelectGraph: L("edgeSelectGraph", [ro(0), ro(1), ro(2), ro(5), ro(6), ro(7)]),
       edgeState: L("edgeState", [rw(0), rw(1)]),
       select: L("select", [un(0), rw(1), rw(3)]),
       test: L("test", [un(0), rw(1)]),
       resolve: L("resolve", [un(0), rw(1), ro(2)]),
       empty: L("empty", []),
-    };
-    const nodeConstants = { LOD_TARGET_PX: lodTargetPx };
-    const edgeConstants = {
-      EDGE_ARROWS: edge.directed ? 1 : 0,
-      EDGE_MAX_OVERDRAW: edge.maxOverdraw,
-      EDGE_MIN_LEN_PX: edge.minLengthPx,
-      EDGE_DEBUG: edge.debug,
     };
     const make = (module: GPUShaderModule, entryPoint: string, groups: GPUBindGroupLayout[], constants: Record<string, number>) =>
       device.createComputePipelineAsync({
@@ -129,15 +126,23 @@ export class PickPass {
         layout: device.createPipelineLayout({ bindGroupLayouts: [contract.frame, ...groups] }),
         compute: { module, entryPoint, constants },
       });
-    const [nodeSelect, nodeTest, nodeResolve, edgeSelect, edgeTest, edgeResolve] = await Promise.all([
-      make(nodeModule, "pick_nodes_select", [layouts.nodeGraph, layouts.nodeState, layouts.select], nodeConstants),
-      make(nodeModule, "pick_nodes_test", [layouts.nodeGraph, layouts.nodeState, layouts.test], nodeConstants),
-      make(nodeModule, "pick_nodes_resolve", [layouts.nodeGraph, layouts.nodeState, layouts.resolve], nodeConstants),
-      make(edgeModule, "pick_edges_select", [layouts.edgeGraph, layouts.edgeState, layouts.select], edgeConstants),
-      make(edgeModule, "pick_edges_test", [layouts.edgeGraph, layouts.edgeState, layouts.test], edgeConstants),
-      make(edgeModule, "pick_edges_resolve", [layouts.empty, layouts.empty, layouts.resolve], edgeConstants),
-    ]);
-    return new PickPass(device, layouts, { nodeSelect, nodeTest, nodeResolve, edgeSelect, edgeTest, edgeResolve });
+    const makeAll = async (t: Tune): Promise<Pipelines> => {
+      const nodeConstants = { LOD_TARGET_PX: t.lodTargetPx };
+      const edge = edgeConstants(t);
+      const [nodeSelect, nodeTest, nodeResolve, edgeSelect, edgeTest, edgeResolve] = await Promise.all([
+        make(nodeModule, "pick_nodes_select", [layouts.nodeGraph, layouts.nodeState, layouts.select], nodeConstants),
+        make(nodeModule, "pick_nodes_test", [layouts.nodeGraph, layouts.nodeState, layouts.test], nodeConstants),
+        make(nodeModule, "pick_nodes_resolve", [layouts.nodeGraph, layouts.nodeState, layouts.resolve], nodeConstants),
+        make(edgeModule, "pick_edges_select", [layouts.edgeSelectGraph, layouts.edgeState, layouts.select], edge),
+        make(edgeModule, "pick_edges_test", [layouts.edgeGraph, layouts.edgeState, layouts.test], edge),
+        make(edgeModule, "pick_edges_resolve", [layouts.empty, layouts.empty, layouts.resolve], edge),
+      ]);
+      return { nodeSelect, nodeTest, nodeResolve, edgeSelect, edgeTest, edgeResolve };
+    };
+    const pipelines = new Tuned(pickKey, makeAll);
+    await pipelines.loadTune(tune);
+    pipelines.useTune(tune);
+    return new PickPass(device, layouts, pipelines);
   }
 
   get free(): boolean {
@@ -174,7 +179,7 @@ export class PickPass {
       (nodes ? C.PICK_FLAG_NODES : 0) | (edges ? C.PICK_FLAG_EDGES : 0) | (req.shapes ? C.PICK_FLAG_SHAPES : 0) | (req.layers ? C.PICK_FLAG_LAYERS : 0) | (req.edgeColors ? C.PICK_FLAG_EDGE_COLORS : 0);
     this.device.queue.writeBuffer(this.params, 0, this.paramData);
 
-    const p = this.pipelines;
+    const p = this.pipelines.value!;
     const pass = encoder.beginComputePass();
     pass.setBindGroup(0, ctx.frameBindGroup);
     if (nodes) {
@@ -191,11 +196,12 @@ export class PickPass {
       pass.dispatchWorkgroups(1);
     }
     if (edges) {
-      pass.setBindGroup(1, groups.edgeGraph!);
+      pass.setBindGroup(1, groups.edgeSelectGraph);
       pass.setBindGroup(2, groups.edgeState!);
       pass.setBindGroup(3, groups.select);
       pass.setPipeline(p.edgeSelect);
       pass.dispatchWorkgroups(1);
+      pass.setBindGroup(1, groups.edgeGraph!);
       pass.setBindGroup(3, groups.test);
       pass.setPipeline(p.edgeTest);
       pass.dispatchWorkgroupsIndirect(this.args, 0);
@@ -207,7 +213,7 @@ export class PickPass {
     }
     pass.end();
     encoder.copyBufferToBuffer(this.out, C.PICK_NODE_RESULT * 4, slot.buffer, 0, READBACK_BYTES);
-    const picked = (nodes ? PICKED_NODES : 0) | (edges ? PICKED_EDGES : 0);
+    const picked = (nodes ? C.PICK_FLAG_NODES : 0) | (edges ? C.PICK_FLAG_EDGES : 0);
     slot.busy = true;
     slot.token = req.token * 4 + picked;
     this.pending = slot;
@@ -218,7 +224,10 @@ export class PickPass {
     const slot = this.pending;
     if (!slot) return;
     this.pending = null;
-    slot.buffer.mapAsync(GPUMapMode.READ).then(slot.read, () => (slot.busy = false));
+    slot.buffer.mapAsync(GPUMapMode.READ).then(slot.read, () => {
+      slot.busy = false;
+      this.onResult?.(-1, -1, 1, slot.token);
+    });
   }
 
   private bind(graph: GraphBuffers, nodeState: GPUBuffer, edgeState: GPUBuffer | null, lines: GPUBuffer | null, out: GPUBuffer): Groups {
@@ -246,7 +255,8 @@ export class PickPass {
     this.groups = {
       nodeGraph: group(l.nodeGraph, [[0, b.nodePos], [1, b.nodeStyle], [2, b.nodeSize], [3, b.nodeColor], [4, b.nodeState]]),
       nodeState: group(l.nodeState, [[0, nodeState]]),
-      edgeGraph: group(l.edgeGraph, [[0, b.nodePos], [1, b.nodeStyle], [2, b.nodeSize], [5, b.edgeIdx], [6, b.edgeStyle], [7, b.edgeColor]]),
+      edgeGraph: group(l.edgeGraph, [[0, b.nodePos], [1, b.nodeStyle], [2, b.nodeSize], [4, b.nodeState], [5, b.edgeIdx], [6, b.edgeStyle], [7, b.edgeColor]]),
+      edgeSelectGraph: group(l.edgeSelectGraph, [[0, b.nodePos], [1, b.nodeStyle], [2, b.nodeSize], [5, b.edgeIdx], [6, b.edgeStyle], [7, b.edgeColor]]),
       edgeState: edgeReady ? group(l.edgeState, [[0, edgeState], [1, lines]]) : null,
       select: group(l.select, [[0, this.params], [1, out], [3, this.args]]),
       test: group(l.test, [[0, this.params], [1, out]]),
@@ -263,6 +273,7 @@ export class PickPass {
   }
 
   destroy(): void {
+    this.onResult = null;
     this.params.destroy();
     this.args.destroy();
     this.out?.destroy();

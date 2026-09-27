@@ -35,17 +35,17 @@ export const SUITE: readonly BenchCase[] = [
 
 export async function setBenchIcons(graph: Graph, count: number, icons: number): Promise<void> {
   if (icons === 0) {
-    graph.setNodes({ count, icons: new Uint16Array(count).fill(NO_ICON) });
+    graph.nodes.updateAll({ icons: new Uint16Array(count).fill(NO_ICON) });
     return;
   }
-  await graph.defineIcons(benchIcons(icons));
+  await graph.icons.define(benchIcons(icons));
   const ids = new Uint16Array(count);
   const colors = new Uint32Array(count);
   for (let i = 0; i < count; i++) {
     ids[i] = i % icons;
     colors[i] = i % 3 === 0 ? 0xffffffff : hslToWord(((i >> 2) % 16) / 16, 0.8, 0.85);
   }
-  graph.setNodes({ count, icons: ids, iconColors: colors });
+  graph.nodes.updateAll({ icons: ids, iconColors: colors });
 }
 
 export interface CaseRun {
@@ -58,7 +58,7 @@ export async function runCase(graph: Graph, c: BenchCase): Promise<CaseRun> {
   await setBenchIcons(graph, c.count, c.icons ?? 0);
   graph.camera.fit();
   const path = PATHS[c.path];
-  const result = await graph.benchmark({ path: path.keys, frames: path.frames });
+  const result = await graph.debug.benchmark({ path: path.keys, frames: path.frames });
   return { case: c, result };
 }
 
