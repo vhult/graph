@@ -8,6 +8,22 @@ bandwidth), Edge 153, 1M nodes / 3M edges at fit unless stated.
 
 ---
 
+## 0074 — The build strips comments, indentation and blank lines from WGSL
+
+`scripts/build.mjs` strips comments, indentation and blank lines from every
+`.wgsl` file before esbuild bundles it; `#include` lines are kept. Watch mode
+keeps the full source so dev shader errors point to real lines. The WGSL is
+~40% of `worker.js`: 366.3 -> 333.4 KB raw, 104.5 -> 93.1 KB gzip,
+87.7 -> 79.0 KB brotli. Also removing spaces around symbols and joining lines
+saves only 0.6 KB more brotli and can merge tokens (`a - -b` -> `a--b`), so it
+is not done. Renaming identifiers was estimated at ~2.8 KB more brotli; it
+needs a real WGSL parser and would break shader error messages, so it is not
+done. All 23 pass shaders compile clean on the GPU, raw and stripped. Frame
+cost unchanged, `large` bench, AMD Radeon 890M, one run each: frame
+4.90 / 9.54 -> 4.97 / 9.71 ms (mean / p95), GPU 3.84 / 7.89 -> 3.78 / 7.95 ms.
+
+---
+
 ## 0073 — The node reserve is an init option, 100 by default; an add inside it marks STYLE | STATE
 
 The reserve of 0055 is `GraphOptions.nodeReserve` (user decision): an integer
