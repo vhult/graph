@@ -287,6 +287,83 @@ describe("Graph.destroy", () => {
     expect(last.r[8]).toBe(0);
   });
 
+  describe("long press", () => {
+    const menus = () => FakeWorker.last.sent.filter((m): m is Extract<ToWorker, { t: "inputRecord" }> => m.t === "inputRecord" && m.r[0] === 8);
+    const setup = async (listen = true) => {
+      const graph = await createGraph();
+      const canvas = document.querySelector("canvas")!;
+      canvas.setPointerCapture = () => {};
+      if (listen) graph.on("contextMenu", () => {});
+      const pointer = (type: string, init: PointerEventInit = {}) =>
+        canvas.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, pointerType: "touch", pointerId: 1, buttons: 1, clientX: 5, clientY: 6, ...init }));
+      return { canvas, pointer };
+    };
+
+    it("sends a menu record at the press point after a 500 ms touch hold", async () => {
+      const { pointer } = await setup();
+      pointer("pointerdown");
+      vi.advanceTimersByTime(499);
+      expect(menus()).toHaveLength(0);
+      vi.advanceTimersByTime(1);
+      const [m] = menus();
+      expect(m?.r[2]).toBe(5);
+      expect(m?.r[3]).toBe(6);
+      expect(m?.r[8]).toBe(0);
+      expect(m!.r[7]! & 16).toBe(16);
+    });
+
+    it("holds with a pen too, within the slop", async () => {
+      const { pointer } = await setup();
+      pointer("pointerdown", { pointerType: "pen" });
+      pointer("pointermove", { pointerType: "pen", clientX: 7, clientY: 7 });
+      vi.advanceTimersByTime(500);
+      expect(menus()).toHaveLength(1);
+    });
+
+    it("cancels when the press moves past the slop, lifts, or a second finger lands", async () => {
+      const { pointer } = await setup();
+      pointer("pointerdown");
+      pointer("pointermove", { clientX: 9 });
+      vi.advanceTimersByTime(500);
+      pointer("pointerup");
+      pointer("pointerdown");
+      vi.advanceTimersByTime(300);
+      pointer("pointerup");
+      vi.advanceTimersByTime(500);
+      pointer("pointerdown");
+      pointer("pointerdown", { pointerId: 2, clientX: 50 });
+      vi.advanceTimersByTime(500);
+      expect(menus()).toHaveLength(0);
+    });
+
+    it("does not hold for a mouse press or without a contextMenu listener", async () => {
+      const { pointer } = await setup(false);
+      pointer("pointerdown");
+      vi.advanceTimersByTime(500);
+      pointer("pointerup");
+      expect(menus()).toHaveLength(0);
+    });
+
+    it("ignores the mouse button press but still sends a right click", async () => {
+      const { canvas, pointer } = await setup();
+      pointer("pointerdown", { pointerType: "mouse" });
+      vi.advanceTimersByTime(500);
+      expect(menus()).toHaveLength(0);
+      canvas.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, button: 2 }));
+      expect(menus()).toHaveLength(1);
+    });
+
+    it("blocks the native touch menu without sending a second record", async () => {
+      const { canvas, pointer } = await setup();
+      pointer("pointerdown");
+      vi.advanceTimersByTime(500);
+      const e = new PointerEvent("contextmenu", { bubbles: true, cancelable: true, pointerType: "touch" });
+      canvas.dispatchEvent(e);
+      expect(e.defaultPrevented).toBe(true);
+      expect(menus()).toHaveLength(1);
+    });
+  });
+
   it("forwards a double click as an input record with the changed button", async () => {
     await createGraph();
     const canvas = document.querySelector("canvas")!;

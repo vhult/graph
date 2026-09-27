@@ -8,6 +8,20 @@ bandwidth), Edge 153, 1M nodes / 3M edges at fit unless stated.
 
 ---
 
+## 0076 — A long touch or pen press opens the context menu
+
+PointerInput sends the menu record itself when a single touch or pen
+press is held 500 ms within 3 CSS px, the click slop, so a press becomes
+a drag or a menu, never both. iOS never fires `contextmenu`, so the event
+did not work there. The native touch menu is still prevented but no
+longer forwarded, so Android does not open it twice. A menu record now
+ends a camera pan, so the view no longer follows the finger under an
+open menu. Main thread only, no frame cost. Checked in Edge with CDP
+touch: a hold on a node or on empty space opens one menu, a 30 px move
+cancels, a short tap stays a click, right click is unchanged.
+
+---
+
 ## 0075 — Edge line patterns and taper live in the style word, in their own shader variant
 
 `packEdgeStyle` takes `pattern` (`solid`, `dashed`, `dotted`, `dashDot`,

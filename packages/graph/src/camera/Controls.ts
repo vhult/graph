@@ -119,6 +119,7 @@ export class Controls {
       }
 
       case INPUT.POINTER_UP:
+      case INPUT.MENU:
         this.endPinch();
         this.dragging = false;
         this.panGesture.end();
