@@ -2,6 +2,7 @@ import content from "virtual:content";
 import { useEffect, useRef, useState } from "react";
 import { useApi, type Api } from "../content/api";
 import { Link } from "../router";
+import { SearchBox } from "./SearchBox";
 import { VersionPicker } from "./Versions";
 
 export type Area = "docs" | "api";
@@ -49,15 +50,27 @@ function groups(area: Area, api: Api): Group[] {
   ];
 }
 
-function holds(g: Group, path: string): boolean {
-  return g.parts.some((p) => p.items.some((i) => i.href === path));
+function partKey(g: Group, part: Part): string {
+  return `${g.title}/${part.title}`;
+}
+
+function openKeys(list: Group[], path: string): string[] {
+  const keys: string[] = [];
+  for (const g of list) {
+    for (const part of g.parts) {
+      if (!part.items.some((i) => i.href === path)) continue;
+      if (g.fold) keys.push(g.title);
+      if (part.title) keys.push(partKey(g, part));
+    }
+  }
+  return keys;
 }
 
 interface ListProps {
   list: Group[];
   path: string;
   open: Set<string>;
-  toggle: (title: string) => void;
+  toggle: (key: string) => void;
 }
 
 function List({ list, path, open, toggle }: ListProps) {
@@ -75,23 +88,44 @@ function List({ list, path, open, toggle }: ListProps) {
               <p className="side-title">{g.title}</p>
             )}
             {shown &&
-              g.parts.map((part, i) => (
-                <div key={i} className="side-part">
-                  {part.title && <p className="side-sub">{part.title}</p>}
-                  <ul>
-                    {part.items.map((l) => (
-                      <li key={l.href}>
-                        <Link href={l.href} className={path === l.href ? "active" : undefined}>
-                          {l.code ? <code>{l.label}</code> : l.label}
-                        </Link>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ))}
+              g.parts.map((part, i) => {
+                const key = partKey(g, part);
+                const items = !part.title || open.has(key);
+                return (
+                  <div key={i} className="side-part">
+                    {part.title && (
+                      <button type="button" className={items ? "side-sub side-fold open" : "side-sub side-fold"} onClick={() => toggle(key)}>
+                        {part.title}
+                      </button>
+                    )}
+                    {items && (
+                      <ul>
+                        {part.items.map((l) => (
+                          <li key={l.href}>
+                            <Link href={l.href} className={path === l.href ? "active" : undefined}>
+                              {l.code ? <code>{l.label}</code> : l.label}
+                            </Link>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                );
+              })}
           </div>
         );
       })}
+    </>
+  );
+}
+
+function Menu({ area, ...props }: ListProps & { area: Area }) {
+  if (area !== "api") return <List {...props} />;
+  return (
+    <>
+      <List {...props} list={props.list.slice(0, 1)} />
+      <SearchBox />
+      <List {...props} list={props.list.slice(1)} />
     </>
   );
 }
@@ -100,13 +134,13 @@ export function Sidebar({ area, path }: { area: Area; path: string }) {
   const aside = useRef<HTMLElement>(null);
   const api = useApi();
   const list = groups(area, api);
-  const [open, setOpen] = useState(() => new Set(list.filter((g) => holds(g, path)).map((g) => g.title)));
+  const [open, setOpen] = useState(() => new Set(openKeys(list, path)));
   const [seen, setSeen] = useState(path);
 
   if (seen !== path) {
     setSeen(path);
-    const current = list.find((g) => g.fold && holds(g, path));
-    if (current && !open.has(current.title)) setOpen(new Set(open).add(current.title));
+    const keys = openKeys(list, path).filter((k) => !open.has(k));
+    if (keys.length > 0) setOpen(new Set([...open, ...keys]));
   }
 
   useEffect(() => {
@@ -117,10 +151,10 @@ export function Sidebar({ area, path }: { area: Area; path: string }) {
     if (top < el.scrollTop || top + item.offsetHeight > el.scrollTop + el.clientHeight) el.scrollTop = top - el.clientHeight / 3;
   }, [area, path]);
 
-  const toggle = (title: string) =>
+  const toggle = (key: string) =>
     setOpen((prev) => {
       const next = new Set(prev);
-      if (!next.delete(title)) next.add(title);
+      if (!next.delete(key)) next.add(key);
       return next;
     });
 
@@ -128,12 +162,12 @@ export function Sidebar({ area, path }: { area: Area; path: string }) {
     <>
       <aside className="sidebar" ref={aside}>
         {area === "api" && <VersionPicker path={path} />}
-        <List list={list} path={path} open={open} toggle={toggle} />
+        <Menu area={area} list={list} path={path} open={open} toggle={toggle} />
       </aside>
       <details className="side-menu">
         <summary>Menu</summary>
         {area === "api" && <VersionPicker path={path} />}
-        <List list={list} path={path} open={open} toggle={toggle} />
+        <Menu area={area} list={list} path={path} open={open} toggle={toggle} />
       </details>
     </>
   );
