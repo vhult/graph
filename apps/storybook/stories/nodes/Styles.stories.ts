@@ -59,12 +59,17 @@ function layout(): { nodes: Node[]; edges: number[] } {
     }
   });
 
-  row(() => {
-    DEMO_ICON_NAMES.forEach((icon, k) => add({ x: k * 60, y: 530, size: 40, icon, color: rgbToWord(PALETTE[(k + 1) % PALETTE.length]!), label: icon }));
-  });
+  const perRow = Math.ceil(DEMO_ICON_NAMES.length / 2);
+  for (let first = 0; first < DEMO_ICON_NAMES.length; first += perRow) {
+    row(() => {
+      DEMO_ICON_NAMES.slice(first, first + perRow).forEach((icon, k) =>
+        add({ x: k * 60, y: 530 + (first / perRow) * 80, size: 40, icon, color: rgbToWord(PALETTE[(first + k + 1) % PALETTE.length]!), label: icon }),
+      );
+    });
+  }
 
   row(() => {
-    for (let k = 0; k < TINTS; k++) add({ x: k * 60, y: 610, size: 40, icon: "star", color: rgbToWord(0x2a3140), tint: hslToWord(k / TINTS, 0.85, 0.65), label: `tint ${k}` });
+    for (let k = 0; k < TINTS; k++) add({ x: k * 60, y: 690, size: 40, icon: "star", color: rgbToWord(0x2a3140), tint: hslToWord(k / TINTS, 0.85, 0.65), label: `tint ${k}` });
   });
 
   return { nodes, edges };
