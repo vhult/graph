@@ -128,6 +128,9 @@ export interface DebugTune {
 }
 
 // @public
+export type DragEndEvent = DragMoveEvent;
+
+// @public
 export interface DragMoveEvent {
     dx: number;
     dy: number;
@@ -280,7 +283,7 @@ export interface GraphEvents {
     contextMenu: Hit;
     doubleClick: Hit;
     drag: DragMoveEvent;
-    dragEnd: DragMoveEvent;
+    dragEnd: DragEndEvent;
     dragStart: DragStartEvent;
     edgesRemoved: Uint32Array;
     error: GraphError;
