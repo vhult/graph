@@ -253,3 +253,215 @@ body {
     transform: rotate(360deg);
   }
 }
+
+.legend {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  max-width: calc(100% - 16px);
+  max-height: calc(100% - 96px);
+  overflow: auto;
+  border-radius: 6px;
+  background: rgba(10, 10, 15, 0.85);
+  color: #cfd3dc;
+  font: 12px/1.4 system-ui, sans-serif;
+}
+
+.legend-toggle {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  border: 0;
+  background: none;
+  color: #e6e9ef;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.legend-toggle::after {
+  content: " ▴";
+  color: #8b919c;
+}
+
+.legend-open .legend-toggle::after {
+  content: " ▾";
+}
+
+.legend-body {
+  display: none;
+  padding: 0 10px 8px;
+}
+
+.legend-open .legend-body {
+  display: block;
+}
+
+.legend-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-height: 20px;
+}
+
+.legend-graphic {
+  display: inline-flex;
+  flex: none;
+  justify-content: center;
+  width: 36px;
+}
+
+.legend-graphic svg {
+  height: 16px;
+}
+
+.wheel-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;
+}
+
+.wheel-link {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.wheel-link-from {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.7);
+  stroke-width: 2;
+  animation: wheel-pulse 1s ease-in-out infinite alternate;
+}
+
+.wheel-backdrop {
+  position: absolute;
+  inset: 0;
+  pointer-events: auto;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.wheel {
+  position: absolute;
+  overflow: visible;
+  font: 10px system-ui, sans-serif;
+  animation: wheel-in 0.12s ease-out;
+}
+
+.wheel-slice {
+  cursor: pointer;
+}
+
+.wheel-slice > path {
+  fill: rgb(24, 26, 34);
+  stroke: rgb(10, 10, 15);
+  stroke-width: 3;
+  transition: fill 0.1s;
+}
+
+.wheel-danger text {
+  fill: #ff9b9b;
+}
+
+.wheel-current {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.wheel-slice:not(.wheel-current):active > path {
+  fill: color-mix(in srgb, var(--c) 40%, #16181f);
+}
+
+@media (hover: hover) {
+  .wheel-slice:not(.wheel-current):hover > path {
+    fill: color-mix(in srgb, var(--c) 35%, #16181f);
+  }
+}
+
+.wheel-slice text,
+.wheel-slice svg,
+.wheel-slice g,
+.wheel-center text {
+  pointer-events: none;
+}
+
+.wheel-slice text {
+  fill: #dfe3ea;
+  text-anchor: middle;
+}
+
+.wheel-center circle {
+  fill: rgb(14, 15, 20);
+  stroke: rgba(255, 255, 255, 0.15);
+  cursor: pointer;
+}
+
+.wheel-center text {
+  fill: #e6e9ef;
+  font-size: 11px;
+  font-weight: 600;
+  text-anchor: middle;
+}
+
+.wheel-center .wheel-center-sub {
+  fill: #9aa1ad;
+  font-size: 9.5px;
+  font-weight: 400;
+}
+
+.wheel-toast {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  max-width: calc(100% - 24px);
+  padding: 8px 14px;
+  border-radius: 16px;
+  background: rgba(20, 22, 30, 0.94);
+  color: #e6e9ef;
+  font: 12px/1.4 system-ui, sans-serif;
+  text-align: center;
+  opacity: 0;
+  transform: translate(-50%, -8px);
+  transition: opacity 0.15s, transform 0.15s;
+}
+
+.wheel-toast-on {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+@keyframes wheel-in {
+  from {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+}
+
+@keyframes wheel-pulse {
+  to {
+    stroke-opacity: 0.2;
+  }
+}
+
+@media (max-width: 640px) {
+  .stage-readout {
+    display: none;
+  }
+
+  .stage-note {
+    font-size: 10px;
+  }
+
+  .legend {
+    font-size: 11px;
+    max-height: 45%;
+  }
+}
