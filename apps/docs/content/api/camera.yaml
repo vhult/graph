@@ -1,0 +1,247 @@
+title: Camera
+intro: >-
+  The camera decides which part of the world is on the canvas. You move it through `graph.camera`: frame
+  some nodes, set a view, turn it, limit how far it can go and convert points between the canvas and the world.
+namespace: GraphCamera
+types: [CameraView, CameraFitOptions, CameraAnimOptions, CameraEasing, CameraRotateOptions, CameraLimits, WorldBounds]
+
+docs:
+  GraphCamera:
+    description: >-
+      Everything you do with the camera goes through `graph.camera`. The view is a center in world units, a
+      zoom in CSS px per world unit and a rotation in radians. World y points down, as on the screen. A new
+      `set`, `fit` or `rotate`, or a move by the user, stops a camera animation that is running.
+    example: |
+      graph.camera.fit({ duration: 400 });
+
+      graph.on("view", (v) => console.log(`zoom ${v.zoom.toFixed(2)}`));
+    members:
+      fit:
+        description: >-
+          Moves and zooms the camera so every node is on the canvas. Pass `nodes` to frame some of them, or
+          `bounds` to frame a world rectangle, not both. The rotation does not change. Node frames leave room
+          for the largest node size, so nodes at the edge are not cut off.
+        example: |
+          graph.camera.fit({ nodes: new Uint32Array([3, 8, 13]), padding: 48, duration: 500 });
+      set:
+        description: >-
+          Moves the camera to a view. Fields you leave out keep their value. Without a second argument the
+          move is at once; with a duration it is animated, and a rotation takes the shortest way round.
+        example: |
+          graph.camera.set({ x: 0, y: 0, zoom: 2 });
+          graph.camera.set({ rotation: Math.PI / 2 }, { duration: 600, easing: "linear" });
+      get:
+        description: >-
+          Returns the last drawn view. It can be one frame old, so right after `set` it may still show the
+          old view. To follow every move, listen to `graph.on("view")`.
+        example: |
+          const { x, y, zoom } = graph.camera.get();
+          graph.camera.set({ x, y, zoom: zoom * 2 }, { duration: 300 });
+      rotate:
+        description: >-
+          Turns the view by an angle in radians, added to the current rotation. It turns around a canvas
+          point, by default the canvas center, and that point stays in place. Pass a `duration` to animate it.
+        example: |
+          graph.camera.rotate(Math.PI / 4, { duration: 300 });
+          graph.camera.rotate(-0.1, { x: 120, y: 80 });
+      limits:
+        description: >-
+          Sets the zoom range and the world rectangle the view center must stay in. Each call replaces the
+          last one: a field you leave out goes back to no limit. The limits apply to the view at once, and to
+          every later move by code or by the user.
+        example: |
+          graph.camera.limits({ minZoom: 0.05, maxZoom: 40, bounds: { minX: -5000, minY: -5000, maxX: 5000, maxY: 5000 } });
+          graph.camera.limits({});
+      toWorld:
+        description: >-
+          Converts a canvas point in CSS px, from the top left corner of the canvas, to world units. It uses
+          the last drawn view. Pass an `out` object to reuse it and avoid a new object on each call.
+        example: |
+          const point = { x: 0, y: 0 };
+          canvas.addEventListener("pointermove", (e) => {
+            graph.camera.toWorld(e.offsetX, e.offsetY, point);
+            console.log(point.x, point.y);
+          });
+      toScreen:
+        description: >-
+          Converts a world point to canvas CSS px, from the top left corner of the canvas. Use it to place
+          your own HTML over a node. Like `toWorld`, it uses the last drawn view and takes an `out` object.
+        example: |
+          const tip = document.getElementById("tip")!;
+          graph.on("view", () => {
+            const p = graph.camera.toScreen(100, 40);
+            tip.style.transform = `translate(${p.x}px, ${p.y}px)`;
+          });
+  CameraView:
+    description: >-
+      A camera view: where the camera looks, how close and at what angle. `camera.get` and the `view` event
+      give you one, and `camera.set` takes one, in part or whole.
+    example: |
+      import type { CameraView } from "@vhult/graph";
+
+      const home: CameraView = { x: 0, y: 0, zoom: 1, rotation: 0 };
+      graph.camera.set(home, { duration: 500 });
+    members:
+      x:
+        description: >-
+          The x of the point at the center of the canvas, in world units.
+        example: |
+          graph.camera.set({ x: 250 });
+      y:
+        description: >-
+          The y of the point at the center of the canvas, in world units. World y points down.
+        example: |
+          graph.camera.set({ y: -120 });
+      zoom:
+        description: >-
+          How many CSS px one world unit takes on the canvas. 2 means everything looks twice as big as at 1.
+          It stays inside the range set by `camera.limits`.
+        example: |
+          graph.camera.set({ zoom: 0.5 }, { duration: 300 });
+      rotation:
+        description: >-
+          The angle of the view, in radians.
+        example: |
+          graph.camera.set({ rotation: Math.PI });
+  CameraFitOptions:
+    description: >-
+      The options of `camera.fit`. With no options it frames every node at once, with 24 CSS px of space
+      around them.
+    example: |
+      import type { CameraFitOptions } from "@vhult/graph";
+
+      const opts: CameraFitOptions = { padding: 40, duration: 600 };
+      graph.camera.fit(opts);
+    members:
+      nodes:
+        description: >-
+          The nodes to frame, by index. The default is every node. An empty list does nothing. It cannot be
+          used with `bounds`.
+        example: |
+          graph.camera.fit({ nodes: new Uint32Array([0, 1, 2]) });
+      bounds:
+        description: >-
+          A world rectangle to frame instead of nodes. It cannot be used with `nodes`.
+        example: |
+          graph.camera.fit({ bounds: { minX: 0, minY: 0, maxX: 800, maxY: 600 } });
+      padding:
+        description: >-
+          The space left around the framed area, in CSS px. The default is 24.
+        example: |
+          graph.camera.fit({ padding: 64 });
+      duration:
+        description: >-
+          How long the move takes, in ms. The default is 0, a move at once. An animated fit uses the `"ease"`
+          easing.
+        example: |
+          graph.camera.fit({ duration: 800 });
+  CameraAnimOptions:
+    description: >-
+      How `camera.set` animates. Give a duration to animate the move; leave the whole object out to move at
+      once.
+    example: |
+      import type { CameraAnimOptions } from "@vhult/graph";
+
+      const slow: CameraAnimOptions = { duration: 1200, easing: "linear" };
+      graph.camera.set({ x: 500, y: 200 }, slow);
+    members:
+      duration:
+        description: >-
+          How long the move takes, in ms. It must be 0 or more.
+        example: |
+          graph.camera.set({ zoom: 4 }, { duration: 400 });
+      easing:
+        description: >-
+          How the speed changes during the move. The default is `"ease"`.
+        example: |
+          graph.camera.set({ x: 0 }, { duration: 400, easing: "linear" });
+  CameraEasing:
+    description: >-
+      The speed curve of a camera animation. `"linear"` keeps the same speed from start to end. `"ease"` starts
+      slow, speeds up and slows down at the end.
+    example: |
+      import type { CameraEasing } from "@vhult/graph";
+
+      const easing: CameraEasing = "ease";
+      graph.camera.set({ zoom: 3 }, { duration: 500, easing });
+  CameraRotateOptions:
+    description: >-
+      The options of `camera.rotate`: the point to turn around and how long the turn takes.
+    example: |
+      import type { CameraRotateOptions } from "@vhult/graph";
+
+      const opts: CameraRotateOptions = { x: 200, y: 150, duration: 250 };
+      graph.camera.rotate(Math.PI / 2, opts);
+    members:
+      x:
+        description: >-
+          The x of the point to turn around, in canvas CSS px. The default is the canvas center.
+        example: |
+          graph.camera.rotate(0.5, { x: 100, y: 100 });
+      y:
+        description: >-
+          The y of the point to turn around, in canvas CSS px. The default is the canvas center.
+        example: |
+          graph.camera.rotate(0.5, { x: 300, y: 40 });
+      duration:
+        description: >-
+          How long the turn takes, in ms. The default is 0, a turn at once.
+        example: |
+          graph.camera.rotate(Math.PI, { duration: 700 });
+  CameraLimits:
+    description: >-
+      The limits you pass to `camera.limits`. Use them to stop the user from zooming too far or from getting
+      lost away from the graph. `minZoom` must not be above `maxZoom`, or the call throws.
+    example: |
+      import type { CameraLimits } from "@vhult/graph";
+
+      const limits: CameraLimits = { minZoom: 0.1, maxZoom: 20 };
+      graph.camera.limits(limits);
+    members:
+      minZoom:
+        description: >-
+          The smallest zoom, in CSS px per world unit. The default is 0, no limit.
+        example: |
+          graph.camera.limits({ minZoom: 0.2 });
+      maxZoom:
+        description: >-
+          The largest zoom, in CSS px per world unit. It must be above 0. The default is no limit.
+        example: |
+          graph.camera.limits({ maxZoom: 50 });
+      bounds:
+        description: >-
+          A world rectangle the view center stays in. The edges of the view can still show what is outside
+          it. The default is no limit.
+        example: |
+          graph.camera.limits({ bounds: { minX: -1000, minY: -1000, maxX: 1000, maxY: 1000 } });
+  WorldBounds:
+    description: >-
+      A rectangle in world units, used by `camera.fit` and `camera.limits`. Since world y points down, `minY`
+      is the top edge. Every value must be a finite number, with each min at or below its max, or the call
+      throws.
+    example: |
+      import type { WorldBounds } from "@vhult/graph";
+
+      const area: WorldBounds = { minX: 0, minY: 0, maxX: 1200, maxY: 800 };
+      graph.camera.fit({ bounds: area, duration: 400 });
+    members:
+      minX:
+        description: >-
+          The left edge, in world units.
+        example: |
+          graph.camera.fit({ bounds: { minX: -300, minY: 0, maxX: 300, maxY: 200 } });
+      minY:
+        description: >-
+          The top edge, in world units.
+        example: |
+          graph.camera.fit({ bounds: { minX: 0, minY: -300, maxX: 200, maxY: 300 } });
+      maxX:
+        description: >-
+          The right edge, in world units.
+        example: |
+          graph.camera.limits({ bounds: { minX: 0, minY: 0, maxX: 5000, maxY: 5000 } });
+      maxY:
+        description: >-
+          The bottom edge, in world units.
+        example: |
+          graph.camera.limits({ bounds: { minX: 0, minY: 0, maxX: 5000, maxY: 2000 } });

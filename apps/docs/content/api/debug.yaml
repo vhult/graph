@@ -1,0 +1,418 @@
+title: Debug
+intro: >-
+  Tools to see and measure what the engine does. You reach them through `graph.debug`: an overlay on the
+  canvas, frame recordings, benchmarks along a camera path and a look inside label placement.
+namespace: GraphDebug
+types: [DebugRecording, DebugSummary, DebugTotals, DebugTune, EdgeDebugMode, BenchmarkOptions, BenchmarkResult, CameraPathKey, LabelSnapshot]
+
+docs:
+  GraphDebug:
+    description: >-
+      Everything for measuring the engine goes through `graph.debug`. The overlay shows frame times over the
+      canvas, `record` captures every frame for a while, and `benchmark` plays a camera path and times each
+      frame. You do not need any of it to draw a graph.
+    example: |
+      graph.debug.open();
+      graph.debug.expand();
+
+      const recording = await graph.debug.record();
+      console.log(`${recording.frames} frames in ${recording.durationMs} ms`);
+    members:
+      open:
+        description: >-
+          Shows the debug overlay in the top left corner of the canvas. While it is open, the engine times
+          every GPU pass, so `graph.stats` reports `gpuMs`. It starts collapsed.
+        example: |
+          graph.debug.open();
+      close:
+        description: >-
+          Removes the debug overlay. Unless a recording or a benchmark runs, the engine stops timing every GPU
+          pass.
+        example: |
+          graph.debug.close();
+      toggle:
+        description: >-
+          Opens the overlay when it is closed, and closes it when it is open, for example behind a key.
+        example: |
+          window.addEventListener("keydown", (e) => {
+            if (e.key === "F2") graph.debug.toggle();
+          });
+      isOpen:
+        description: >-
+          Returns true when the debug overlay is open.
+        example: |
+          if (!graph.debug.isOpen()) graph.debug.open();
+      expand:
+        description: >-
+          Expands the overlay, or collapses it with `false`. Expanded, it shows GPU and CPU charts and the
+          **Record** and **Export JSON** buttons, and the engine also times each CPU step of the frame. It
+          does not open the overlay; clicking the collapsed overlay also expands it.
+        example: |
+          graph.debug.open();
+          graph.debug.expand(true);
+      record:
+        description: >-
+          Starts recording every frame and resolves with a `DebugRecording` once it stops. It stops on
+          `stop`, on the overlay **Stop** button, or by itself after 10 seconds or 20,000 frames. The overlay
+          does not need to be open. It rejects when a recording is already running.
+        example: |
+          const done = graph.debug.record();
+          setTimeout(() => graph.debug.stop(), 3000);
+          const recording = await done;
+          console.log(`gpu p95 ${recording.summary["gpu"]?.p95} ms`);
+      stop:
+        description: >-
+          Stops the recording started by `record`, which then resolves. It does nothing when no recording
+          is running.
+        example: |
+          graph.debug.stop();
+      benchmark:
+        description: >-
+          Plays a camera path, one step per frame, and resolves with the timings of every frame. Frame N
+          always shows the same view, however fast the GPU is, so runs compare across machines and versions.
+          The engine draws every frame while it runs. It rejects when a benchmark is already running, when the
+          path is empty or when `frames` is not above 0.
+        example: |
+          const result = await graph.debug.benchmark({
+            path: [{ x: 0.5, y: 0.5, zoom: 1 }, { x: 0.3, y: 0.6, zoom: 8 }],
+            frames: 300,
+          });
+          const cpu = Array.from(result.cpuMs).sort((a, b) => a - b);
+          console.log(`cpu p95 ${cpu[Math.floor(cpu.length * 0.95)]} ms`);
+      labelSnapshot:
+        description: >-
+          Resolves with the candidates of the next label placement and what the placement decided for each,
+          as a `LabelSnapshot`. When there is nothing to place, the snapshot is empty.
+        example: |
+          const snap = await graph.debug.labelSnapshot();
+          const shown = snap.decision.filter((d) => d === 1).length;
+          console.log(`${shown} of ${snap.found} candidates shown`);
+      tune:
+        description: >-
+          Changes engine settings, see `DebugTune`. It is not stable API. Fields you leave out keep their
+          value. It throws when a number is not finite or is below its minimum, or when `edgeMode` is unknown.
+        example: |
+          graph.debug.tune({ edgeMode: "length", edgeMinLengthPx: 10 });
+  DebugRecording:
+    description: >-
+      What `debug.record` resolves with: every recorded frame, statistics per series and facts about the
+      machine. The overlay **Export JSON** button saves the same data as a file.
+    example: |
+      import type { DebugRecording } from "@vhult/graph";
+
+      const recording: DebugRecording = await graph.debug.record();
+      for (const [name, s] of Object.entries(recording.summary)) {
+        console.log(`${name}: mean ${s.mean.toFixed(2)}, p95 ${s.p95.toFixed(2)}`);
+      }
+    members:
+      schema:
+        description: >-
+          The version of the recording format. It is 1.
+      date:
+        description: >-
+          When the recording finished, as an ISO 8601 string.
+      userAgent:
+        description: >-
+          The user agent string of the browser.
+      adapter:
+        description: >-
+          A description of the GPU adapter, such as "nvidia ampere".
+      caps:
+        description: >-
+          What the GPU and the page support, as a `GraphCaps`.
+      nodeCount:
+        description: >-
+          How many node slots the engine held when the recording finished, as in `GraphStats.nodeCount`.
+      edgeCount:
+        description: >-
+          How many edges the engine held when the recording finished.
+      viewport:
+        description: >-
+          The width and height of the drawing buffer, in device px.
+      pixelRatio:
+        description: >-
+          How many device px make one CSS px on the canvas.
+      durationMs:
+        description: >-
+          How long the recording ran, in ms.
+      frames:
+        description: >-
+          How many frames were recorded. Every array in `series` has this length.
+      gpuGroups:
+        description: >-
+          For each GPU pass series, the group the overlay charts it in.
+      summary:
+        description: >-
+          A `DebugSummary` for each series, by the same names as `series`. It counts only the frames that
+          have a value.
+      series:
+        description: >-
+          The value of each frame, by series name, such as `gpu`, `interval` or `cpu.frame`. A frame without
+          a value holds NaN.
+      workerMessages:
+        description: >-
+          A `DebugTotals` for each type of message the worker handled during the recording.
+      mainThread:
+        description: >-
+          A `DebugTotals` for each API call made on the main thread during the recording.
+  DebugSummary:
+    description: >-
+      The statistics of one series of a `DebugRecording`. Frames without a value are left out.
+    example: |
+      import type { DebugSummary } from "@vhult/graph";
+
+      const recording = await graph.debug.record();
+      const gpu: DebugSummary | undefined = recording.summary["gpu"];
+      if (gpu) console.log(`gpu p50 ${gpu.p50} ms, p99 ${gpu.p99} ms`);
+    members:
+      n:
+        description: >-
+          How many frames have a value.
+      ran:
+        description: >-
+          The share of frames that have a value, from 0 to 1.
+      mean:
+        description: >-
+          The mean of the values.
+      p50:
+        description: >-
+          The median of the values.
+      p95:
+        description: >-
+          The 95th percentile of the values.
+      p99:
+        description: >-
+          The 99th percentile of the values.
+      max:
+        description: >-
+          The largest value.
+  DebugTotals:
+    description: >-
+      How often one message type or API call ran during a `DebugRecording`, and how long it took.
+    example: |
+      import type { DebugTotals } from "@vhult/graph";
+
+      const recording = await graph.debug.record();
+      const calls: Record<string, DebugTotals> = recording.mainThread;
+      for (const [name, t] of Object.entries(calls)) console.log(`${name}: ${t.count} calls, ${t.totalMs} ms`);
+    members:
+      count:
+        description: >-
+          How many times it ran.
+      totalMs:
+        description: >-
+          The time of all runs added up, in ms.
+      maxMs:
+        description: >-
+          The longest single run, in ms.
+  DebugTune:
+    description: >-
+      Engine settings you change with `debug.tune`. It is **not stable API**: it is made for the Storybook
+      and the bench. Edge and LOD settings take effect once the engine has rebuilt the shaders that use them.
+    example: |
+      import type { DebugTune } from "@vhult/graph";
+
+      const tune: DebugTune = { lodTargetPx: 0, edgeMaxOverdraw: 0, edgeMinLengthPx: 0 };
+      graph.debug.tune(tune);
+    members:
+      lodTargetPx:
+        description: >-
+          The spacing between nodes, in device px, below which nodes merge into clusters. 0 turns this off.
+          The default is 2.5.
+        example: |
+          graph.debug.tune({ lodTargetPx: 4 });
+      edgeMaxOverdraw:
+        description: >-
+          How far crowded edges are thinned out. A lower value draws fewer edges, and 0 draws every edge.
+          The default is 1.5.
+        example: |
+          graph.debug.tune({ edgeMaxOverdraw: 0 });
+      edgeMinLengthPx:
+        description: >-
+          The length on screen, in CSS px, at or below which an edge is not drawn. Edges up to 1.5 times this
+          length fade in. The default is 6.
+        example: |
+          graph.debug.tune({ edgeMinLengthPx: 2 });
+      pickRate:
+        description: >-
+          How many times per second the engine looks for what is under the pointer for hover. It must be at
+          least 1. The default is 60.
+        example: |
+          graph.debug.tune({ pickRate: 30 });
+      edgeMode:
+        description: >-
+          Colors edges to show what the edge cull decided, see `EdgeDebugMode`. The default is `"off"`.
+        example: |
+          graph.debug.tune({ edgeMode: "thinning" });
+  EdgeDebugMode:
+    description: >-
+      How `debug.tune` colors edges to show what the edge cull decided. `"off"` draws edges as usual.
+      `"length"` draws red for edges too short to draw (shown anyway), orange for edges fading in and green
+      for the rest. `"thinning"` goes from blue, where every edge of a chunk is drawn, to red, where 1 in 1024
+      is. `"chunk"` gives each chunk of 1024 edges its own color.
+    example: |
+      import type { EdgeDebugMode } from "@vhult/graph";
+
+      const mode: EdgeDebugMode = "chunk";
+      graph.debug.tune({ edgeMode: mode });
+  BenchmarkOptions:
+    description: >-
+      The options of `debug.benchmark`: the camera path to play, how many frames to record along it, and
+      how much to time.
+    example: |
+      import type { BenchmarkOptions } from "@vhult/graph";
+
+      const options: BenchmarkOptions = {
+        path: [{ x: 0.5, y: 0.5, zoom: 1 }, { x: 0.5, y: 0.5, zoom: 16 }],
+        frames: 600,
+        warmup: 30,
+        timing: "passes",
+      };
+      const result = await graph.debug.benchmark(options);
+    members:
+      path:
+        description: >-
+          The camera keys to play, in order, as `CameraPathKey` values. It needs at least one key. The frames
+          are spread evenly over the path, with an ease between keys. Zoom is blended on a log scale.
+        example: |
+          await graph.debug.benchmark({
+            path: [{ x: 0, y: 0, zoom: 4 }, { x: 1, y: 0, zoom: 4 }, { x: 1, y: 1, zoom: 4 }],
+            frames: 300,
+          });
+      frames:
+        description: >-
+          How many frames to record along the path. It must be above 0.
+        example: |
+          await graph.debug.benchmark({ path: [{ x: 0.5, y: 0.5, zoom: 1 }], frames: 120 });
+      warmup:
+        description: >-
+          How many frames to draw at the first key before recording starts. They are not in the result.
+          The default is 10.
+        example: |
+          await graph.debug.benchmark({ path: [{ x: 0.5, y: 0.5, zoom: 1 }], frames: 120, warmup: 60 });
+      timing:
+        description: >-
+          How much GPU timing to take. `"off"` does not time the GPU passes, so `gpuMs` is NaN.
+          `"passes"` times every GPU pass. `"full"` also times each CPU step of the frame. The default is
+          `"passes"`.
+        example: |
+          await graph.debug.benchmark({ path: [{ x: 0.5, y: 0.5, zoom: 1 }], frames: 120, timing: "off" });
+  BenchmarkResult:
+    description: >-
+      What `debug.benchmark` resolves with. Each series is a `Float64Array` with one entry per recorded frame,
+      and NaN where a frame has no value.
+    example: |
+      import type { BenchmarkResult } from "@vhult/graph";
+
+      const result: BenchmarkResult = await graph.debug.benchmark({ path: [{ x: 0.5, y: 0.5, zoom: 1 }], frames: 300 });
+      const gpu = Array.from(result.gpuMs).filter((v) => !Number.isNaN(v));
+      console.log(`gpu mean ${gpu.reduce((a, b) => a + b, 0) / gpu.length} ms`);
+    members:
+      frames:
+        description: >-
+          How many frames were recorded.
+      warmup:
+        description: >-
+          How many frames were drawn before recording started.
+      nodeCount:
+        description: >-
+          How many node slots the engine held, as in `GraphStats.nodeCount`.
+      viewport:
+        description: >-
+          The width and height of the drawing buffer, in device px.
+      adapter:
+        description: >-
+          A description of the GPU adapter.
+      timestampQuery:
+        description: >-
+          True when GPU timestamp queries were available. When false, `gpuMs` and `passMs` hold NaN.
+      wallMs:
+        description: >-
+          The time from the first recorded frame until the GPU finished its work, in ms.
+      cpuMs:
+        description: >-
+          The time the worker spent on the CPU for each frame, in ms.
+      intervalMs:
+        description: >-
+          The time between a frame and the one before it, in ms. The first entry is NaN.
+      gpuMs:
+        description: >-
+          The GPU time of each frame, in ms.
+      passMs:
+        description: >-
+          The GPU time of each pass for each frame, in ms, by pass name as in `GraphCaps.profilerSlots`.
+      visibleNodes:
+        description: >-
+          How many nodes each frame drew.
+      visibleEdges:
+        description: >-
+          How many edges each frame sent to be drawn.
+  CameraPathKey:
+    description: >-
+      One key of a benchmark camera path. It is relative to the nodes, not to world units, so the same path
+      works on any dataset. The camera is not rotated along the path.
+    example: |
+      import type { CameraPathKey } from "@vhult/graph";
+
+      const path: CameraPathKey[] = [
+        { x: 0.5, y: 0.5, zoom: 1 },
+        { x: 0.25, y: 0.75, zoom: 10 },
+      ];
+      await graph.debug.benchmark({ path, frames: 300 });
+    members:
+      x:
+        description: >-
+          The x of the view center, as a share of the node bounds. 0 is the smallest node x, 0.5 the middle
+          and 1 the largest.
+        example: |
+          await graph.debug.benchmark({ path: [{ x: 0, y: 0.5, zoom: 2 }, { x: 1, y: 0.5, zoom: 2 }], frames: 200 });
+      y:
+        description: >-
+          The y of the view center, as a share of the node bounds. 0.5 is the middle.
+        example: |
+          await graph.debug.benchmark({ path: [{ x: 0.5, y: 0, zoom: 2 }, { x: 0.5, y: 1, zoom: 2 }], frames: 200 });
+      zoom:
+        description: >-
+          A multiple of the zoom that fits every node on screen. 1 shows the whole graph, and 10 zooms in ten
+          times closer.
+        example: |
+          await graph.debug.benchmark({ path: [{ x: 0.5, y: 0.5, zoom: 1 }, { x: 0.5, y: 0.5, zoom: 10 }], frames: 200 });
+  LabelSnapshot:
+    description: >-
+      What `debug.labelSnapshot` resolves with: the label candidates of one placement and what it decided for
+      each. Each array has one entry per candidate, up to `capacity`, and `center` has two.
+    example: |
+      import type { LabelSnapshot } from "@vhult/graph";
+
+      const snap: LabelSnapshot = await graph.debug.labelSnapshot();
+      if (snap.found > snap.capacity) console.log(`${snap.found - snap.capacity} candidates did not fit`);
+    members:
+      found:
+        description: >-
+          How many candidates the placement found, including the ones beyond `capacity`.
+      capacity:
+        description: >-
+          How many candidates the placement can hold.
+      center:
+        description: >-
+          The center of each label box, in device px, as x then y.
+      halfWidth:
+        description: >-
+          Half the width of each label box, in device px, padding included.
+      halfHeight:
+        description: >-
+          Half the height of each label box, in device px, padding included.
+      rank:
+        description: >-
+          The priority of each candidate. A higher rank wins over a lower one.
+      size:
+        description: >-
+          For a node label, the node size in world units. For an edge label, the length of the edge on
+          screen, in device px.
+      index:
+        description: >-
+          For a node label, the engine node index. For an edge label, the sorted edge index with the top bit
+          set.
+      decision:
+        description: >-
+          What the placement decided for each candidate: 0 undecided, 1 shown, 2 hidden.

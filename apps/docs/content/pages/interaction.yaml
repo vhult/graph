@@ -1,0 +1,52 @@
+title: Interaction
+description: Pan, zoom, drag, select, listen to events and ask what is under a point.
+blocks:
+  - heading: Modes
+  - text: "Each interaction has a `Mode`: `\"auto\"` means the engine does it, `\"manual\"` means it only reports it in an event, and `false` turns it off. Set them in `Graph.create` or later with `input.set`."
+  - table:
+      columns: [Setting, What it does, Default]
+      rows:
+        - ["`pan`", "Drag on empty space moves the camera", "`\"auto\"`"]
+        - ["`zoom`", "Wheel and pinch zoom around the pointer", "`\"auto\"`"]
+        - ["`rotate`", "Two-finger twist turns the view", "`false`"]
+        - ["`drag`", "Press and move on a node moves it, with every selected node", "`\"auto\"`"]
+        - ["`select`", "Click and key + drag select nodes", "`\"auto\"`"]
+  - code: |
+      graph.input.set({ zoom: false, drag: "manual", selectShape: "lasso", selectKey: "alt" });
+    lang: ts
+  - text: "`pick` chooses what hover and click see (nodes, edges, groups), and `pickRadius` and `edgePickRadius` add reach around them in CSS px."
+
+  - heading: Events
+  - text: "`graph.on` subscribes to an event and returns the function that unsubscribes."
+  - code: |
+      const off = graph.on("click", (hit) => {
+        if (hit.node !== null) console.log("node", hit.node);
+        else if (hit.edge !== null) console.log("edge", hit.edge);
+      });
+
+      graph.on("select", (e) => console.log(e.shape, e.nodes));
+      graph.on("drag", (e) => console.log(e.index, e.dx, e.dy));
+
+      off();
+    lang: ts
+  - table:
+      columns: [Event, When]
+      rows:
+        - ["`click`, `doubleClick`, `contextMenu`", "A click on a node, an edge or empty space, as a `Hit`"]
+        - ["`hover`", "What is under the pointer changed"]
+        - ["`select`", "A click or a shape selected nodes"]
+        - ["`dragStart`, `drag`, `dragEnd`", "Nodes are dragged"]
+        - ["`pan`, `zoom`, `rotate`", "A gesture step"]
+        - ["`view`", "The camera moved"]
+        - ["`edgesRemoved`", "Edges went away with a removed node"]
+        - ["`error`", "Something failed after creation"]
+
+  - heading: Selection
+  - text: "With `select` on `\"auto\"`, a click selects a node, shift + click adds or removes it, and the select key + drag draws a box or a lasso. The engine sets `Flag.selected` itself and the `select` event lists the selected nodes. With `\"manual\"`, nothing is flagged and the event lists the nodes under the click or inside the shape."
+
+  - heading: Queries
+  - text: "`query.at` resolves with what is at a canvas point, and `query.inside` with the nodes inside a box or a polygon. Both use CSS px."
+  - code: |
+      const hit = await graph.query.at(120, 80);
+      const nodes = await graph.query.inside({ x: 0, y: 0, width: 200, height: 100 });
+    lang: ts

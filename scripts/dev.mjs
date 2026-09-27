@@ -1,6 +1,6 @@
 /**
- * `npm run dev`: build @vhult/graph once, then run its watcher and Storybook
- * side by side. Stopping this process stops both (whole process trees — on
+ * `npm run dev`: build @vhult/graph once, then run its watcher, Storybook and the docs
+ * side by side. Stopping this process stops them all (whole process trees — on
  * Windows `child.kill()` alone leaves the shell's grandchildren running).
  */
 import { spawn, spawnSync } from "node:child_process";
@@ -16,7 +16,11 @@ function killTree(child) {
 const build = spawnSync("npm", ["run", "build", "-w", "@vhult/graph"], { stdio: "inherit", shell: true });
 if (build.status !== 0) process.exit(build.status ?? 1);
 
-const children = [npm(["run", "watch", "-w", "@vhult/graph"]), npm(["run", "dev", "-w", "@vhult/graph-storybook"])];
+const children = [
+  npm(["run", "watch", "-w", "@vhult/graph"]),
+  npm(["run", "dev", "-w", "@vhult/graph-storybook"]),
+  npm(["run", "dev", "-w", "@vhult/graph-docs"]),
+];
 
 let stopping = false;
 const stop = () => {

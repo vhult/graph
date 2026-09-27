@@ -1,0 +1,180 @@
+title: Edges
+intro: >-
+  Edges are the lines between nodes. You reach them through `graph.edges`, and you describe them with typed
+  arrays: one entry per edge for each channel, like its two ends, its style or its colors.
+namespace: GraphEdges
+types: [EdgeData, EdgeUpdate]
+
+docs:
+  GraphEdges:
+    description: >-
+      Everything you do with edges goes through `graph.edges`: load them, add more, change them, remove them
+      and mark them with flags. An edge is known by its index, a whole number the engine gives it when you
+      add it. Each edge joins two nodes by their node indices.
+    example: |
+      import { packRgba } from "@vhult/graph";
+
+      graph.nodes.set({ count: 3, positions: new Float32Array([0, 0, 100, 0, 50, 80]) });
+      graph.edges.set({
+        count: 2,
+        indices: new Uint32Array([0, 1, 1, 2]),
+        colors: new Uint32Array(4).fill(packRgba(0.6, 0.6, 0.7)),
+      });
+
+      console.log(graph.edges.count);
+    members:
+      count:
+        description: >-
+          How many edges are in the graph right now. Removed edges do not count.
+        example: |
+          console.log(`${graph.edges.count} edges`);
+      slots:
+        description: >-
+          How many edge indices are in use, live edges plus the ones freed by `remove`. Arrays you pass to
+          `updateAll` must have one entry per slot, or two for `indices` and `colors`. `compact` brings
+          `slots` back down to `count`.
+        example: |
+          import { packEdgeStyle } from "@vhult/graph";
+
+          const styles = new Uint32Array(graph.edges.slots).fill(packEdgeStyle({ width: 2 }));
+          graph.edges.updateAll({ styles });
+      set:
+        description: >-
+          Replaces every edge with the ones you pass. This is the fastest way to load all the edges at once.
+          Call it after `nodes.set`, since `nodes.set` removes every edge. Channels you leave out get their
+          default: the width and color from `style.edge`, no arrow and no label.
+        example: |
+          graph.nodes.set({ count: 3, positions: new Float32Array([0, 0, 100, 0, 50, 80]) });
+          graph.edges.set({ count: 3, indices: new Uint32Array([0, 1, 1, 2, 2, 0]) });
+      add:
+        description: >-
+          Adds edges and returns their indices. Freed indices are used again first, so the returned
+          indices are not always at the end. Both ends of each edge must be live nodes, or it throws.
+        example: |
+          const added = graph.edges.add({ count: 2, indices: new Uint32Array([0, 3, 3, 4]) });
+          console.log(`first new edge: ${added[0]}`);
+      remove:
+        description: >-
+          Removes edges by index. The other edges keep their indices, and the nodes stay where they are.
+        example: |
+          graph.edges.remove([0, 2]);
+      update:
+        description: >-
+          Changes some channels of the listed edges. Each array has one entry per listed index, in the same
+          order, or two for `indices` and `colors`. Channels you leave out do not change. Pass new
+          `indices` to connect an edge to other nodes.
+        example: |
+          import { packEdgeStyle, packRgba } from "@vhult/graph";
+
+          const picked = new Uint32Array([4, 9]);
+          graph.edges.update(picked, {
+            styles: new Uint32Array(2).fill(packEdgeStyle({ width: 3, directed: true })),
+            colors: new Uint32Array(4).fill(packRgba(1, 0.6, 0.2)),
+          });
+      updateAll:
+        description: >-
+          Changes some channels of every edge at once. Each array must have one entry per slot, see
+          `slots`, or two for `indices` and `colors`. It is faster than `update` when most edges change.
+          Pass `labels: null` to clear every label.
+        example: |
+          import { packRgba } from "@vhult/graph";
+
+          const colors = new Uint32Array(graph.edges.slots * 2);
+          for (let i = 0; i < graph.edges.slots; i++) {
+            colors[i * 2] = packRgba(1, 0.3, 0.3);
+            colors[i * 2 + 1] = packRgba(0.3, 0.6, 1);
+          }
+          graph.edges.updateAll({ colors });
+      flag:
+        description: >-
+          Turns flags on or off for the listed edges, or for all of them with `"all"`. Flags change how an
+          edge is drawn without touching its channels: selected, focused, dimmed or hidden. Combine several
+          with `|`. An edge is also hidden when one of its nodes is hidden.
+        example: |
+          import { Flag } from "@vhult/graph";
+
+          graph.edges.flag("all", Flag.dimmed, true);
+          graph.edges.flag(new Uint32Array([3, 7]), Flag.dimmed, false);
+          graph.edges.flag(new Uint32Array([3]), Flag.selected, true);
+      clear:
+        description: >-
+          Removes every edge. The nodes stay.
+        example: |
+          graph.edges.clear();
+      compact:
+        description: >-
+          Moves the live edges into the first indices, so there are no freed slots left. It returns a table
+          from old index to new index, with `NO_INDEX` for edges that were removed. Update any edge index you
+          keep on your side with the table.
+        example: |
+          import { NO_INDEX } from "@vhult/graph";
+
+          let selected = 12;
+          const table = graph.edges.compact();
+          if (table[selected] !== NO_INDEX) selected = table[selected];
+  EdgeData:
+    description: >-
+      The edges you pass to `edges.set` and `edges.add`. `count` says how many edges there are, and
+      `indices` says which nodes they join. The other fields are optional channels: a typed array with one
+      entry per edge, or two for colors.
+    example: |
+      import { packEdgeStyle, packRgba, type EdgeData } from "@vhult/graph";
+
+      const data: EdgeData = {
+        count: 2,
+        indices: new Uint32Array([0, 1, 1, 2]),
+        styles: new Uint32Array([packEdgeStyle({ width: 2 }), packEdgeStyle({ directed: true })]),
+        colors: new Uint32Array([packRgba(1, 0, 0), packRgba(0, 0, 1), 0, 0]),
+        labels: ["knows", null],
+      };
+      graph.edges.set(data);
+    members:
+      count:
+        description: >-
+          How many edges the data holds. Every channel array must match it, or the call throws.
+      indices:
+        description: >-
+          The two ends of each edge, as a source node index then a target node index. The array holds two
+          entries per edge. For a directed edge, the arrow points at the target.
+        example: |
+          graph.edges.set({ count: 2, indices: new Uint32Array([0, 1, 0, 2]) });
+      styles:
+        description: >-
+          One style word per edge, made with `packEdgeStyle`. It holds the width in CSS px and whether the
+          edge is directed. Edges without a style use the width from `style.edge` and have no arrow.
+        example: |
+          import { packEdgeStyle } from "@vhult/graph";
+
+          graph.edges.set({
+            count: 2,
+            indices: new Uint32Array([0, 1, 1, 2]),
+            styles: new Uint32Array([packEdgeStyle({ width: 4 }), packEdgeStyle({ width: 1, directed: true })]),
+          });
+      colors:
+        description: >-
+          Two packed colors per edge, made with `packRgba`: one at the source, then one at the target. The
+          edge fades from the first to the second along its length. A 0 uses the color from `style.edge`.
+        example: |
+          import { packRgba } from "@vhult/graph";
+
+          graph.edges.set({
+            count: 1,
+            indices: new Uint32Array([0, 1]),
+            colors: new Uint32Array([packRgba(1, 0.2, 0.2), packRgba(0.2, 0.4, 1)]),
+          });
+      labels:
+        description: >-
+          The text shown on each edge, at its middle. Use null or leave a hole for an edge without a label.
+          A label shows only when the edge is long enough on screen to fit it, so zoom in to see more.
+        example: |
+          graph.edges.set({ count: 2, indices: new Uint32Array([0, 1, 1, 2]), labels: ["follows", null] });
+  EdgeUpdate:
+    description: >-
+      The channels you pass to `edges.update` and `edges.updateAll`. It has the same channels as `EdgeData`,
+      all optional, but no `count`, since the indices or the slots decide the length. `labels: null` in
+      `updateAll` clears every label.
+    example: |
+      import { packRgba, type EdgeUpdate } from "@vhult/graph";
+
+      const change: EdgeUpdate = { colors: new Uint32Array([packRgba(1, 1, 1), packRgba(1, 1, 1)]) };
+      graph.edges.update(new Uint32Array([5]), change);

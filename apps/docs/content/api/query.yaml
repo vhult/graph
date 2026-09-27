@@ -1,0 +1,85 @@
+title: Query
+intro: >-
+  Ask the engine what is at a point or inside a shape on the canvas. You reach it through `graph.query`,
+  with canvas coordinates in CSS px.
+namespace: GraphQuery
+types: [Rect, Polygon]
+
+docs:
+  GraphQuery:
+    description: >-
+      Finds nodes and edges from canvas coordinates, in CSS px from the top left of the canvas. The answer
+      comes back from the render worker, so every call returns a promise. Use it for your own tools, like a
+      custom menu or a selection you draw yourself.
+    example: |
+      const hit = await graph.query.at(200, 150);
+      if (hit.node !== null) console.log(`node ${hit.node}`);
+
+      const nodes = await graph.query.inside({ x: 0, y: 0, width: 300, height: 200 });
+      console.log(`${nodes.length} nodes in the box`);
+    members:
+      at:
+        description: >-
+          Resolves with what is at a canvas point, as a `Hit`: the node and the edge there, or null, and
+          the point in world units. `button` is -1 and the key fields are false, since no pointer made the
+          query. It throws when `x` or `y` is not a finite number.
+        example: |
+          canvas.addEventListener("dblclick", async (e) => {
+            const hit = await graph.query.at(e.offsetX, e.offsetY);
+            if (hit.edge !== null) console.log(`edge ${hit.edge} at ${hit.x}, ${hit.y}`);
+          });
+      inside:
+        description: >-
+          Resolves with the indices of the nodes inside a box or a polygon on the canvas. A node counts when
+          its center is inside. Hidden nodes are left out, and the order of the indices is not fixed.
+        example: |
+          import { Flag } from "@vhult/graph";
+
+          const nodes = await graph.query.inside({ points: [100, 20, 180, 160, 20, 160] });
+          graph.nodes.flag(nodes, Flag.selected, true);
+  Rect:
+    description: >-
+      A box on the canvas for `query.inside`, in CSS px. `x` and `y` are its top left corner. Width and
+      height must be 0 or more, or the query throws.
+    example: |
+      import type { Rect } from "@vhult/graph";
+
+      const box: Rect = { x: 40, y: 40, width: canvas.clientWidth - 80, height: canvas.clientHeight - 80 };
+      const nodes = await graph.query.inside(box);
+    members:
+      x:
+        description: >-
+          The left edge of the box, in CSS px from the left of the canvas.
+        example: |
+          const nodes = await graph.query.inside({ x: 100, y: 0, width: 50, height: 50 });
+      y:
+        description: >-
+          The top edge of the box, in CSS px from the top of the canvas.
+        example: |
+          const nodes = await graph.query.inside({ x: 0, y: 100, width: 50, height: 50 });
+      width:
+        description: >-
+          The width of the box, in CSS px.
+        example: |
+          const nodes = await graph.query.inside({ x: 0, y: 0, width: canvas.clientWidth, height: 40 });
+      height:
+        description: >-
+          The height of the box, in CSS px.
+        example: |
+          const nodes = await graph.query.inside({ x: 0, y: 0, width: 40, height: canvas.clientHeight });
+  Polygon:
+    description: >-
+      A closed shape on the canvas for `query.inside`, such as a lasso. It takes 3 to 1024 corners, in CSS
+      px. The last corner joins the first one.
+    example: |
+      import type { Polygon } from "@vhult/graph";
+
+      const triangle: Polygon = { points: [100, 20, 180, 160, 20, 160] };
+      const nodes = await graph.query.inside(triangle);
+    members:
+      points:
+        description: >-
+          The corners as x then y, in CSS px from the top left of the canvas. The array must hold an even
+          count of finite numbers.
+        example: |
+          const nodes = await graph.query.inside({ points: [0, 0, 300, 0, 300, 120, 150, 260, 0, 120] });

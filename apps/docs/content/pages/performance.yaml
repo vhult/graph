@@ -1,0 +1,43 @@
+title: Performance
+description: Cross-origin isolation, frame numbers and the debug overlay.
+blocks:
+  - heading: Cross-origin isolation
+  - text: "The engine works on any page. When the page is cross-origin isolated, it uses a `SharedArrayBuffer` for pointer input and frame numbers. Otherwise input, frame numbers and node streams go through messages between the page and the worker instead."
+  - text: "To turn it on, serve the page with these two headers:"
+  - code: |
+      Cross-Origin-Opener-Policy: same-origin
+      Cross-Origin-Embedder-Policy: require-corp
+    lang: text
+  - note: "With these headers, every resource from another origin, such as an image, a font or an embed, must allow it with a CORS or a `Cross-Origin-Resource-Policy` header, or it is blocked."
+    kind: warning
+  - text: "`graph.caps.sharedMemory` tells you which path is running."
+
+  - heading: Frame numbers
+  - text: "`graph.stats()` returns the latest frame numbers: CPU and GPU time, visible nodes and edges, GPU memory and more. Pass the same object back to avoid a new one per call."
+  - code: |
+      const stats = graph.stats();
+
+      function tick() {
+        graph.stats(stats);
+        console.log(stats.cpuMs, stats.gpuMs, stats.visibleNodes);
+        requestAnimationFrame(tick);
+      }
+      tick();
+    lang: ts
+  - text: "`gpuMs` is NaN when the GPU has no timestamp queries, see `graph.caps.timestampQuery`. It is also NaN while the debug overlay is closed and no recording or benchmark runs, because only then does the engine time the GPU."
+
+  - heading: Debug overlay
+  - text: "`graph.debug.open()` shows the debug overlay with live frame timings. `graph.debug.record()` records the frames until `graph.debug.stop()` and resolves with the recording."
+  - code: |
+      graph.debug.open();
+
+      const recording = graph.debug.record();
+      setTimeout(() => graph.debug.stop(), 5000);
+      console.log((await recording).summary);
+    lang: ts
+
+  - heading: See it run
+  - cards:
+      - title: Storybook
+        text: Large graphs up to 10 million nodes, every style, and the benchmark.
+        href: /storybook/

@@ -1,6 +1,6 @@
 ---
 name: release
-description: Use when preparing a release from dev to main. Reads the commits dev has that main does not, picks the version, writes the CHANGELOG entry, and proposes one release commit. Does not push, tag or publish.
+description: Use when preparing a release from dev to main. Reads the commits dev has that main does not, brings the docs up to date, picks the version, writes the CHANGELOG entry, and proposes the release commit. Does not push, tag or publish.
 ---
 
 # Release dev to main
@@ -17,7 +17,33 @@ This skill helps, it does not automate. It proposes and the user decides. It nev
 - Skip every `docs` commit.
 - Every later step uses only the kept commits, including the version bump.
 
-## 2. Find each author's GitHub login
+## 2. Bring the docs up to date
+
+The docs site must match the version being released. Apply the `update-docs` skill with `main` as the base: `git diff main...dev -- packages/graph/api/graph.api.md` lists the API changes, and the commits kept in step 1 say why.
+
+The release goes on only when all three pass, from the repo root:
+
+```
+node --experimental-strip-types --no-warnings apps/docs/scripts/missing.mjs
+npm run typecheck
+npm run storybook:build
+```
+
+- `missing.mjs` must print `nothing missing`: every export and member has its text.
+- `npm run typecheck` also typechecks every example of the docs.
+- `npm run storybook:build` fails on a broken link or a name that no longer exists.
+
+If one fails, stop and report it.
+
+The docs changes are their own commit on `dev`, before the release commit:
+
+```
+docs: update the docs for v0.2.0
+```
+
+Show the diff and the message, then ask `Commit? [Y/n]`. Commit only on `Y`. When the docs are already up to date (all three pass and no API change is left undocumented), say so and make no docs commit. The docs read their version from `packages/graph/package.json`, so the bump in step 6 updates it with nothing to edit.
+
+## 3. Find each author's GitHub login
 
 For each commit, take the first that works:
 
@@ -27,7 +53,7 @@ For each commit, take the first that works:
 
 Skip authorship for the maintainer (`hihubble` or `hihubbIe`): their lines get no `@login`.
 
-## 3. Pick the version
+## 4. Pick the version
 
 Read the current version from `packages/graph/package.json`, then propose a bump:
 
@@ -37,7 +63,7 @@ Read the current version from `packages/graph/package.json`, then propose a bump
 
 State the proposed version and the reason. If the user names another bump, use theirs.
 
-## 4. Write the CHANGELOG entry
+## 5. Write the CHANGELOG entry
 
 `CHANGELOG.md` sits at the repo root. New entries always go at the top, under the `# Changelog` title. Never edit older entries. Create the file if it is missing.
 
@@ -68,7 +94,7 @@ Entry format:
 - A performance line carries the frame and p95 numbers from the commit's `Perf` block.
 - Rewrite a summary only to make it clear. Never change what it says.
 
-## 5. Bump the version
+## 6. Bump the version
 
 Set the new version in:
 
@@ -76,7 +102,7 @@ Set the new version in:
 - `packages/graph/package.json`
 - `package-lock.json`: the top `version`, `packages[""].version` and `packages["packages/graph"].version`
 
-## 6. Propose the commit
+## 7. Propose the commit
 
 The commit goes on `dev`.
 
@@ -88,7 +114,7 @@ chore(release): v0.2.0
 
 Show the full diff and the message, then ask `Commit? [Y/n]`. Commit only on `Y`. On `n`, change what the user asks and propose again. The commit body is also the description of the dev to main PR.
 
-## 7. Give the commands
+## 8. Give the commands
 
 After the commit, print these for the user to run. Do not run them.
 

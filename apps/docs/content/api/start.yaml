@@ -1,0 +1,277 @@
+title: Start
+intro: >-
+  `Graph.create` turns a canvas into a graph. The `Graph` it returns is the way in to everything else,
+  and its errors tell you when the browser or the GPU cannot run the engine.
+namespace: Graph
+types: [GraphOptions, GraphCaps, GraphError, GraphErrorCode, UnsupportedError]
+
+docs:
+  Graph:
+    description: >-
+      A graph drawn with WebGPU on a canvas. The drawing runs in a worker, so the calls you make on the
+      main thread only send work and return. Make one with `Graph.create`, then reach the parts through
+      `graph.nodes`, `graph.edges`, `graph.camera` and the other namespaces.
+    example: |
+      import { Graph, UnsupportedError } from "@vhult/graph";
+
+      try {
+        const graph = await Graph.create(canvas);
+        graph.nodes.set({ count: 2, positions: new Float32Array([0, 0, 100, 0]) });
+        graph.edges.set({ count: 1, indices: new Uint32Array([0, 1]) });
+        graph.camera.fit();
+      } catch (e) {
+        if (e instanceof UnsupportedError) showFallback(e.message);
+        else throw e;
+      }
+    members:
+      create:
+        description: >-
+          Hands the canvas to a render worker, starts WebGPU and resolves with the graph. It rejects with an
+          `UnsupportedError` when the browser or the GPU cannot run the engine. The canvas size is read at
+          this moment, so give it its CSS size first. A canvas can be handed over only once.
+        example: |
+          import { Graph } from "@vhult/graph";
+
+          const graph = await Graph.create(canvas, {
+            style: { background: [0.05, 0.05, 0.08, 1] },
+            input: { selectShape: "lasso" },
+          });
+      camera:
+        description: >-
+          Moves and reads the view: pan, zoom, rotation, fit to the nodes, limits, and conversion between
+          screen and world units. See `GraphCamera`.
+        example: |
+          graph.camera.fit({ duration: 300 });
+      nodes:
+        description: >-
+          Loads, changes, removes and flags the nodes. See `GraphNodes`.
+        example: |
+          graph.nodes.set({ count: 3, positions: new Float32Array([0, 0, 80, 0, 40, 60]) });
+      edges:
+        description: >-
+          Loads, changes, removes and flags the edges. Edges point at nodes by index, so load the nodes
+          first. See `GraphEdges`.
+        example: |
+          graph.edges.set({ count: 2, indices: new Uint32Array([0, 1, 1, 2]) });
+      style:
+        description: >-
+          Sets the look of the graph: background, edges, labels, icons and highlights. See `GraphStyle`.
+        example: |
+          graph.style.set({ background: [1, 1, 1, 1], nodeScale: 1.5 });
+      input:
+        description: >-
+          Sets how the graph reacts to the mouse and touch: pan, zoom, rotate, drag, select and picking.
+          See `GraphInput`.
+        example: |
+          graph.input.set({ rotate: "auto", drag: false });
+      icons:
+        description: >-
+          Loads the icons that nodes can show. See `GraphIcons`.
+        example: |
+          const [star] = await graph.icons.add([{ path: "M12 2l3 7h7l-6 5 2 7-6-4-6 4 2-7-6-5h7z", viewBox: [0, 0, 24, 24] }]);
+          graph.nodes.update(new Uint32Array([0]), { icons: new Uint16Array([star]) });
+      query:
+        description: >-
+          Asks what is at a point or inside a shape on the canvas. See `GraphQuery`.
+        example: |
+          const hit = await graph.query.at(120, 80);
+          console.log(hit.node);
+      canvas:
+        description: >-
+          Resizes the canvas, draws a frame on demand and takes snapshots. See `GraphCanvas`.
+        example: |
+          const png = await graph.canvas.snapshot();
+          window.open(URL.createObjectURL(png));
+      debug:
+        description: >-
+          Opens the debug overlay, records timings and runs benchmarks. See `GraphDebug`.
+        example: |
+          window.addEventListener("keydown", (e) => {
+            if (e.key === "F2") graph.debug.toggle();
+          });
+      caps:
+        description: >-
+          What this GPU and page support, read once when the graph starts. See `GraphCaps`.
+        example: |
+          console.log(`${graph.caps.adapter}, up to ${graph.caps.maxIcons} icons`);
+      stats:
+        description: >-
+          Returns the latest frame numbers right away: frame times in ms, node and edge counts, what is
+          on screen and GPU memory. Pass an object as `out` to fill it again instead of making a new one on
+          each call. See `GraphStats`.
+        example: |
+          const stats = graph.stats();
+          setInterval(() => {
+            graph.stats(stats);
+            console.log(`${stats.cpuMs.toFixed(2)} ms, ${stats.visibleNodes} nodes on screen`);
+          }, 1000);
+      "on":
+        description: >-
+          Listens to an event, like `click`, `hover`, `select` or `error`, and returns a function that
+          stops listening. The worker only sends the events that have a listener. With no `error`
+          listener, errors are logged with `console.error`. See `GraphEvents`.
+        example: |
+          const off = graph.on("click", (hit) => {
+            if (hit.node === null) return;
+            console.log(`clicked node ${hit.node}`);
+            off();
+          });
+      destroy:
+        description: >-
+          Stops the graph and frees the worker, the GPU device and every listener. Promises still waiting
+          reject, and calls that send work after it throw a `GraphError` with code `destroyed`. Calling it
+          twice is safe.
+        example: |
+          window.addEventListener("pagehide", () => graph.destroy());
+  GraphOptions:
+    description: >-
+      The options you pass to `Graph.create`. Every field is optional. The style and input you set here
+      are the first ones; change them later with `graph.style` and `graph.input`.
+    example: |
+      import { Graph, type GraphOptions } from "@vhult/graph";
+
+      const options: GraphOptions = { pixelRatio: 1, autoResize: true, nodeReserve: 1000 };
+      const graph = await Graph.create(canvas, options);
+    members:
+      pixelRatio:
+        description: >-
+          How many canvas pixels one CSS px takes. The default is `devicePixelRatio`. A lower value draws
+          fewer pixels, which is faster but less sharp.
+        example: |
+          import { Graph } from "@vhult/graph";
+
+          const graph = await Graph.create(canvas, { pixelRatio: 1 });
+      autoResize:
+        description: >-
+          Follows the CSS size of the canvas with a `ResizeObserver`. The default is true. Turn it off to
+          set the size yourself with `graph.canvas.resize`.
+        example: |
+          import { Graph } from "@vhult/graph";
+
+          const graph = await Graph.create(canvas, { autoResize: false });
+          graph.canvas.resize(800, 600);
+      style:
+        description: >-
+          The first look of the graph, in the same shape as `style.set`. See `GraphStyle`.
+        example: |
+          import { Graph } from "@vhult/graph";
+
+          const graph = await Graph.create(canvas, { style: { background: [0, 0, 0, 0], edge: { width: 2 } } });
+      input:
+        description: >-
+          The first interaction settings, in the same shape as `input.set`. See `GraphInput`.
+        example: |
+          import { Graph } from "@vhult/graph";
+
+          const graph = await Graph.create(canvas, { input: { select: "manual", selectKey: null } });
+      nodeReserve:
+        description: >-
+          How many empty node slots the engine keeps ready past `nodes.slots`. The default is 100. Adds
+          that fit in them are cheap; the add that takes the last one grows the buffers, which costs more.
+          Raise it when you add many nodes one call at a time. It must be a whole number of 0 or more.
+        example: |
+          import { Graph } from "@vhult/graph";
+
+          const graph = await Graph.create(canvas, { nodeReserve: 10_000 });
+  GraphCaps:
+    description: >-
+      What this GPU and page support, in `graph.caps`. Read it to know the limits of the machine, or to
+      turn off a feature it cannot run.
+    example: |
+      if (!graph.caps.timestampQuery) console.log("GPU times are not available here");
+    members:
+      adapter:
+        description: >-
+          A short description of the GPU adapter, such as "nvidia ampere".
+      timestampQuery:
+        description: >-
+          Whether the GPU can measure its own time. Without it, `gpuMs` in `graph.stats` is `NaN`.
+      indirectFirstInstance:
+        description: >-
+          Whether indirect draws can set the first instance.
+      subgroups:
+        description: >-
+          Whether shader subgroups are available.
+      float32Filterable:
+        description: >-
+          Whether 32-bit float textures can be filtered.
+      shaderF16:
+        description: >-
+          Whether 16-bit floats are available in shaders.
+      maxBufferSize:
+        description: >-
+          The largest GPU buffer, in bytes.
+      maxStorageBufferBindingSize:
+        description: >-
+          The largest storage buffer binding, in bytes. It limits how many edges the GPU can hold.
+      maxTextureDimension2D:
+        description: >-
+          The largest side of a 2D texture, in px.
+      maxStorageBuffersPerShaderStage:
+        description: >-
+          How many storage buffers one shader stage can use.
+      maxIcons:
+        description: >-
+          The most icons the icon set can hold. `icons.define` and `icons.add` throw past it.
+      sharedMemory:
+        description: >-
+          Whether the page can share memory with the worker. It needs `SharedArrayBuffer` and a
+          cross-origin isolated page. Without it, pointer input and node streams go through messages.
+      profilerSlots:
+        description: >-
+          The names of the GPU timings, in order. They are the keys of `passMs` in `graph.stats`.
+  GraphError:
+    description: >-
+      The error the engine throws, rejects with and reports. Read `code` to know what went wrong; the
+      message says it in words. Errors that happen later in the worker come through the `error` event.
+    example: |
+      import { GraphError } from "@vhult/graph";
+
+      try {
+        graph.nodes.update(new Uint32Array([999999]), { sizes: new Float32Array([8]) });
+      } catch (e) {
+        if (e instanceof GraphError && e.code === "invalid-argument") console.warn(e.message);
+        else throw e;
+      }
+    members:
+      constructor:
+        description: >-
+          Makes an error with a code and a message. The engine makes these for you, so you rarely need it.
+        example: |
+          import { GraphError } from "@vhult/graph";
+
+          const error = new GraphError("invalid-argument", "positions must hold x, y pairs");
+      code:
+        description: >-
+          What went wrong, as one of `GraphErrorCode`.
+      name:
+        description: >-
+          The class name, `"GraphError"`.
+  GraphErrorCode:
+    description: >-
+      The code of a `GraphError`. The first five, `webgpu-unavailable`, `offscreen-canvas-unavailable`,
+      `no-adapter`, `compat-mode` and `insufficient-limits`, mean this browser or GPU cannot run the engine,
+      and come as an `UnsupportedError`. `limits-exceeded` means the data is too large, `device-failed` and
+      `device-lost` mean the GPU device could not start or was lost, `detached-array` means an array was
+      already sent, and `destroyed` means the graph is gone. `invalid-argument` is bad input and `internal`
+      is everything else.
+    example: |
+      graph.on("error", (e) => {
+        if (e.code === "device-lost") showFallback(e.message);
+      });
+  UnsupportedError:
+    description: >-
+      A `GraphError` that says this browser or GPU cannot run the engine. `Graph.create` throws it when
+      WebGPU or `OffscreenCanvas` is missing, when there is no GPU adapter, when the adapter only offers
+      compatibility mode, or when the GPU limits are too low. Catch it to show a fallback.
+    example: |
+      import { Graph, UnsupportedError } from "@vhult/graph";
+
+      const graph = await Graph.create(canvas).catch((e: unknown) => {
+        if (e instanceof UnsupportedError) showFallback(`${e.code}: ${e.message}`);
+        return null;
+      });
+    members:
+      name:
+        description: >-
+          The class name, `"UnsupportedError"`.

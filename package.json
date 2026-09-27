@@ -12,6 +12,6 @@
     "test": "npm run test -w @vhult/graph",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "dev": "node scripts/dev.mjs",
-    "storybook:build": "npm run build -w @vhult/graph && npm run build -w @vhult/graph-storybook"
+    "storybook:build": "npm run build -w @vhult/graph && npm run build -w @vhult/graph-storybook && npm run build -w @vhult/graph-docs"
   }
 }

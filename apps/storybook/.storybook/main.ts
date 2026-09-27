@@ -12,8 +12,6 @@ import { mergeConfig } from "vite";
  */
 const config: StorybookConfig = {
   stories: ["../stories/**/*.mdx", "../stories/**/*.stories.ts"],
-  // `_headers`: the static host's COOP/COEP (the dev server's `crossOriginIsolated` does not reach a static build).
-  staticDirs: ["../public"],
   addons: ["@storybook/addon-docs"],
   framework: { name: "@storybook/html-vite", options: {} },
   core: {

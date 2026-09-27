@@ -1,0 +1,63 @@
+title: Styling
+description: Colors, shapes, labels, icons and the look of highlighted nodes.
+blocks:
+  - heading: Colors
+  - text: "Per-node and per-edge colors are packed RGBA words. `packRgba` takes red, green, blue and alpha from 0 to 1. Colors in the style, like the background, are `RGBA` arrays with the same four values."
+  - code: |
+      import { packRgba } from "@vhult/graph";
+
+      const orange = packRgba(1, 0.4, 0.2);
+      const glass = packRgba(1, 1, 1, 0.3);
+    lang: ts
+
+  - heading: The graph style
+  - text: "`style.set` changes part of the look; fields you leave out keep their value. `Graph.create` takes the same shape as the first look."
+  - code: |
+      graph.style.set({
+        background: [0.04, 0.04, 0.06, 1],
+        nodeScale: 1.2,
+        edge: { color: [0.6, 0.7, 0.9, 0.6], width: 1 },
+        label: { size: 12, color: [1, 1, 1, 0.9] },
+        dimmed: { alpha: 0.15 },
+      });
+    lang: ts
+  - text: "A background alpha below 1 makes the canvas see-through, so the page shows behind the graph."
+
+  - heading: Edges
+  - text: "`packEdgeStyle` makes one style word per edge from a width in CSS px and whether the edge is directed. Edges without their own width or color use `style.edge`. Two colors per edge draw a gradient from the source to the target."
+  - code: |
+      import { packEdgeStyle, packRgba } from "@vhult/graph";
+
+      graph.edges.set({
+        count: 1,
+        indices: new Uint32Array([0, 1]),
+        styles: new Uint32Array([packEdgeStyle({ width: 3, directed: true })]),
+        colors: new Uint32Array([packRgba(0.3, 0.6, 1), packRgba(0.2, 0.8, 0.6)]),
+      });
+    lang: ts
+
+  - heading: Highlights
+  - text: "The hovered node, the selected nodes and the focused nodes each have a `HighlightLook`: an outline around the node, and a color and width for its edges. Set `hover` to false to turn the hover highlight off."
+  - code: |
+      graph.style.set({
+        hover: { outline: { color: [1, 1, 1, 1], scale: 0.15, minWidth: 1, maxWidth: 4 } },
+        selected: { outline: { color: [0.3, 0.6, 1, 1] }, edgeColor: [0.3, 0.6, 1, 1], edgeWidth: 2 },
+      });
+    lang: ts
+
+  - heading: Icons
+  - text: "Icons come from SVG path data or SVG markup. `icons.define` sets the whole icon set, and an icon's id is its position in the list. Nodes pick an icon with the `icons` channel and tint it with `iconColors`."
+  - code: |
+      import { NO_ICON, packRgba } from "@vhult/graph";
+
+      await graph.icons.define([
+        { path: "M12 2 L22 22 L2 22 Z", viewBox: [0, 0, 24, 24] },
+        { svg: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/></svg>' },
+      ]);
+
+      graph.nodes.update(new Uint32Array([0, 1, 2]), {
+        icons: new Uint16Array([0, 1, NO_ICON]),
+        iconColors: new Uint32Array(3).fill(packRgba(1, 1, 1)),
+      });
+    lang: ts
+  - text: "`style.icon.scale` sets the icon size inside the node, from 0.01 to 1. Icons are not drawn on nodes smaller than `style.icon.minPx` CSS px."
