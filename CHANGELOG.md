@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.3.0 - 2026-09-27
+
+### Breaking
+- the whole 0.2 public api is replaced by namespaces (nodes, edges, icons, camera, style, input, query, canvas, stats, debug); see the README for the 0.3 names, options and events (c64fb4e)
+- api: outline the hovered node instead of growing it; HoverStyle.nodeColor and nodeScale are replaced by nodeOutlineColor, nodeOutlineScale, nodeOutlineMinWidth and nodeOutlineMaxWidth (98126fe)
+- api: add node icons and a single partial updateNodes; updateNodePositions and updateNodeColor are removed, use updateNodes; binding contract 3 puts the icon colour index in the high half of nodeSize; the ENABLE_ICONS override is removed (3b65639)
+- api: streamNodePositions() and the NodePositionStream type are removed; use streamNodes({ positions: true }), which returns a NodeStream (a4d86f2)
+
+### Features
+- clean up the 0.3 engine and add the nodeReserve option (0f3e9b5)
+- api: stream z-index with the other node channels (32f7fd1)
+- api: add a z-index to draw nodes in layers (2bf10f5)
+
+### Fixes
+- shaders: stop the edge line inside the arrowhead (9a471b4)
+- engine: mark only what each node channel changes (6b73480)
+
 ## v0.2.0 - 2026-09-24
 
 ### Features
