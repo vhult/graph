@@ -1,12 +1,7 @@
-import { Graph, type GraphOptions } from "@vhult/graph";
+import { Graph } from "@vhult/graph";
 import { useEffect, useRef, useState } from "react";
 import { demoGraph } from "./demo";
 import "./landing-graph.css";
-
-const OPTIONS: GraphOptions = {
-  style: { background: [0, 0, 0, 0], edge: { color: [0.6, 0.7, 0.9, 0.5] } },
-  input: { zoom: false },
-};
 
 export function LandingGraph() {
   const host = useRef<HTMLDivElement>(null);
@@ -19,7 +14,7 @@ export function LandingGraph() {
     el.append(canvas);
     let graph: Graph | null = null;
     let live = true;
-    Graph.create(canvas, OPTIONS).then(
+    Graph.create(canvas).then(
       (g) => {
         if (!live) return g.destroy();
         graph = g;
@@ -27,6 +22,7 @@ export function LandingGraph() {
         g.nodes.set(nodes);
         g.edges.set(edges);
         g.camera.fit();
+        g.on("click", (hit) => console.log(hit.node));
       },
       (e: unknown) => {
         if (live) setError(e instanceof Error ? e.message : "The graph could not start.");
