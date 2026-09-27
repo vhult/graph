@@ -1,4 +1,4 @@
-import type { ApiDoc, ApiEntry, ApiGroup, ApiMember, ApiModel, ApiMemberText, Block, Content, Token } from "../src/content/types.ts";
+import type { ApiDoc, ApiEntry, ApiGroup, ApiMember, ApiMemberText, ApiVersion, Block, Content, Token } from "../src/content/types.ts";
 
 function inline(text: string): string {
   return text.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (all, label: string, href: string) => (href.startsWith("/") ? label : all));
@@ -60,7 +60,7 @@ export interface LlmsFiles {
   full: string;
 }
 
-export function llmsFiles(content: Content, api: ApiModel): LlmsFiles {
+export function llmsFiles(content: Content, api: ApiVersion): LlmsFiles {
   const { site, version, pages } = content;
   const pageOrder = site.docs.flatMap((s) => s.pages.map((id) => pages[id]));
   const summary = `> ${site.description}. ${site.landing.lead}`;
@@ -76,7 +76,7 @@ export function llmsFiles(content: Content, api: ApiModel): LlmsFiles {
     "## Contents of the full documentation",
     [
       ...pageOrder.map((p) => `- Guide, ${p.title}${p.description ? `: ${inline(p.description)}` : ""}`),
-      ...content.api.map((g) => `- API, ${g.title}: ${groupNames(g).join(", ")}`),
+      ...api.groups.map((g) => `- API, ${g.title}: ${groupNames(g).join(", ")}`),
     ].join("\n"),
   ].join("\n\n");
 
@@ -87,7 +87,7 @@ export function llmsFiles(content: Content, api: ApiModel): LlmsFiles {
     for (const b of p.blocks) full.push(block(b));
   }
   full.push("# API reference");
-  for (const g of content.api) {
+  for (const g of api.groups) {
     full.push(`## ${g.title}`);
     if (g.intro) full.push(inline(g.intro));
     for (const name of groupNames(g)) {

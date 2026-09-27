@@ -261,6 +261,9 @@ export interface DragMoveEvent {
   dy: number;
 }
 
+/** Payload of the `dragEnd` event. */
+export type DragEndEvent = DragMoveEvent;
+
 /** Diagnostic edge colouring mode. */
 export type EdgeDebugMode = "off" | "length" | "thinning" | "chunk";
 
@@ -666,7 +669,7 @@ export interface GraphEvents {
   /** The dragged nodes moved. */
   drag: DragMoveEvent;
   /** A drag ended. */
-  dragEnd: DragMoveEvent;
+  dragEnd: DragEndEvent;
   /** A click or a shape selected nodes. */
   select: SelectEvent;
   /** A pan gesture step. */

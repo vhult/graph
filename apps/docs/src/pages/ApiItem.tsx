@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { groupOf, labelOf, textOf } from "../content/api";
+import { useApi } from "../content/api";
 import type { ApiDoc, ApiEntry, ApiMember, ApiMemberText, Token } from "../content/types";
 import { Shell } from "../layout/Shell";
 import { Example } from "../render/Code";
@@ -13,11 +13,12 @@ const SECTIONS: { kind: ApiMember["kind"]; title: string }[] = [
 ];
 
 function Signature({ tokens, block = false }: { tokens: Token[]; block?: boolean }) {
+  const api = useApi();
   const code = (
     <code>
       {tokens.map((t, i) =>
         t.ref ? (
-          <Link key={i} href={`/api/${t.ref}`} className="ref">
+          <Link key={i} href={api.itemHref(t.ref)} className="ref">
             {t.text}
           </Link>
         ) : (
@@ -80,7 +81,7 @@ function Member({ member, text }: { member: ApiMember; text: ApiMemberText }) {
 }
 
 function Entry({ entry, first }: { entry: ApiEntry; first: boolean }) {
-  const text = textOf(entry.name);
+  const text = useApi().textOf(entry.name);
   return (
     <div className="entry">
       {!first && (
@@ -106,9 +107,10 @@ function Entry({ entry, first }: { entry: ApiEntry; first: boolean }) {
 }
 
 export function ApiItem({ entries, path }: { entries: ApiEntry[]; path: string }) {
+  const api = useApi();
   const name = entries[0].name;
-  const label = labelOf(name);
-  const group = groupOf(name);
+  const label = api.labelOf(name);
+  const group = api.groupOf(name);
   const toc = entries.flatMap((e) => e.members.map((m) => ({ id: m.name, label: `\`${m.name}\`` })));
   return (
     <Shell area="api" path={path} toc={toc}>

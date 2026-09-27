@@ -47,9 +47,9 @@ blocks("landing", site.landing.blocks);
 
 for (const f of files(join(content, "pages"))) blocks(`page-${basename(f, ".yaml")}`, read(join(content, "pages", f)).blocks);
 
-for (const f of files(join(content, "api"))) {
+for (const f of files(join(content, "api", "latest"))) {
   const group = basename(f, ".yaml");
-  const docs = read(join(content, "api", f)).docs ?? {};
+  const docs = read(join(content, "api", "latest", f)).docs ?? {};
   for (const [name, text] of Object.entries(docs)) {
     if (text.example) add(`api-${group}-${name}`, text.example);
     for (const [member, m] of Object.entries(text.members ?? {})) {

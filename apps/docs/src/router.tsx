@@ -2,7 +2,7 @@ import { useEffect, useState, type AnchorHTMLAttributes, type MouseEvent } from 
 
 export function isAppPath(href: string): boolean {
   const path = href.split("#")[0];
-  return path === "/" || path === "/api" || path.startsWith("/api/") || path.startsWith("/docs/");
+  return path === "/" || path === "/api" || path.startsWith("/api/") || path.startsWith("/docs/") || /^\/v\d+\/api(\/|$)/.test(path);
 }
 
 export function navigate(href: string): void {

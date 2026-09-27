@@ -38,6 +38,7 @@ export type {
   LabelSnapshot,
   Mode,
   DragMoveEvent,
+  DragEndEvent,
   DragStartEvent,
   PanEvent,
   RotateEvent,

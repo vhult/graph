@@ -5,7 +5,7 @@ import { GitHubButton, NpmBadge } from "./Integrations";
 function active(path: string, href: string): boolean {
   if (!href.startsWith("/") || href === "/") return false;
   const section = href.split("/")[1];
-  return path.split("/")[1] === section;
+  return path.replace(/^\/v\d+(?=\/api(\/|$))/, "").split("/")[1] === section;
 }
 
 export function Mark() {

@@ -1,7 +1,8 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { parse } from "yaml";
-import type { ApiGroup, ApiModel, Block, Content, Page, Site } from "../src/content/types.ts";
+import type { ApiEntry, ApiGroup, ApiModel, ApiVersion, Block, Content, Page, Site } from "../src/content/types.ts";
+import { readApi } from "./api.ts";
 
 type Check = (v: unknown, at: string) => void;
 
@@ -153,47 +154,29 @@ export function yamlFiles(dir: string): string[] {
     : [];
 }
 
+export const LATEST = "latest";
+
 export interface Loaded {
   content: Content;
+  api: ApiVersion;
   warnings: string[];
   missing: string[];
   files: string[];
 }
 
-export function loadContent(dir: string, api: ApiModel, version: string): Loaded {
-  const siteFile = join(dir, "site.yaml");
-  const pageFiles = yamlFiles(join(dir, "pages"));
-  const apiFiles = yamlFiles(join(dir, "api"));
+interface Groups {
+  groups: ApiGroup[];
+  warnings: string[];
+  missing: string[];
+  files: string[];
+}
 
-  const siteData = readYaml(siteFile, "site.yaml");
-  site(siteData, "site.yaml");
-  const siteValue = siteData as Site;
-
-  const pages: Record<string, Page> = {};
-  for (const file of pageFiles) {
-    const id = basename(file, ".yaml");
-    const data = readYaml(file, `pages/${id}.yaml`);
-    page(data, `pages/${id}.yaml`);
-    pages[id] = { id, ...(data as Omit<Page, "id">) };
-  }
-
-  const listed = new Set<string>();
-  for (const section of siteValue.docs) {
-    for (const id of section.pages) {
-      if (!pages[id]) fail("site.yaml docs", `page "${id}" has no file pages/${id}.yaml`);
-      if (listed.has(id)) fail("site.yaml docs", `page "${id}" is listed twice`);
-      listed.add(id);
-    }
-  }
-  for (const id of Object.keys(pages)) {
-    if (!listed.has(id)) fail(`pages/${id}.yaml`, "the page is not listed in site.yaml docs");
-  }
-
-  const entries = new Map(api.entries.map((e) => [e.name, e]));
+function loadGroups(dir: string, rel: string, order: string[], orderAt: string, entries: Map<string, ApiEntry>): Groups {
+  const files = yamlFiles(dir);
   const groupsById = new Map<string, ApiGroup>();
-  for (const file of apiFiles) {
+  for (const file of files) {
     const id = basename(file, ".yaml");
-    const at = `api/${id}.yaml`;
+    const at = `${rel}/${id}.yaml`;
     const data = readYaml(file, at);
     apiGroup(data, at);
     const g = data as Partial<ApiGroup> & { title: string };
@@ -201,23 +184,23 @@ export function loadContent(dir: string, api: ApiModel, version: string): Loaded
   }
 
   const groups: ApiGroup[] = [];
-  for (const id of siteValue.api) {
+  for (const id of order) {
     const g = groupsById.get(id);
-    if (!g) fail("site.yaml api", `group "${id}" has no file api/${id}.yaml`);
+    if (!g) fail(orderAt, `group "${id}" has no file ${rel}/${id}.yaml`);
     groups.push(g);
   }
   for (const id of groupsById.keys()) {
-    if (!siteValue.api.includes(id)) fail(`api/${id}.yaml`, "the group is not listed in site.yaml api");
+    if (!order.includes(id)) fail(`${rel}/${id}.yaml`, `the group is not listed in ${orderAt}`);
   }
 
   const grouped = new Map<string, string>();
   const missing: string[] = [];
   for (const g of groups) {
-    const at = `api/${g.id}.yaml`;
+    const at = `${rel}/${g.id}.yaml`;
     const items = [...(g.namespace ? [g.namespace] : []), ...g.types, ...g.values];
     for (const name of items) {
       if (!entries.has(name)) fail(at, `"${name}" is not exported by @vhult/graph`);
-      if (grouped.has(name)) fail(at, `"${name}" is also in api/${grouped.get(name)}.yaml`);
+      if (grouped.has(name)) fail(at, `"${name}" is also in ${rel}/${grouped.get(name)}.yaml`);
       grouped.set(name, g.id);
     }
     for (const [name, text] of Object.entries(g.docs)) {
@@ -247,11 +230,10 @@ export function loadContent(dir: string, api: ApiModel, version: string): Loaded
     warnings.push(`${missing.length} API items have no description and show their doc comment: ${shown}${missing.length > 12 ? ", ..." : ""}`);
   }
 
-  const sources: [string, unknown][] = [
-    ["site.yaml", siteValue],
-    ...Object.values(pages).map((p): [string, unknown] => [`pages/${p.id}.yaml`, p]),
-    ...groups.map((g): [string, unknown] => [`api/${g.id}.yaml`, g]),
-  ];
+  return { groups, warnings, missing, files };
+}
+
+function checkLinks(sources: [string, unknown][], pages: Record<string, Page>, entries: Map<string, ApiEntry>): void {
   for (const [at, v] of sources) {
     const out: string[] = [];
     hrefs(v, out);
@@ -267,6 +249,49 @@ export function loadContent(dir: string, api: ApiModel, version: string): Loaded
       if (!ok) fail(at, `broken link "${href}"`);
     }
   }
+}
+
+export function loadContent(dir: string, api: ApiModel, version: string): Loaded {
+  const siteFile = join(dir, "site.yaml");
+  const pageFiles = yamlFiles(join(dir, "pages"));
+
+  const siteData = readYaml(siteFile, "site.yaml");
+  site(siteData, "site.yaml");
+  const siteValue = siteData as Site;
+
+  const pages: Record<string, Page> = {};
+  for (const file of pageFiles) {
+    const id = basename(file, ".yaml");
+    const data = readYaml(file, `pages/${id}.yaml`);
+    page(data, `pages/${id}.yaml`);
+    pages[id] = { id, ...(data as Omit<Page, "id">) };
+  }
+
+  const listed = new Set<string>();
+  for (const section of siteValue.docs) {
+    for (const id of section.pages) {
+      if (!pages[id]) fail("site.yaml docs", `page "${id}" has no file pages/${id}.yaml`);
+      if (listed.has(id)) fail("site.yaml docs", `page "${id}" is listed twice`);
+      listed.add(id);
+    }
+  }
+  for (const id of Object.keys(pages)) {
+    if (!listed.has(id)) fail(`pages/${id}.yaml`, "the page is not listed in site.yaml docs");
+  }
+
+  const rel = `api/${LATEST}`;
+  const entries = new Map(api.entries.map((e) => [e.name, e]));
+  const { groups, warnings, missing, files: apiFiles } = loadGroups(join(dir, rel), rel, siteValue.api, "site.yaml api", entries);
+
+  checkLinks(
+    [
+      ["site.yaml", siteValue],
+      ...Object.values(pages).map((p): [string, unknown] => [`pages/${p.id}.yaml`, p]),
+      ...groups.map((g): [string, unknown] => [`${rel}/${g.id}.yaml`, g]),
+    ],
+    pages,
+    entries,
+  );
 
   const lists: [string, Block[]][] = [
     ["site.yaml landing", siteValue.landing.blocks],
@@ -278,5 +303,51 @@ export function loadContent(dir: string, api: ApiModel, version: string): Loaded
     }
   }
 
-  return { content: { version, site: siteValue, pages, api: groups }, warnings, missing, files: [siteFile, ...pageFiles, ...apiFiles] };
+  return {
+    content: { version, site: siteValue, pages },
+    api: { id: LATEST, version, base: "/api", groups, entries: api.entries },
+    warnings,
+    missing,
+    files: [siteFile, ...pageFiles, ...apiFiles],
+  };
+}
+
+const archive = shape({ version: str, api: strs });
+
+export function archiveIds(dir: string): string[] {
+  const root = join(dir, "api");
+  return readdirSync(root, { withFileTypes: true })
+    .filter((d) => d.isDirectory() && /^v\d+$/.test(d.name))
+    .map((d) => d.name)
+    .sort((a, b) => Number(b.slice(1)) - Number(a.slice(1)));
+}
+
+export interface Archives {
+  versions: ApiVersion[];
+  files: string[];
+}
+
+export function loadArchives(dir: string, pages: Record<string, Page>): Archives {
+  const versions: ApiVersion[] = [];
+  const files: string[] = [];
+  for (const id of archiveIds(dir)) {
+    const rel = `api/${id}`;
+    const root = join(dir, rel);
+    const metaFile = join(root, "archive.json");
+    const apiFile = join(root, "api.json");
+    const meta = readYaml(metaFile, `${rel}/archive.json`);
+    archive(meta, `${rel}/archive.json`);
+    const { version, api: order } = meta as { version: string; api: string[] };
+    const model = readApi(apiFile);
+    const entries = new Map(model.entries.map((e) => [e.name, e]));
+    const loaded = loadGroups(root, rel, order, `${rel}/archive.json`, entries);
+    checkLinks(
+      loaded.groups.map((g): [string, unknown] => [`${rel}/${g.id}.yaml`, g]),
+      pages,
+      entries,
+    );
+    versions.push({ id, version, base: `/${id}/api`, groups: loaded.groups, entries: model.entries });
+    files.push(metaFile, apiFile, ...loaded.files);
+  }
+  return { versions, files };
 }
