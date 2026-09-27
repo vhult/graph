@@ -29,11 +29,12 @@ fn edgeSegment(a : vec2<f32>, b : vec2<f32>, head : u32, w : f32, directed : boo
 }
 
 fn edgeDist(uv : vec2<f32>, halfLen : f32, halfWidth : f32, arrowLen : f32) -> f32 {
-  let d = sdSegment(uv, halfLen, halfWidth);
   if (EDGE_ARROWS && arrowLen > 0.0) {
-    return min(d, sdArrowhead(uv, halfLen, arrowLen, arrowLen * ARROW_HALF_MUL / ARROW_LEN_MUL));
+    let trim = min(arrowLen, (halfWidth + EDGE_AA_PAD_PX) * ARROW_SIDE_MUL) * 0.5;
+    let line = sdSegment(uv + vec2<f32>(trim, 0.0), halfLen - trim, halfWidth);
+    return min(line, sdArrowhead(uv, halfLen, arrowLen, arrowLen * ARROW_HALF_MUL / ARROW_LEN_MUL));
   }
-  return d;
+  return sdSegment(uv, halfLen, halfWidth);
 }
 
 fn edgeEndState(ij : vec2<u32>) -> u32 {

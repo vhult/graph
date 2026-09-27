@@ -18,6 +18,7 @@ override EDGE_DEBUG : u32 = 0u;
 /** Arrowhead length and half-width as multiples of the edge width. */
 const ARROW_LEN_MUL : f32 = 4.0;
 const ARROW_HALF_MUL : f32 = 2.0;
+const ARROW_SIDE_MUL : f32 = sqrt(1.0 + (ARROW_LEN_MUL / ARROW_HALF_MUL) * (ARROW_LEN_MUL / ARROW_HALF_MUL));
 /**
  * An arrowhead is never shorter than this, in CSS px, or it vanishes on thin
  * edges and next to large nodes.

@@ -59,17 +59,8 @@ function layout(): { nodes: Node[]; edges: number[] } {
     }
   });
 
-  const perRow = Math.ceil(DEMO_ICON_NAMES.length / 2);
-  for (let first = 0; first < DEMO_ICON_NAMES.length; first += perRow) {
-    row(() => {
-      DEMO_ICON_NAMES.slice(first, first + perRow).forEach((icon, k) =>
-        add({ x: k * 60, y: 530 + (first / perRow) * 80, size: 40, icon, color: rgbToWord(PALETTE[(first + k + 1) % PALETTE.length]!), label: icon }),
-      );
-    });
-  }
-
   row(() => {
-    for (let k = 0; k < TINTS; k++) add({ x: k * 60, y: 690, size: 40, icon: "star", color: rgbToWord(0x2a3140), tint: hslToWord(k / TINTS, 0.85, 0.65), label: `tint ${k}` });
+    for (let k = 0; k < TINTS; k++) add({ x: k * 60, y: 530, size: 40, icon: "star", color: rgbToWord(0x2a3140), tint: hslToWord(k / TINTS, 0.85, 0.65), label: `tint ${k}` });
   });
 
   return { nodes, edges };
@@ -109,8 +100,7 @@ const meta: Meta = {
         showReadout(graph, root, { node: (i) => `${NAMES[i]} (#${i})`, edge: (e) => `${NAMES[EDGES[e * 2]!]} → ${NAMES[EDGES[e * 2 + 1]!]} (#${e})` });
         hud.setNote(
           "Node styles · colours and alpha · one icon from 2 to 160 world units: zoom in to see it fade in, then turn exact above 96 px\n" +
-            "shapes, plain and with an icon, with arrowheads stopping at their edge · z-index 0 to 9, each covering the one on its left\n" +
-            "every demo icon (path data and SVG markup; the pentagram even-odd, then nonzero) · per-node icon tints",
+            "shapes, plain and with an icon, with arrowheads stopping at their edge · z-index 0 to 9, each covering the one on its left · per-node icon tints",
         );
         await graph.icons.define(DEMO_ICON_LIST).catch((e: unknown) => hud.setNote(`icons.define failed: ${e instanceof Error ? e.message : String(e)}`));
       },
