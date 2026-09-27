@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { Dirty } from "../src/engine/Dirty";
 import type { FrameContext } from "../src/gpu/FrameGraph";
+import type { ScatterSlot } from "../src/gpu/PermuteKernels";
 
 type EdgeCull = typeof import("../src/passes/EdgeCullPass").EdgeCullPass;
 type TransformCull = typeof import("../src/passes/TransformCullPass").TransformCullPass;
@@ -82,14 +83,17 @@ describe("edge cull move state", () => {
     expect(pass.phaseActive(0, moved)).toBe(false);
   });
 
-  it("appends a restyle to the move list during a move and starts a fresh list once it ends", () => {
-    const { pass, writes } = ready();
+  it("refits every chunk for a restyle during a move and starts a fresh list once it ends", () => {
+    const { pass, encoder, pipes, writes } = ready();
+    const slot = { ranges: {}, params: {} } as ScatterSlot;
     pass.moveNodes(E);
     writes.length = 0;
-    pass.restyle({} as GPUBuffer, {} as GPUBuffer, {} as GPUBuffer, 3, E);
+    pass.restyle(0, {} as GPUBuffer, slot, 3, E);
     expect(writes).toEqual([]);
+    pass.encodePhase(0, encoder, frame(0, E, Dirty.MOVED));
+    expect(pipes).toEqual(["bounds"]);
     pass.endMove();
-    pass.restyle({} as GPUBuffer, {} as GPUBuffer, {} as GPUBuffer, 3, E);
+    pass.restyle(0, {} as GPUBuffer, slot, 3, E);
     expect(writes.map((w) => w.buffer)).toEqual(["edge/state"]);
   });
 

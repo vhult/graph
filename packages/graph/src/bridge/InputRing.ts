@@ -28,6 +28,15 @@ export const MOD = {
   TOUCH: 16,
 } as const;
 
+export function modKeys<T extends object>(mods: number, into: T): T & { shift: boolean; ctrl: boolean; alt: boolean; meta: boolean } {
+  const out = into as T & { shift: boolean; ctrl: boolean; alt: boolean; meta: boolean };
+  out.shift = (mods & MOD.SHIFT) !== 0;
+  out.ctrl = (mods & MOD.CTRL) !== 0;
+  out.alt = (mods & MOD.ALT) !== 0;
+  out.meta = (mods & MOD.META) !== 0;
+  return out;
+}
+
 /** Decoded record; one instance is reused by the consumer. */
 export interface InputRecord {
   type: number;

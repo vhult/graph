@@ -1,4 +1,3 @@
-import { GraphError } from "../api/errors";
 import type { IconPath as IconPathSource, IconSource } from "../api/types";
 import { ICON_CONSTANTS } from "../data/Layouts";
 
@@ -54,18 +53,17 @@ const SKIPPED = new Set(["defs", "clipPath", "mask", "symbol", "title", "desc", 
 const EMPTY_BAND: Band = { curves: [], min: [], max: [] };
 const EMPTY_ICON: BuiltIcon = { curves: [], nb: 1, evenOdd: false, h: [EMPTY_BAND], v: [EMPTY_BAND] };
 
-export function parseIcons(sources: readonly IconSource[]): BuiltIcon[] {
-  return sources.map((s, i) => {
+export function parseIcons(sources: readonly IconSource[]): { icons: (BuiltIcon | null)[]; failed: string[] } {
+  const failed: string[] = [];
+  const icons = sources.map((s, i) => {
     try {
       return buildIcon("svg" in s ? parseSvg(s.svg) : fromPath(s));
     } catch (e) {
-      throw new GraphError("invalid-argument", `icons: icon ${i}: ${e instanceof Error ? e.message : String(e)}`);
+      failed.push(`icons: icon ${i}: ${e instanceof Error ? e.message : String(e)}`);
+      return null;
     }
   });
-}
-
-export function buildIcons(sources: readonly IconSource[]): IconSet {
-  return packIcons(parseIcons(sources));
+  return { icons, failed };
 }
 
 function fromPath(icon: IconPathSource): ParsedIcon {

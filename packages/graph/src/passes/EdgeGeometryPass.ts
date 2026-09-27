@@ -4,10 +4,10 @@
  * Premultiplied alpha, no vertex buffers.
  */
 import { EDGE_CONSTANTS } from "../data/Layouts";
-import { edgeConstants, edgeKey, type Tunable, type Tune } from "../engine/Tune";
+import { edgeConstants, edgeKey, type Tune } from "../engine/Tune";
 import type { ContractLayouts } from "../gpu/BindLayouts";
-import { Stage, type FrameContext, type RenderNode } from "../gpu/FrameGraph";
-import { Variants } from "../gpu/Lazy";
+import { PREMULTIPLIED, Stage, type FrameContext, type RenderNode } from "../gpu/FrameGraph";
+import { Tuned } from "../gpu/Lazy";
 import { createShaderModule } from "../gpu/ShaderModules";
 import type { EdgeCullOutputs } from "./EdgeCullPass";
 import type { HoverPass } from "./HoverPass";
@@ -16,7 +16,7 @@ import type { HoverPass } from "./HoverPass";
 const VARIANTS = 4;
 const SHAPE_VARIANTS = 8;
 
-export class EdgeGeometryPass implements RenderNode, Tunable {
+export class EdgeGeometryPass implements RenderNode {
   readonly stage = Stage.EDGE_GEOMETRY;
   readonly name = "edges";
 
@@ -28,12 +28,11 @@ export class EdgeGeometryPass implements RenderNode, Tunable {
 
   private bound: EdgeCullOutputs | null = null;
   private bindGroup: GPUBindGroup | null = null;
-  private readonly pipelines = new Variants<readonly GPURenderPipeline[]>();
 
   private constructor(
     private readonly device: GPUDevice,
     private readonly layout: GPUBindGroupLayout,
-    private readonly make: (t: Tune) => Promise<readonly GPURenderPipeline[]>,
+    readonly pipelines: Tuned<readonly GPURenderPipeline[]>,
   ) {}
 
   static async create(device: GPUDevice, format: GPUTextureFormat, layouts: ContractLayouts, tune: Tune): Promise<EdgeGeometryPass> {
@@ -41,10 +40,6 @@ export class EdgeGeometryPass implements RenderNode, Tunable {
     const read = (binding: number): GPUBindGroupLayoutEntry => ({ binding, visibility: GPUShaderStage.VERTEX, buffer: { type: "read-only-storage" } });
     const layout = device.createBindGroupLayout({ label: "group2/edges", entries: [read(0), read(1)] });
     const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [layouts.frame, layouts.graph, layout] });
-    const blend: GPUBlendState = {
-      color: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
-      alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
-    };
     // Every variant is built up front: choosing one must never wait inside a frame.
     const make = (t: Tune, v: number) => {
       const constants = {
@@ -57,27 +52,14 @@ export class EdgeGeometryPass implements RenderNode, Tunable {
         label: `edges#${v}`,
         layout: pipelineLayout,
         vertex: { module, entryPoint: "vs", constants },
-        fragment: { module, entryPoint: "fs", targets: [{ format, blend }], constants },
+        fragment: { module, entryPoint: "fs", targets: [{ format, blend: PREMULTIPLIED }], constants },
         primitive: { topology: "triangle-strip" },
       });
     };
-    const makeAll = (t: Tune) => Promise.all(Array.from({ length: t.arrows ? SHAPE_VARIANTS : VARIANTS }, (_, v) => make(t, v)));
-    const pass = new EdgeGeometryPass(device, layout, makeAll);
-    await pass.loadTune(tune);
-    pass.useTune(tune);
-    return pass;
-  }
-
-  loadTune(t: Tune): Promise<unknown> {
-    return this.pipelines.load(edgeKey(t), () => this.make(t));
-  }
-
-  hasTune(t: Tune): boolean {
-    return this.pipelines.get(edgeKey(t)) !== null;
-  }
-
-  useTune(t: Tune): void {
-    this.pipelines.use(edgeKey(t));
+    const pipelines = new Tuned(edgeKey, (t) => Promise.all(Array.from({ length: t.arrows ? SHAPE_VARIANTS : VARIANTS }, (_, v) => make(t, v))));
+    await pipelines.loadTune(tune);
+    pipelines.useTune(tune);
+    return new EdgeGeometryPass(device, layout, pipelines);
   }
 
   /** (Re)bind the cull outputs; a no-op when unchanged. */

@@ -56,7 +56,7 @@ beforeAll(async () => {
 });
 
 describe("Labels per-index text", () => {
-  it("setNodeTextAt recomputes only the touched index's width", () => {
+  it("textAt recomputes only the touched index's width", () => {
     const labels = new Labels(fakeDevice(), { sizeCssPx: 12, paddingCssPx: 2, font: "sans-serif" });
     labels.setPixelRatio(1);
     labels.setNodeCount(3);
@@ -65,7 +65,7 @@ describe("Labels per-index text", () => {
     const before = [widthAt(labels.nodeWidths, 0), widthAt(labels.nodeWidths, 1), widthAt(labels.nodeWidths, 2)];
     expect(before.every((w) => w > 0)).toBe(true);
 
-    labels.setNodeTextAt(new Uint32Array([1]), ["longer text"]);
+    labels.textAt("nodes", new Uint32Array([1]), ["longer text"]);
 
     expect(widthAt(labels.nodeWidths, 0)).toBe(before[0]);
     expect(widthAt(labels.nodeWidths, 1)).toBeGreaterThan(before[1]!);
@@ -81,6 +81,22 @@ describe("Labels per-index text", () => {
     const after = labels.metrics();
     expect(after.textH).toBeGreaterThan(before.textH);
     expect(after.padding).toBe(10);
+  });
+
+  it("setColor writes the colour word into the params and leaves the text alone", async () => {
+    const { LABEL_PARAMS } = await import("../src/data/Layouts");
+    const device = fakeDevice();
+    const create = vi.spyOn(device, "createBuffer");
+    const labels = new Labels(device, { sizeCssPx: 12, paddingCssPx: 2, font: "sans-serif" });
+    labels.setPixelRatio(1);
+    labels.setNodeCount(2);
+    labels.setNodeText(["a", "b"]);
+    const created = create.mock.calls.length;
+    const generation = labels.generation;
+    labels.setColor(0x11223344);
+    expect((labels.params as unknown as MirroredBuffer).mirror[LABEL_PARAMS.offset.color / 4]).toBe(0x11223344);
+    expect(create.mock.calls.length).toBe(created);
+    expect(labels.generation).toBe(generation);
   });
 
   it("clearing text that was never set does no work", () => {
@@ -118,7 +134,7 @@ describe("Labels per-index text", () => {
     expect(labels.hasEdgeText).toBe(false);
   });
 
-  it("setEdgeTextAt recomputes only the touched index's width", () => {
+  it("textAt on edges recomputes only the touched index's width", () => {
     const labels = new Labels(fakeDevice(), { sizeCssPx: 12, paddingCssPx: 2, font: "sans-serif" });
     labels.setPixelRatio(1);
     labels.setEdgeCount(3);
@@ -127,7 +143,7 @@ describe("Labels per-index text", () => {
     const before = [widthAt(labels.edgeWidths, 0), widthAt(labels.edgeWidths, 1), widthAt(labels.edgeWidths, 2)];
     expect(before.every((w) => w > 0)).toBe(true);
 
-    labels.setEdgeTextAt(new Uint32Array([0]), [""]);
+    labels.textAt("edges", new Uint32Array([0]), [""]);
 
     expect(widthAt(labels.edgeWidths, 0)).toBe(0);
     expect(widthAt(labels.edgeWidths, 1)).toBe(before[1]);

@@ -176,6 +176,20 @@ interface Readback {
 
 const levelsFor = (chunks: number) => Math.ceil(Math.log2(Math.max(1, chunks)));
 
+function snapshotOf(found: number, capacity: number, n: number): LabelSnapshot {
+  return {
+    found,
+    capacity,
+    center: new Float32Array(2 * n),
+    halfWidth: new Float32Array(n),
+    halfHeight: new Float32Array(n),
+    rank: new Float32Array(n),
+    size: new Float32Array(n),
+    index: new Uint32Array(n),
+    decision: new Uint8Array(n),
+  };
+}
+
 export class LabelPass implements ComputeNode {
   readonly stage = Stage.LABEL_PLACE;
   readonly name = "labels";
@@ -296,7 +310,7 @@ export class LabelPass implements ComputeNode {
     this.runMark = false;
     if (ctx.nodeCount === 0 || !this.cull.outputs) return false;
     const nodesOn = this.labels.hasNodeText;
-    const edgesOn = this.labels.hasEdgeText && ctx.edgeCount > 0 && this.graph.edgeOrder !== null && this.edgeCull.outputs !== null;
+    const edgesOn = this.edgeText(ctx);
     if (nodesOn !== this.nodesOn || edgesOn !== this.edgesOn) {
       this.nodesOn = nodesOn;
       this.edgesOn = edgesOn;
@@ -316,7 +330,7 @@ export class LabelPass implements ComputeNode {
       this.labels.marksDirty = true;
     }
     this.runMark = this.labels.marksDirty;
-    if (!nodesOn && !edgesOn) return this.runMark;
+    if (!this.placeable(ctx)) return this.runMark;
     if ((ctx.dirty & SOLVE_TRIGGERS) !== 0) this.wanted = true;
     if ((ctx.dirty & EDGE_TREE_DIRTY) !== 0) this.edgeTreeStale = true;
     this.runOrder = this.orderStale && nodesOn;
@@ -496,7 +510,8 @@ export class LabelPass implements ComputeNode {
     this.step = k < STEPS.length ? k : -1;
   }
 
-  recordReadback(encoder: GPUCommandEncoder): void {
+  recordReadback(encoder: GPUCommandEncoder, ctx: FrameContext): void {
+    if (!this.placeable(ctx)) this.stop();
     if (!this.collected) return;
     this.collected = false;
     const target = this.readbacks[this.solveReadback]!.buffer;
@@ -512,7 +527,10 @@ export class LabelPass implements ComputeNode {
       this.pendingSnapshot = null;
       snap.buf.mapAsync(GPUMapMode.READ).then(
         () => this.readSnapshot(snap),
-        () => snap.buf.destroy(),
+        () => {
+          snap.buf.destroy();
+          this.answerEmpty(snap.ids);
+        },
       );
     }
     if (this.scheduledReadback < 0) return;
@@ -522,7 +540,7 @@ export class LabelPass implements ComputeNode {
     const generation = this.generation;
     readback.buffer.mapAsync(GPUMapMode.READ).then(
       () => this.read(readback, solve, generation),
-      () => (readback.busy = false),
+      () => this.release(readback),
     );
   }
 
@@ -553,17 +571,7 @@ export class LabelPass implements ComputeNode {
     const o = LABEL_CANDIDATE.offset;
     const stride = LABEL_CANDIDATE.size / 4;
     for (const id of snap.ids) {
-      const s: LabelSnapshot = {
-        found,
-        capacity: snap.cap,
-        center: new Float32Array(2 * n),
-        halfWidth: new Float32Array(n),
-        halfHeight: new Float32Array(n),
-        rank: new Float32Array(n),
-        size: new Float32Array(n),
-        index: new Uint32Array(n),
-        decision: new Uint8Array(n),
-      };
+      const s = snapshotOf(found, snap.cap, n);
       for (let k = 0; k < n; k++) {
         const b = k * stride;
         s.center[2 * k] = f32[b + o.center / 4]!;
@@ -584,14 +592,35 @@ export class LabelPass implements ComputeNode {
   private read(readback: Readback, solve: number, generation: number): void {
     const words = new Uint32Array(readback.buffer.getMappedRange()).slice();
     readback.buffer.unmap();
-    readback.busy = false;
     const count = Math.min(words[C.WORK_SHOWN]!, C.LABEL_SHOWN_MAX);
     if (solve > this.appliedSolve && generation === this.labels.generation) {
       this.appliedSolve = solve;
       this.lastSolveMs = performance.now() - this.solveStart;
       this.onShown(words.subarray(READ_WORDS, READ_WORDS + 2 * count), count);
     }
+    this.release(readback);
+  }
+
+  private release(readback: Readback): void {
+    readback.busy = false;
     if (this.wanted) this.requestSolve();
+  }
+
+  private placeable(ctx: FrameContext): boolean {
+    return ctx.nodeCount !== 0 && !!this.cull.outputs && (this.labels.hasNodeText || this.edgeText(ctx));
+  }
+
+  private edgeText(ctx: FrameContext): boolean {
+    return this.labels.hasEdgeText && ctx.edgeCount > 0 && this.graph.edgeOrder !== null && this.edgeCull.outputs !== null;
+  }
+
+  private stop(): void {
+    if (this.step >= 0) this.abort();
+    if (this.snapshotRequests.length > 0) this.answerEmpty(this.snapshotRequests.splice(0));
+  }
+
+  private answerEmpty(ids: readonly number[]): void {
+    for (const id of ids) this.onSnapshot(id, snapshotOf(0, 0, 0));
   }
 
   private abort(): void {

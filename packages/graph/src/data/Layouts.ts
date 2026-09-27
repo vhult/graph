@@ -84,10 +84,6 @@ export const FRAME = defineStruct("Frame", [
   { name: "iconScale", type: "f32", doc: "icon side / node diameter" },
   { name: "iconMinPx", type: "f32", doc: "smallest icon side drawn, device px" },
   { name: "dimmedAlpha", type: "f32", doc: "alpha factor of dimmed nodes and edges" },
-  { name: "selectedEdgeColor", type: "u32", doc: "rgba8unorm" },
-  { name: "selectedEdgeWidth", type: "f32", doc: "width factor" },
-  { name: "focusedEdgeColor", type: "u32", doc: "rgba8unorm" },
-  { name: "focusedEdgeWidth", type: "f32", doc: "width factor" },
 ] as const);
 
 // ---------------------------------------------------------------------------
@@ -157,6 +153,7 @@ export const CONSTANTS = {
   STATE_NEIGHBOR: 1 << 4,
   STATE_DRAGGING: 1 << 5,
   STATE_FOCUSED: 1 << 6,
+  STATE_REMOVED: 1 << 7,
   STATE_FOREGROUND_MASK: (1 << 0) | (1 << 1) | (1 << 5) | (1 << 6),
   STATE_GROUP_SHIFT: 8,
   FRAME_FLAG_HIDDEN: 1,
@@ -199,12 +196,13 @@ export const CONSTANTS = {
   EDGE_STATE_SELECTED: 2,
   EDGE_STATE_DIMMED: 4,
   EDGE_STATE_FOCUSED: 8,
+  EDGE_STATE_REMOVED: 1 << 4,
 } as const;
 
 /** Default nodeStyle word: shape 0 (circle), no icon, layer 0, no flags. */
 export const DEFAULT_NODE_STYLE = CONSTANTS.NO_ICON << CONSTANTS.STYLE_ICON_SHIFT;
 
-export const NODE_RESERVE = 100;
+export const MAX_NODES = CONSTANTS.EDGE_END_MASK + 1;
 
 // ---------------------------------------------------------------------------
 // Engine-internal layouts (@group(2), NOT public contract)
@@ -391,13 +389,11 @@ export const LOOK_PARAMS = defineStruct("LookParams", [
   { name: "outlineMinPx", type: "f32" },
   { name: "outlineMaxPx", type: "f32" },
   { name: "bit", type: "u32", doc: "STATE_* bit the listed nodes carry" },
-  { name: "offset", type: "u32", doc: "first entry in the look list" },
   { name: "flags", type: "u32" },
   { name: "edgeColor", type: "u32", doc: "rgba8unorm" },
   { name: "edgeWidth", type: "f32", doc: "width factor" },
   { name: "edgeBit", type: "u32", doc: "EDGE_STATE_* bits a listed edge carries under edgeMask" },
   { name: "edgeMask", type: "u32" },
-  { name: "edgeOffset", type: "u32", doc: "first entry in the edge look list" },
 ] as const);
 
 export function pickOutWords(nodeCount: number, edgeCount: number): number {

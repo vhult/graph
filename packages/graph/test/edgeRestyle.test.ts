@@ -43,7 +43,7 @@ describe("edge restyle", () => {
 
   it("a style update by index lists the restyled edges for the chunk bounds", () => {
     const { store, buffers } = setup(true);
-    store.updateEdgesAt(new Uint32Array([2, 0]), { styles: new Uint32Array([64, 8]) }, 0);
+    store.updateEdgesAt(new Uint32Array([2, 0]), { styles: new Uint32Array([64, 8]) });
     buffers.flush();
     expect(buffers.edgeRank).not.toBeNull();
     expect(buffers.restyledEdges).toBe(2);
@@ -53,7 +53,7 @@ describe("edge restyle", () => {
 
   it("colour and state updates list nothing", () => {
     const { store, buffers } = setup(true);
-    store.updateEdgesAt(new Uint32Array([1]), { colors: new Uint32Array([1, 2]) }, 0);
+    store.updateEdgesAt(new Uint32Array([1]), { colors: new Uint32Array([1, 2]) });
     store.flagEdges(new Uint32Array([1]), 8, true);
     buffers.flush();
     expect(buffers.restyledEdges).toBe(0);

@@ -1,6 +1,5 @@
-#include "common/nodes.wgsl"
 #include "passes/edge_cull.wgsl"
-#include "common/sdf.wgsl"
+#include "common/edge_segment.wgsl"
 #include "common/pick.wgsl"
 
 fn pickRel(center : vec2<f32>) -> vec2<f32> {
@@ -13,14 +12,12 @@ fn pickRel(center : vec2<f32>) -> vec2<f32> {
 fn pickEdge(e : u32, keep : f32, n : u32) -> bool {
   let raw = edgeIdx[e];
   let ij = edgeEnds(raw);
-  if (edgeHidden(raw) || (anyNodeHidden() && edgeEndHidden(nodeState[ij.x], nodeState[ij.y]))) {
+  if (edgeHidden(raw) || (edgeEndState(ij) & STATE_HIDDEN) != 0u) {
     return false;
   }
   let a = worldToScreen(nodePos[ij.x]);
-  var b = worldToScreen(nodePos[ij.y]);
-  let full = b - a;
-  let fullLen = length(full);
-  let fade = edgeLengthFade(fullLen);
+  let b = worldToScreen(nodePos[ij.y]);
+  let fade = edgeLengthFade(length(b - a));
   if (fade <= 0.0 && EDGE_DEBUG != 1u) {
     return false;
   }
@@ -28,32 +25,18 @@ fn pickEdge(e : u32, keep : f32, n : u32) -> bool {
   let w = edgeWidthPx(style);
   let wDraw = max(w, EDGE_MIN_DRAW_WIDTH_PX);
   let halfWidth = wDraw * 0.5;
-  var arrowLen = 0.0;
-  if (EDGE_ARROWS && (style & EDGE_FLAG_DIRECTED) != 0u) {
-    arrowLen = arrowLenPx(w);
-    let dirAB = full / fullLen;
-    var reach = nodeRadiusPx(ij.y);
-    if ((pick.flags & PICK_FLAG_SHAPES) != 0u) {
-      reach *= shapeReach(dirAB, nodeShape(ij.y));
-    }
-    b = b - dirAB * min(reach, fullLen * 0.5);
-  }
-  let d = b - a;
-  let len = max(length(d), 1e-4);
-  arrowLen = arrowFitPx(arrowLen, len);
-  let dir = d / len;
-  let halfLen = len * 0.5;
-  let extX = halfLen + max(halfWidth, arrowLen) + EDGE_AA_PAD_PX;
-  let rel = pickPoint() - (a + b) * 0.5;
-  let uv = vec2<f32>(dot(rel, dir), dot(rel, vec2<f32>(-dir.y, dir.x)));
-  var dist = sdSegment(uv, halfLen, halfWidth);
-  if (EDGE_ARROWS && arrowLen > 0.0) {
-    dist = min(dist, sdArrowhead(uv, halfLen, arrowLen, arrowLen * ARROW_HALF_MUL / ARROW_LEN_MUL));
-  }
-  var ca = unpack4x8unorm(frame.globalEdgeColor).a;
+  let s = edgeSegment(a, b, ij.y, w, EDGE_ARROWS && (style & EDGE_FLAG_DIRECTED) != 0u, (pick.flags & PICK_FLAG_SHAPES) != 0u);
+  let extX = s.halfLen + max(halfWidth, s.arrowLen) + EDGE_AA_PAD_PX;
+  let rel = pickPoint() - s.mid;
+  let uv = vec2<f32>(dot(rel, s.dir), dot(rel, vec2<f32>(-s.dir.y, s.dir.x)));
+  let dist = edgeDist(uv, s.halfLen, halfWidth, s.arrowLen);
+  let tint = frame.globalEdgeColor;
+  var ca = unpack4x8unorm(tint).a;
   if ((pick.flags & PICK_FLAG_EDGE_COLORS) != 0u) {
-    let s = clamp(uv.x / extX * 0.5 + 0.5, 0.0, 1.0);
-    ca = mix(unpack4x8unorm(edgeColor[e * 2u]).a, unpack4x8unorm(edgeColor[e * 2u + 1u]).a, s);
+    let t = clamp(uv.x / extX * 0.5 + 0.5, 0.0, 1.0);
+    let c0 = edgeColor[e * 2u];
+    let c1 = edgeColor[e * 2u + 1u];
+    ca = mix(unpack4x8unorm(select(c0, tint, c0 == 0u)).a, unpack4x8unorm(select(c1, tint, c1 == 0u)).a, t);
   }
   let fadeIn = clamp(keep - f32(e & (EDGE_CHUNK_SIZE - 1u)), 0.0, 1.0);
   var alpha = edgeStandInAlpha(ca * min(1.0, w / wDraw) * fade, f32(n) / keep) * fadeIn;

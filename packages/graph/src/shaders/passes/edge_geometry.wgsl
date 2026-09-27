@@ -6,9 +6,7 @@
 // opacity of the edges it stands for, and the last one fades in with the
 // prefix, so thinning neither dims an area nor pops while zooming. Edges too
 // short to see collapse to a point and rasterize nothing.
-#include "common/nodes.wgsl"
-#include "common/edges.wgsl"
-#include "common/sdf.wgsl"
+#include "common/edge_segment.wgsl"
 
 @group(2) @binding(0) var<storage, read> edgeScratch : array<u32>;
 @group(2) @binding(1) var<storage, read> edgeList : array<u32>;
@@ -45,29 +43,19 @@ fn culled() -> VOut {
 fn vs(@builtin(vertex_index) vi : u32, @builtin(instance_index) ii : u32) -> VOut {
   let e = edgeList[ii];
   let raw = edgeIdx[e];
-  let ij = edgeEnds(raw);
-  if (edgeHidden(raw)) {
+  let bits = raw.x >> EDGE_STATE_SHIFT;
+  let flagged = select(0u, EDGE_STATE_SELECTED | EDGE_STATE_FOCUSED, (frame.flags & FRAME_FLAG_EDGE_LOOKS) != 0u);
+  if ((bits & (EDGE_STATE_HIDDEN | flagged)) != 0u) {
     return culled();
   }
-  let bits = raw.x >> EDGE_STATE_SHIFT;
-  var dimmed = (bits & EDGE_STATE_DIMMED) != 0u;
-  if (anyNodeHidden() || anyNodeDimmed()) {
-    let ends = nodeState[ij.x] | nodeState[ij.y];
-    if ((ends & STATE_HIDDEN) != 0u) {
-      return culled();
-    }
-    dimmed = dimmed || (ends & STATE_DIMMED) != 0u;
-  }
-  let focused = (bits & EDGE_STATE_FOCUSED) != 0u;
-  let selected = !focused && (bits & EDGE_STATE_SELECTED) != 0u;
-  if ((focused || selected) && (frame.flags & FRAME_FLAG_EDGE_LOOKS) != 0u) {
+  let ij = edgeEnds(raw);
+  let ends = edgeEndState(ij);
+  if ((ends & STATE_HIDDEN) != 0u) {
     return culled();
   }
   let a = worldToScreen(nodePos[ij.x]);
-  var b = worldToScreen(nodePos[ij.y]);
-  let full = b - a;
-  let fullLen = length(full);
-  let fade = edgeLengthFade(fullLen);
+  let b = worldToScreen(nodePos[ij.y]);
+  let fade = edgeLengthFade(length(b - a));
   if (fade <= 0.0 && EDGE_DEBUG != 1u) {
     return culled();
   }
@@ -76,51 +64,24 @@ fn vs(@builtin(vertex_index) vi : u32, @builtin(instance_index) ii : u32) -> VOu
   if (EDGE_PER_EDGE_STYLE) {
     style = edgeStyle[e];
   }
-  var w = edgeWidthPx(style);
-  if (focused) {
-    w *= frame.focusedEdgeWidth;
-  } else if (selected) {
-    w *= frame.selectedEdgeWidth;
-  }
+  let w = edgeWidthPx(style);
   let wDraw = max(w, EDGE_MIN_DRAW_WIDTH_PX);
   // Equal ink: a half-width edge keeps half the alpha rather than disappearing.
   let coverage = min(1.0, w / wDraw);
   let halfWidth = wDraw * 0.5;
 
-  var arrowLen = 0.0;
-  if (EDGE_ARROWS && (style & EDGE_FLAG_DIRECTED) != 0u) {
-    arrowLen = arrowLenPx(w);
-    // Stop at the target's silhouette so the arrowhead touches the node.
-    let dirAB = full / fullLen;
-    var reach = nodeRadiusPx(ij.y);
-    if (NODE_SHAPES) {
-      reach *= shapeReach(dirAB, nodeShape(ij.y));
-    }
-    b = b - dirAB * min(reach, fullLen * 0.5);
-  }
-
-  let d = b - a;
-  let len = max(length(d), 1e-4);
-  arrowLen = arrowFitPx(arrowLen, len);
-  let dir = d / len;
-  let nor = vec2<f32>(-dir.y, dir.x);
-  let mid = (a + b) * 0.5;
-  let halfLen = len * 0.5;
-  let corner = edgeStripCorner(vi, halfLen, halfWidth, arrowLen);
-  let sp = mid + dir * corner.x + nor * corner.y;
+  let s = edgeSegment(a, b, ij.y, w, EDGE_ARROWS && (style & EDGE_FLAG_DIRECTED) != 0u, NODE_SHAPES);
+  let corner = edgeStripCorner(vi, s.halfLen, halfWidth, s.arrowLen);
+  let sp = s.mid + s.dir * corner.x + vec2<f32>(-s.dir.y, s.dir.x) * corner.y;
 
   // Gradient: the corner's end selects the endpoint colour, the rasterizer
   // interpolates between them along the segment.
   var c = unpack4x8unorm(frame.globalEdgeColor);
   if (EDGE_PER_EDGE_COLOR) {
-    c = unpack4x8unorm(edgeColor[e * 2u + select(0u, 1u, corner.x > 0.0)]);
+    let word = edgeColor[e * 2u + select(0u, 1u, corner.x > 0.0)];
+    c = unpack4x8unorm(select(word, frame.globalEdgeColor, word == 0u));
   }
-  if (focused) {
-    c = unpack4x8unorm(frame.focusedEdgeColor);
-  } else if (selected) {
-    c = unpack4x8unorm(frame.selectedEdgeColor);
-  }
-  if (dimmed) {
+  if ((bits & EDGE_STATE_DIMMED) != 0u || (ends & STATE_DIMMED) != 0u) {
     c.a *= frame.dimmedAlpha;
   }
 
@@ -135,13 +96,13 @@ fn vs(@builtin(vertex_index) vi : u32, @builtin(instance_index) ii : u32) -> VOu
   var o : VOut;
   o.pos = vec4<f32>(screenToClip(sp), 0.0, 1.0);
   o.uv = corner;
-  o.halfLen = halfLen;
+  o.halfLen = s.halfLen;
   o.halfWidth = halfWidth;
   o.color = vec4<f32>(c.rgb, edgeStandInAlpha(c.a * coverage * fade, f32(n) / keep) * fadeIn);
   if (EDGE_DEBUG != 0u) {
     o.color = vec4<f32>(debugColor(fade, keep / f32(n), chunk), 0.9 * fadeIn);
   }
-  o.arrowLen = arrowLen;
+  o.arrowLen = s.arrowLen;
   return o;
 }
 
@@ -170,11 +131,7 @@ fn debugColor(fade : f32, kept : f32, chunk : u32) -> vec3<f32> {
 
 @fragment
 fn fs(in : VOut) -> @location(0) vec4<f32> {
-  var d = sdSegment(in.uv, in.halfLen, in.halfWidth);
-  if (EDGE_ARROWS && in.arrowLen > 0.0) {
-    let half = in.arrowLen * ARROW_HALF_MUL / ARROW_LEN_MUL;
-    d = min(d, sdArrowhead(in.uv, in.halfLen, in.arrowLen, half));
-  }
+  let d = edgeDist(in.uv, in.halfLen, in.halfWidth, in.arrowLen);
   // Analytic 1 px coverage ramp across the silhouette.
   let a = in.color.a * clamp(0.5 - d, 0.0, 1.0);
   if (a < 0.002) {

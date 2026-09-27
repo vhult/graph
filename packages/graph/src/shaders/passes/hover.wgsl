@@ -1,6 +1,4 @@
-#include "common/nodes.wgsl"
-#include "common/edges.wgsl"
-#include "common/sdf.wgsl"
+#include "common/edge_segment.wgsl"
 #include "common/icons.wgsl"
 
 @group(2) @binding(0) var<uniform> hover : HoverParams;
@@ -68,22 +66,24 @@ fn premultiplied(color : u32, a : f32) -> vec4<f32> {
   return vec4<f32>(c.rgb * alpha, alpha);
 }
 
-fn hoverNode(vi : u32, i : u32) -> NodeOut {
-  let r = nodeRadiusPx(i) * hover.lodScale;
-  let rDraw = max(r, NODE_MIN_DRAW_RADIUS_PX);
+fn nodeQuad(vi : u32, i : u32, rDraw : f32, outline : f32) -> LookOut {
   let corner = stripCorner(vi);
-  let outline = min(max(hover.nodeOutlineScale * rDraw, hover.nodeOutlineMinPx), hover.nodeOutlineMaxPx);
   let ext = rDraw + outline + NODE_AA_PAD_PX;
-  var o : NodeOut;
+  var o : LookOut;
   o.pos = vec4<f32>(screenToClip(worldToScreen(nodePos[i]) + corner * ext), 0.0, 1.0);
   o.uv = corner * (ext / rDraw);
   o.radiusPx = rDraw;
-  o.shape = select(0u, nodeShape(i), (hover.flags & HOVER_FLAG_SHAPES) != 0u);
-  var c = unpack4x8unorm(nodeColor[i]);
-  c.a *= min(1.0, (r * r) / (rDraw * rDraw));
-  o.color = c;
   o.outlinePx = outline;
   return o;
+}
+
+fn hoverNode(vi : u32, i : u32) -> NodeOut {
+  let r = nodeRadiusPx(i) * hover.lodScale;
+  let rDraw = max(r, NODE_MIN_DRAW_RADIUS_PX);
+  let q = nodeQuad(vi, i, rDraw, min(max(hover.nodeOutlineScale * rDraw, hover.nodeOutlineMinPx), hover.nodeOutlineMaxPx));
+  var c = unpack4x8unorm(nodeColor[i]);
+  c.a *= min(1.0, (r * r) / (rDraw * rDraw));
+  return NodeOut(q.pos, q.uv, rDraw, select(0u, nodeShape(i), (hover.flags & HOVER_FLAG_SHAPES) != 0u), c, q.outlinePx);
 }
 
 fn outlined(uv : vec2<f32>, radiusPx : f32, shape : u32, outlinePx : f32, rgb : vec3<f32>, alpha : f32) -> vec4<f32> {
@@ -140,21 +140,15 @@ fn node_fs_icons(in : IconNodeOut) -> @location(0) vec4<f32> {
 @vertex
 fn look_vs(@builtin(vertex_index) vi : u32, @builtin(instance_index) ii : u32) -> LookOut {
   var o : LookOut;
-  let i = hoverRank[lookList[look.offset + ii]];
+  let i = hoverRank[lookList[ii]];
   let state = nodeState[i];
   if ((state & look.bit) == 0u || (state & STATE_HIDDEN) != 0u) {
     o.pos = vec4<f32>(0.0, 0.0, 2.0, 1.0);
     return o;
   }
   let rDraw = max(nodeRadiusPx(i), NODE_MIN_DRAW_RADIUS_PX);
-  let corner = stripCorner(vi);
-  let outline = min(max(look.outlineScale * rDraw, look.outlineMinPx), look.outlineMaxPx);
-  let ext = rDraw + outline + NODE_AA_PAD_PX;
-  o.pos = vec4<f32>(screenToClip(worldToScreen(nodePos[i]) + corner * ext), 0.0, 1.0);
-  o.uv = corner * (ext / rDraw);
-  o.radiusPx = rDraw;
+  o = nodeQuad(vi, i, rDraw, min(max(look.outlineScale * rDraw, look.outlineMinPx), look.outlineMaxPx));
   o.shape = select(0u, nodeShape(i), (look.flags & HOVER_FLAG_SHAPES) != 0u);
-  o.outlinePx = outline;
   return o;
 }
 
@@ -171,47 +165,18 @@ fn look_fs(in : LookOut) -> @location(0) vec4<f32> {
 
 @vertex
 fn edge_vs(@builtin(vertex_index) vi : u32) -> EdgeOut {
-  let ia = hoverRank[hover.edgeA];
   let ib = hoverRank[hover.edgeB];
-  let a = worldToScreen(nodePos[ia]);
-  var b = worldToScreen(nodePos[ib]);
-  let full = b - a;
-  let fullLen = max(length(full), 1e-4);
-  let w = edgeWidthPx(hover.edgeStyle);
-  let halfWidth = max(w * hover.edgeWidth, EDGE_MIN_DRAW_WIDTH_PX) * 0.5;
-  var arrowLen = 0.0;
-  if (EDGE_ARROWS && (hover.edgeStyle & EDGE_FLAG_DIRECTED) != 0u) {
-    arrowLen = arrowLenPx(w * hover.edgeWidth);
-    let dirAB = full / fullLen;
-    var reach = nodeRadiusPx(ib);
-    if ((hover.flags & HOVER_FLAG_SHAPES) != 0u) {
-      reach *= shapeReach(dirAB, nodeShape(ib));
-    }
-    b = b - dirAB * min(reach, fullLen * 0.5);
-  }
-  let d = b - a;
-  let len = max(length(d), 1e-4);
-  arrowLen = arrowFitPx(arrowLen, len);
-  let dir = d / len;
-  let nor = vec2<f32>(-dir.y, dir.x);
-  let halfLen = len * 0.5;
-  let corner = edgeStripCorner(vi, halfLen, halfWidth, arrowLen);
-  var o : EdgeOut;
-  o.pos = vec4<f32>(screenToClip((a + b) * 0.5 + dir * corner.x + nor * corner.y), 0.0, 1.0);
-  o.uv = corner;
-  o.halfLen = halfLen;
-  o.halfWidth = halfWidth;
-  o.arrowLen = arrowLen;
-  return o;
+  let a = worldToScreen(nodePos[hoverRank[hover.edgeA]]);
+  let w = edgeWidthPx(hover.edgeStyle) * hover.edgeWidth;
+  let halfWidth = max(w, EDGE_MIN_DRAW_WIDTH_PX) * 0.5;
+  let s = edgeSegment(a, worldToScreen(nodePos[ib]), ib, w, EDGE_ARROWS && (hover.edgeStyle & EDGE_FLAG_DIRECTED) != 0u, (hover.flags & HOVER_FLAG_SHAPES) != 0u);
+  let corner = edgeStripCorner(vi, s.halfLen, halfWidth, s.arrowLen);
+  return EdgeOut(vec4<f32>(screenToClip(s.mid + s.dir * corner.x + vec2<f32>(-s.dir.y, s.dir.x) * corner.y), 0.0, 1.0), corner, s.halfLen, halfWidth, s.arrowLen);
 }
 
 @fragment
 fn edge_fs(in : EdgeOut) -> @location(0) vec4<f32> {
-  var d = sdSegment(in.uv, in.halfLen, in.halfWidth);
-  if (EDGE_ARROWS && in.arrowLen > 0.0) {
-    d = min(d, sdArrowhead(in.uv, in.halfLen, in.arrowLen, in.arrowLen * ARROW_HALF_MUL / ARROW_LEN_MUL));
-  }
-  let a = clamp(0.5 - d, 0.0, 1.0);
+  let a = clamp(0.5 - edgeDist(in.uv, in.halfLen, in.halfWidth, in.arrowLen), 0.0, 1.0);
   if (a < 0.002) {
     discard;
   }
@@ -222,7 +187,7 @@ fn edge_fs(in : EdgeOut) -> @location(0) vec4<f32> {
 fn edge_look_vs(@builtin(vertex_index) vi : u32, @builtin(instance_index) ii : u32) -> EdgeLookOut {
   var o : EdgeLookOut;
   o.pos = vec4<f32>(0.0, 0.0, 2.0, 1.0);
-  let u = lookEdges[look.edgeOffset + ii];
+  let u = lookEdges[ii];
   if (u >= frame.edgeCount) {
     return o;
   }
@@ -233,63 +198,30 @@ fn edge_look_vs(@builtin(vertex_index) vi : u32, @builtin(instance_index) ii : u
     return o;
   }
   let ij = edgeEnds(raw);
-  var dimmed = (bits & EDGE_STATE_DIMMED) != 0u;
-  if (anyNodeHidden() || anyNodeDimmed()) {
-    let ends = nodeState[ij.x] | nodeState[ij.y];
-    if ((ends & STATE_HIDDEN) != 0u) {
-      return o;
-    }
-    dimmed = dimmed || (ends & STATE_DIMMED) != 0u;
+  let ends = edgeEndState(ij);
+  if ((ends & STATE_HIDDEN) != 0u) {
+    return o;
   }
   var style = 0u;
   if ((look.flags & HOVER_FLAG_EDGE_STYLES) != 0u) {
     style = edgeStyle[e];
   }
-  let a = worldToScreen(nodePos[ij.x]);
-  var b = worldToScreen(nodePos[ij.y]);
-  let full = b - a;
-  let fullLen = max(length(full), 1e-4);
   let w = edgeWidthPx(style) * look.edgeWidth;
   let wDraw = max(w, EDGE_MIN_DRAW_WIDTH_PX);
-  var arrowLen = 0.0;
-  if (EDGE_ARROWS && (style & EDGE_FLAG_DIRECTED) != 0u) {
-    arrowLen = arrowLenPx(w);
-    let dirAB = full / fullLen;
-    var reach = nodeRadiusPx(ij.y);
-    if ((look.flags & HOVER_FLAG_SHAPES) != 0u) {
-      reach *= shapeReach(dirAB, nodeShape(ij.y));
-    }
-    b = b - dirAB * min(reach, fullLen * 0.5);
-  }
-  let d = b - a;
-  let len = max(length(d), 1e-4);
-  arrowLen = arrowFitPx(arrowLen, len);
-  let dir = d / len;
-  let nor = vec2<f32>(-dir.y, dir.x);
-  let halfLen = len * 0.5;
   let halfWidth = wDraw * 0.5;
-  let corner = edgeStripCorner(vi, halfLen, halfWidth, arrowLen);
+  let s = edgeSegment(worldToScreen(nodePos[ij.x]), worldToScreen(nodePos[ij.y]), ij.y, w, EDGE_ARROWS && (style & EDGE_FLAG_DIRECTED) != 0u, (look.flags & HOVER_FLAG_SHAPES) != 0u);
+  let corner = edgeStripCorner(vi, s.halfLen, halfWidth, s.arrowLen);
   var c = unpack4x8unorm(look.edgeColor);
   c.a *= min(1.0, w / wDraw);
-  if (dimmed) {
+  if ((bits & EDGE_STATE_DIMMED) != 0u || (ends & STATE_DIMMED) != 0u) {
     c.a *= frame.dimmedAlpha;
   }
-  o.pos = vec4<f32>(screenToClip((a + b) * 0.5 + dir * corner.x + nor * corner.y), 0.0, 1.0);
-  o.uv = corner;
-  o.halfLen = halfLen;
-  o.halfWidth = halfWidth;
-  o.arrowLen = arrowLen;
-  o.color = c;
-  return o;
+  return EdgeLookOut(vec4<f32>(screenToClip(s.mid + s.dir * corner.x + vec2<f32>(-s.dir.y, s.dir.x) * corner.y), 0.0, 1.0), corner, s.halfLen, halfWidth, s.arrowLen, c);
 }
 
 @fragment
 fn edge_look_fs(in : EdgeLookOut) -> @location(0) vec4<f32> {
-  var d = sdSegment(in.uv, in.halfLen, in.halfWidth);
-  if (EDGE_ARROWS && in.arrowLen > 0.0) {
-    d = min(d, sdArrowhead(in.uv, in.halfLen, in.arrowLen, in.arrowLen * ARROW_HALF_MUL / ARROW_LEN_MUL));
-  }
-  let a = in.color.a * clamp(0.5 - d, 0.0, 1.0);
+  let a = in.color.a * clamp(0.5 - edgeDist(in.uv, in.halfLen, in.halfWidth, in.arrowLen), 0.0, 1.0);
   if (a < 0.002) {
     discard;
   }

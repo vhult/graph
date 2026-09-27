@@ -7,7 +7,7 @@ import onDisk from "../src/shaders/common/layouts.wgsl?raw";
 
 describe("Layouts", () => {
   it("Frame matches the byte layout", () => {
-    expect(FRAME.size).toBe(136);
+    expect(FRAME.size).toBe(120);
     expect(FRAME.align).toBe(8);
     expect(FRAME.offset.originHi).toBe(0);
     expect(FRAME.offset.zoom).toBe(52);

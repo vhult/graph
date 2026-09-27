@@ -1,44 +1,62 @@
 import { describe, expect, it } from "vitest";
 import { MOD } from "../src/bridge/InputRing";
-import { Selection, shapeAdds } from "../src/engine/Selection";
+import { GraphStore } from "../src/data/GraphStore";
+import { selectClick, selectedNodes, selectShape, shapeAdds } from "../src/engine/Interaction";
+
+function store(): GraphStore {
+  const s = new GraphStore();
+  s.setNodes(10, {});
+  return s;
+}
+
+const sel = (s: GraphStore) => Array.from(selectedNodes(s));
 
 describe("Selection", () => {
   it("click selects one, shift-click toggles, empty click clears", () => {
-    const s = new Selection();
-    s.click(3, false);
-    expect(Array.from(s.nodes)).toEqual([3]);
-    s.click(5, true);
-    expect(Array.from(s.nodes).sort()).toEqual([3, 5]);
-    s.click(3, true);
-    expect(Array.from(s.nodes)).toEqual([5]);
-    s.click(null, false);
-    expect(s.nodes.length).toBe(0);
+    const s = store();
+    selectClick(s, 3, false);
+    expect(sel(s)).toEqual([3]);
+    selectClick(s, 5, true);
+    expect(sel(s).sort()).toEqual([3, 5]);
+    selectClick(s, 3, true);
+    expect(sel(s)).toEqual([5]);
+    selectClick(s, -1, false);
+    expect(sel(s).length).toBe(0);
   });
 
   it("a shape replaces, a shift shape adds", () => {
-    const s = new Selection();
-    s.shape(new Uint32Array([1, 2]), false);
-    s.shape(new Uint32Array([4]), true);
-    expect(Array.from(s.nodes).sort()).toEqual([1, 2, 4]);
-    s.shape(new Uint32Array([7]), false);
-    expect(Array.from(s.nodes)).toEqual([7]);
+    const s = store();
+    selectShape(s, new Uint32Array([1, 2]), false);
+    selectShape(s, new Uint32Array([4]), true);
+    expect(sel(s).sort()).toEqual([1, 2, 4]);
+    selectShape(s, new Uint32Array([7]), false);
+    expect(sel(s)).toEqual([7]);
   });
 
-  it("gives the flag changes of the last step", () => {
-    const s = new Selection();
-    s.load(new Uint32Array([1, 2, 3]));
-    expect(s.added.length + s.removed.length).toBe(0);
-    s.shape(new Uint32Array([9, 3, 4]), false);
-    expect(Array.from(s.added)).toEqual([4, 9]);
-    expect(Array.from(s.removed)).toEqual([1, 2]);
-    s.click(4, false);
-    expect(Array.from(s.added)).toEqual([]);
-    expect(Array.from(s.removed)).toEqual([3, 9]);
-    s.click(null, true);
-    expect(Array.from(s.nodes)).toEqual([4]);
-    s.clear();
-    expect(Array.from(s.removed)).toEqual([4]);
-    expect(s.nodes.length).toBe(0);
+  it("says whether a step changed the selection", () => {
+    const s = store();
+    expect(selectShape(s, new Uint32Array([1, 2, 3]), false)).toBe(true);
+    expect(selectShape(s, new Uint32Array([9, 3, 4]), false)).toBe(true);
+    expect(sel(s)).toEqual([9, 3, 4]);
+    expect(selectClick(s, 4, false)).toBe(true);
+    expect(selectClick(s, 4, false)).toBe(false);
+    expect(selectClick(s, -1, true)).toBe(false);
+    expect(sel(s)).toEqual([4]);
+    expect(selectClick(s, -1, false)).toBe(true);
+    expect(selectClick(s, -1, false)).toBe(false);
+    expect(sel(s).length).toBe(0);
+  });
+
+  it("lists the selection in first-selection order, and a node toggled off and on keeps its place", () => {
+    const s = store();
+    selectShape(s, new Uint32Array([7, 2]), false);
+    selectClick(s, 5, true);
+    selectClick(s, 0, true);
+    expect(sel(s)).toEqual([7, 2, 5, 0]);
+    selectClick(s, 2, true);
+    expect(sel(s)).toEqual([7, 5, 0]);
+    selectClick(s, 2, true);
+    expect(sel(s)).toEqual([7, 2, 5, 0]);
   });
 
   it("with selectKey shift, a plain shape replaces and ctrl or meta adds", () => {

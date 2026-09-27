@@ -1,6 +1,6 @@
 import { LABEL_CONSTANTS } from "../data/Layouts";
 import type { ContractLayouts } from "../gpu/BindLayouts";
-import { Stage, type FrameContext, type RenderNode } from "../gpu/FrameGraph";
+import { PREMULTIPLIED, Stage, type FrameContext, type RenderNode } from "../gpu/FrameGraph";
 import type { GraphBuffers } from "../gpu/GraphBuffers";
 import { createShaderModule } from "../gpu/ShaderModules";
 import type { Labels } from "../labels/Labels";
@@ -40,16 +40,12 @@ export class LabelDrawPass implements RenderNode {
     });
     const emptyLayout = device.createBindGroupLayout({ label: "empty", entries: [] });
     const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [layouts.frame, emptyLayout, layout] });
-    const blend: GPUBlendState = {
-      color: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
-      alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
-    };
     const make = (halo: boolean) =>
       device.createRenderPipelineAsync({
         label: halo ? "labels/halo" : "labels/fill",
         layout: pipelineLayout,
         vertex: { module, entryPoint: "vs" },
-        fragment: { module, entryPoint: "fs", targets: [{ format, blend }], constants: { HALO: halo ? 1 : 0 } },
+        fragment: { module, entryPoint: "fs", targets: [{ format, blend: PREMULTIPLIED }], constants: { HALO: halo ? 1 : 0 } },
         primitive: { topology: "triangle-strip" },
       });
     const [halo, fill] = await Promise.all([make(true), make(false)]);

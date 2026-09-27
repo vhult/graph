@@ -12,16 +12,19 @@
 import { GraphError } from "../api/errors";
 import { EDGE_CONSTANTS, edgeChunkCount, edgeMoveWordOffset, edgeScratchWords, ENGINE_CONSTANTS, WORKGROUP_SIZE } from "../data/Layouts";
 import { Dirty } from "../engine/Dirty";
-import { edgeConstants, edgeKey, type Tunable, type Tune } from "../engine/Tune";
+import { edgeConstants, edgeKey, type Tune } from "../engine/Tune";
 import type { ContractLayouts } from "../gpu/BindLayouts";
 import { Stage, type ComputeNode, type FrameContext } from "../gpu/FrameGraph";
-import { Variants } from "../gpu/Lazy";
+import { Tuned } from "../gpu/Lazy";
+import type { ScatterSlot } from "../gpu/PermuteKernels";
 import { createShaderModule } from "../gpu/ShaderModules";
 
 /** Grow with headroom so edge additions don't reallocate every time. */
 const GROWTH = 1.25;
 /** Chunk records depend on endpoint positions and on which edges exist. */
 const BOUNDS_DIRTY = Dirty.TOPOLOGY | Dirty.POSITIONS | Dirty.EDGES;
+export const RESTYLE_STYLES = 0;
+export const RESTYLE_STATES = 1;
 
 export interface EdgeCullOutputs {
   /** Draw args, chunk list and chunk records. */
@@ -30,7 +33,7 @@ export interface EdgeCullOutputs {
   list: GPUBuffer;
 }
 
-export class EdgeCullPass implements ComputeNode, Tunable {
+export class EdgeCullPass implements ComputeNode {
   readonly stage = Stage.EDGE_CULL;
   readonly name = "edgeCull";
   readonly phases = ["edge.bounds", "edge.cull", "edge.expand"] as const;
@@ -45,15 +48,12 @@ export class EdgeCullPass implements ComputeNode, Tunable {
   private readonly moveHead = new Uint32Array(1);
   private moving = false;
   private touchPending = false;
-  private restyleCount = 0;
-  private restyleGroup: GPUBindGroup | null = null;
-  private restyleKey: readonly GPUBuffer[] = [];
+  private readonly restyles = [0, 1].map(() => ({ count: 0, group: null as GPUBindGroup | null, key: [] as readonly GPUBuffer[] }));
   private boundsStale = true;
   private capacity = 0;
   private gx = 0;
   private gy = 0;
   private readonly dummy: GPUBuffer;
-  private readonly cull = new Variants<GPUComputePipeline>();
 
   private constructor(
     private readonly device: GPUDevice,
@@ -64,7 +64,7 @@ export class EdgeCullPass implements ComputeNode, Tunable {
     private readonly boundsListLines: GPUComputePipeline,
     private readonly touch: GPUComputePipeline,
     private readonly restylePipe: GPUComputePipeline,
-    private readonly makeCull: (t: Tune) => Promise<GPUComputePipeline>,
+    readonly cull: Tuned<GPUComputePipeline>,
     private readonly expand: GPUComputePipeline,
     private readonly empty: GPUBindGroup,
   ) {
@@ -95,7 +95,7 @@ export class EdgeCullPass implements ComputeNode, Tunable {
         compute: { module: m, entryPoint, constants },
       });
     const emptyLayout = device.createBindGroupLayout({ label: "empty", entries: [] });
-    const makeCull = (t: Tune) => make(module, "edge_cull", phase.state, edgeConstants(t));
+    const cull = new Tuned(edgeKey, (t) => make(module, "edge_cull", phase.state, edgeConstants(t)));
     const [bounds, boundsLines, boundsList, boundsListLines, touch, restyle, expand] = await Promise.all([
       make(module, "edge_bounds", phase.bounds, { EDGE_LINES: 0 }),
       make(module, "edge_bounds", phase.bounds, { EDGE_LINES: 1 }),
@@ -110,22 +110,9 @@ export class EdgeCullPass implements ComputeNode, Tunable {
       make(expandModule, "edge_expand", phase.expand),
     ]);
     const empty = device.createBindGroup({ layout: emptyLayout, entries: [] });
-    const pass = new EdgeCullPass(device, phase, bounds, boundsLines, boundsList, boundsListLines, touch, restyle, makeCull, expand, empty);
-    await pass.loadTune(tune);
-    pass.useTune(tune);
-    return pass;
-  }
-
-  loadTune(t: Tune): Promise<unknown> {
-    return this.cull.load(edgeKey(t), () => this.makeCull(t));
-  }
-
-  hasTune(t: Tune): boolean {
-    return this.cull.get(edgeKey(t)) !== null;
-  }
-
-  useTune(t: Tune): void {
-    this.cull.use(edgeKey(t));
+    await cull.loadTune(tune);
+    cull.useTune(tune);
+    return new EdgeCullPass(device, phase, bounds, boundsLines, boundsList, boundsListLines, touch, restyle, cull, expand, empty);
   }
 
   /** Ensure the buffers fit `edgeCount` edges. Old ones go to `retire`. */
@@ -168,17 +155,20 @@ export class EdgeCullPass implements ComputeNode, Tunable {
     this.touchPending = false;
   }
 
-  restyle(rank: GPUBuffer, list: GPUBuffer, params: GPUBuffer, count: number, edgeCount: number): void {
+  restyle(k: number, rank: GPUBuffer, slot: ScatterSlot, count: number, edgeCount: number): void {
     const out = this.outputs;
     if (!out || count === 0 || edgeCount === 0) return;
-    if (!this.moving) this.device.queue.writeBuffer(out.scratch, (edgeMoveWordOffset(edgeCount) + ENGINE_CONSTANTS.MOVE_COUNT) * 4, this.moveHead);
-    const k = this.restyleKey;
-    if (k[0] !== out.scratch || k[1] !== rank || k[2] !== list || k[3] !== params) {
-      const buffers = [out.scratch, rank, list, params];
-      this.restyleGroup = this.device.createBindGroup({ layout: this.layouts.restyle, entries: buffers.map((buffer, i) => ({ binding: i + 2, resource: { buffer } })) });
-      this.restyleKey = buffers;
+    if (this.moving || count >= edgeCount) {
+      this.boundsStale = true;
+      return;
     }
-    this.restyleCount = count;
+    this.device.queue.writeBuffer(out.scratch, (edgeMoveWordOffset(edgeCount) + ENGINE_CONSTANTS.MOVE_COUNT) * 4, this.moveHead);
+    const r = this.restyles[k]!;
+    if (r.key[0] !== out.scratch || r.key[1] !== rank || r.key[2] !== slot.ranges || r.key[3] !== slot.params) {
+      r.key = [out.scratch, rank, slot.ranges, slot.params];
+      r.group = this.device.createBindGroup({ layout: this.layouts.restyle, entries: r.key.map((buffer, i) => ({ binding: i + 2, resource: { buffer } })) });
+    }
+    r.count = count;
   }
 
   setLines(on: boolean, retire: (b: GPUBuffer) => void): void {
@@ -215,7 +205,7 @@ export class EdgeCullPass implements ComputeNode, Tunable {
 
   phaseActive(phase: number, ctx: FrameContext): boolean {
     if (ctx.edgeCount === 0 || !this.groups) return false;
-    return phase !== 0 || this.boundsStale || this.restyleCount > 0 || this.touchPending || (ctx.dirty & BOUNDS_DIRTY) !== 0 || (this.moving && (ctx.dirty & Dirty.MOVED) !== 0);
+    return phase !== 0 || this.boundsStale || this.restyles[0]!.count > 0 || this.restyles[1]!.count > 0 || this.touchPending || (ctx.dirty & BOUNDS_DIRTY) !== 0 || (this.moving && (ctx.dirty & Dirty.MOVED) !== 0);
   }
 
   prepare(ctx: FrameContext): void {
@@ -231,15 +221,16 @@ export class EdgeCullPass implements ComputeNode, Tunable {
     switch (phase) {
       case 0:
         if (!this.boundsStale && (ctx.dirty & BOUNDS_DIRTY) === 0) {
-          if (this.restyleCount > 0) {
-            const groups = Math.ceil(this.restyleCount / WORKGROUP_SIZE);
+          for (const r of this.restyles) {
+            if (r.count === 0) continue;
+            const groups = Math.ceil(r.count / WORKGROUP_SIZE);
             const gx = Math.min(groups, this.device.limits.maxComputeWorkgroupsPerDimension);
             pass.setPipeline(this.restylePipe);
             pass.setBindGroup(1, this.empty);
-            pass.setBindGroup(2, this.restyleGroup!);
+            pass.setBindGroup(2, r.group!);
             pass.dispatchWorkgroups(gx, Math.ceil(groups / gx));
             pass.setBindGroup(1, ctx.graphBindGroup);
-            this.restyleCount = 0;
+            r.count = 0;
           }
           if (this.touchPending) {
             pass.setPipeline(this.touch);
@@ -256,7 +247,7 @@ export class EdgeCullPass implements ComputeNode, Tunable {
         pass.setBindGroup(2, g.bounds);
         pass.dispatchWorkgroups(this.gx, this.gy);
         this.boundsStale = false;
-        this.restyleCount = 0;
+        for (const r of this.restyles) r.count = 0;
         this.linesReady = this.lines !== null;
         return;
       case 1:

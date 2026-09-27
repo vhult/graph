@@ -1,4 +1,4 @@
-import { GraphError } from "../api/errors";
+import { GraphError, toGraphError } from "../api/errors";
 import { MAX_SHAPE_POINTS } from "../data/QueryShape";
 import { WORKGROUP_SIZE } from "../data/Layouts";
 import type { ContractLayouts } from "../gpu/BindLayouts";
@@ -74,7 +74,7 @@ export class QueryPass {
     this.pipeline.load().then(
       () => this.wake(),
       (e: unknown) => {
-        const err = e instanceof GraphError ? e : new GraphError("internal", `query.inside: pipeline failed to load: ${String(e)}`);
+        const err = toGraphError(e, "query.inside: pipeline failed to load: ");
         this.loadError = err;
         onError(err);
         if (this.destroyed) return;

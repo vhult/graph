@@ -45,3 +45,7 @@ const UNSUPPORTED: ReadonlySet<GraphErrorCode> = new Set([
 export function errorFromCode(code: GraphErrorCode, message: string): GraphError {
   return UNSUPPORTED.has(code) ? new UnsupportedError(code, message) : new GraphError(code, message);
 }
+
+export function toGraphError(e: unknown, prefix = ""): GraphError {
+  return e instanceof GraphError ? e : new GraphError("internal", prefix + (e instanceof Error ? e.message : String(e)));
+}

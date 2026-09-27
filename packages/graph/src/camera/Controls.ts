@@ -30,7 +30,6 @@ const ZOOM_EPSILON = 1e-4;
 /** Longest dt honoured, seconds: after an idle sleep the gap is meaningless. */
 const MAX_STEP_S = 0.1;
 const WHEEL_END_MS = 150;
-const TURN = Math.PI * 2;
 
 export class Gesture {
   dirty = false;
@@ -153,8 +152,7 @@ export class Controls {
         const dx = rec.x - this.pinchX;
         const dy = rec.y - this.pinchY;
         const factor = this.pinchDist > 0 && rec.dx > 0 ? rec.dx / this.pinchDist : 1;
-        let turn = rec.dy - this.pinchAngle;
-        turn -= TURN * Math.round(turn / TURN);
+        const turn = wrapAngle(rec.dy - this.pinchAngle);
         const anchor = !this.pinching;
         this.pinching = true;
         this.pinchX = rec.x;

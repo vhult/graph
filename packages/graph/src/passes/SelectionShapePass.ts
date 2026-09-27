@@ -1,7 +1,7 @@
 import type { RGBA } from "../api/types";
 import { MAX_SHAPE_POINTS } from "../data/QueryShape";
 import type { ContractLayouts } from "../gpu/BindLayouts";
-import type { FrameContext } from "../gpu/FrameGraph";
+import { PREMULTIPLIED, type FrameContext } from "../gpu/FrameGraph";
 import { createShaderModule } from "../gpu/ShaderModules";
 
 const PARAM_BYTES = 64;
@@ -47,16 +47,12 @@ export class SelectionShapePass {
     });
     const emptyLayout = device.createBindGroupLayout({ label: "empty", entries: [] });
     const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [contract.frame, emptyLayout, layout] });
-    const blend: GPUBlendState = {
-      color: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
-      alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
-    };
     const make = (stage: "fill" | "stroke") =>
       device.createRenderPipelineAsync({
         label: `selection/${stage}`,
         layout: pipelineLayout,
         vertex: { module, entryPoint: `vs_${stage}` },
-        fragment: { module, entryPoint: `fs_${stage}`, targets: [{ format, blend }] },
+        fragment: { module, entryPoint: `fs_${stage}`, targets: [{ format, blend: PREMULTIPLIED }] },
         primitive: { topology: "triangle-strip" },
       });
     const [fill, stroke] = await Promise.all([make("fill"), make("stroke")]);

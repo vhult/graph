@@ -1,4 +1,3 @@
-import { GraphError } from "../api/errors";
 import type { IconSource } from "../api/types";
 import { ICON_CONSTANTS } from "../data/Layouts";
 import { maxIcons } from "../gpu/Caps";
@@ -52,30 +51,36 @@ export class IconAtlas {
     return new IconAtlas(device, gpu.memory, layout, boundary, field, device.createBindGroup({ layout: emptyLayout, entries: [] }));
   }
 
-  define(sources: readonly IconSource[]): void {
-    const max = maxIcons(this.device);
-    if (sources.length > max) throw new GraphError("limits-exceeded", `icons.define: this GPU holds at most ${max} icons`);
-    const built = parseIcons(sources);
+  define(sources: readonly IconSource[]): string[] {
     this.dropSdf();
-    this.setSdf(this.sdfTexture(Math.max(1, built.length)));
-    this.built = built;
-    this.build(Uint16Array.from(built.keys()), built);
+    this.setSdf(this.sdfTexture(Math.max(1, sources.length)));
+    this.built = [];
+    return this.defineAt(Uint16Array.from(sources.keys()), sources);
   }
 
-  defineAt(ids: Uint16Array, sources: readonly IconSource[]): void {
-    const max = maxIcons(this.device);
+  defineAt(ids: Uint16Array, sources: readonly IconSource[]): string[] {
+    const { icons, failed } = parseIcons(sources);
     let top = 0;
     for (let k = 0; k < ids.length; k++) top = Math.max(top, ids[k]! + 1);
-    if (top > max) throw new GraphError("limits-exceeded", `icons.add: this GPU holds at most ${max} icons`);
-    const built = parseIcons(sources);
     while (this.built.length < top) this.built.push(null);
-    for (let k = 0; k < ids.length; k++) this.built[ids[k]!] = built[k]!;
+    const good: number[] = [];
+    const bad: number[] = [];
+    for (let k = 0; k < ids.length; k++) {
+      this.built[ids[k]!] = icons[k]!;
+      (icons[k] ? good : bad).push(k);
+    }
     const layers = this.sdf.depthOrArrayLayers;
-    if (top > layers) this.grow(Math.min(max, Math.max(top, layers * 2)));
-    this.build(ids, built);
+    if (top > layers) this.grow(Math.min(maxIcons(this.device), Math.max(top, layers * 2)));
+    if (bad.length > 0) this.blank(Uint16Array.from(bad, (k) => ids[k]!));
+    this.build(Uint16Array.from(good, (k) => ids[k]!), good.map((k) => icons[k]!));
+    return failed;
   }
 
   clear(ids: Uint16Array): void {
+    if (this.blank(ids)) this.pack();
+  }
+
+  private blank(ids: Uint16Array): boolean {
     const blank = new Uint16Array(ICON_TILE * ICON_TILE).fill(FAR_HALF);
     const queue = this.device.queue;
     let any = false;
@@ -89,7 +94,7 @@ export class IconAtlas {
         queue.writeTexture({ texture: this.sdf, mipLevel: level, origin: { x: 0, y: 0, z: id } }, blank, { bytesPerRow: res * SDF_TEXEL_BYTES, rowsPerImage: res }, [res, res, 1]);
       }
     }
-    if (any) this.pack();
+    return any;
   }
 
   setPalette(colors: Uint32Array, version: number): void {

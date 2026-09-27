@@ -146,6 +146,21 @@ fn edge_touch(
   }
 }
 
+fn rangeElement(t : u32) -> u32 {
+  var lo = 0u;
+  var hi = restyle.rangeCount - 1u;
+  while (lo < hi) {
+    let mid = (lo + hi + 1u) >> 1u;
+    if (restyleList[mid].y <= t) {
+      lo = mid;
+    } else {
+      hi = mid - 1u;
+    }
+  }
+  let r = restyleList[lo];
+  return restyleRank[r.x + (t - r.y)];
+}
+
 @compute @workgroup_size(WORKGROUP_SIZE)
 fn edge_restyle(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_workgroups) nwg : vec3<u32>) {
   let t = gid.x + gid.y * nwg.x * WORKGROUP_SIZE;
@@ -153,7 +168,7 @@ fn edge_restyle(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_wor
     return;
   }
   let chunks = numEdgeChunks();
-  let c = restyleRank[restyleList[t].x] >> EDGE_CHUNK_SHIFT;
+  let c = rangeElement(t) >> EDGE_CHUNK_SHIFT;
   if (c < chunks) {
     listMoved(c, chunks);
   }
@@ -185,7 +200,7 @@ fn edgeBoundsOf(c : u32, chunks : u32, lid : u32) {
   var lineA : array<vec2<f32>, ITEMS_PER_THREAD>;
   for (var k = 0u; k < ITEMS_PER_THREAD; k++) {
     let e = c * EDGE_CHUNK_SIZE + k * WORKGROUP_SIZE + lid;
-    if (e < frame.edgeCount) {
+    if (e < frame.edgeCount && !edgeHidden(edgeIdx[e])) {
       let ij = edgeEnds(edgeIdx[e]);
       let pa = nodePos[ij.x];
       let pb = nodePos[ij.y];

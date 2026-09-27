@@ -28,6 +28,7 @@ interface Args {
   nodeLabels: boolean;
   edgeLabels: boolean;
   icons: number;
+  nodeReserve: number;
 }
 
 /** Latest args, read by the panel when "Run" is clicked. */
@@ -45,7 +46,7 @@ const meta: Meta<Args> = {
   title: "Developer/Benchmark",
   render: (args, ctx) =>
     stage(args, ctx, {
-      options: () => ({ input: { pan: false, zoom: false, drag: false, select: false, pick: { edges: false } } }),
+      options: (a) => ({ nodeReserve: a.nodeReserve, input: { pan: false, zoom: false, drag: false, select: false, pick: { edges: false } } }),
       setup: (graph, a, hud, root) => {
         current = a;
         graph.debug.tune({ lodTargetPx: a.lodTargetPx });
@@ -79,6 +80,7 @@ const meta: Meta<Args> = {
     nodeLabels: { control: "boolean" },
     edgeLabels: { control: "boolean" },
     icons: { control: "select", options: [0, 8, 64, 256] },
+    nodeReserve: { control: { type: "number", min: 0, step: 1 } },
   },
   args: {
     dataset: "communities",
@@ -88,6 +90,7 @@ const meta: Meta<Args> = {
     nodeLabels: true,
     edgeLabels: true,
     icons: 0,
+    nodeReserve: 100,
   },
 };
 

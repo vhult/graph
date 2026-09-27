@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { GraphError } from "../src/api/errors";
 import { DEFAULT_NODE_COLOR, GraphStore } from "../src/data/GraphStore";
 import { Flag } from "../src/api/types";
-import { CONSTANTS, DEFAULT_NODE_STYLE } from "../src/data/Layouts";
+import { CONSTANTS, DEFAULT_NODE_STYLE, MAX_NODES } from "../src/data/Layouts";
 
 describe("GraphStore", () => {
   it("bulk set flags node channels for reallocation and computes bounds", () => {
@@ -185,8 +185,8 @@ describe("GraphStore", () => {
   });
 
   it("counts nodes flagged dimmed exactly", () => {
-    const s = new GraphStore();
-    s.setNodes(4, {}, 1);
+    const s = new GraphStore(1);
+    s.setNodes(4, {});
     const D = CONSTANTS.STATE_DIMMED;
     s.flagNodes(new Uint32Array([1, 3]), D, true);
     expect(s.dimmedCount).toBe(2);
@@ -207,18 +207,17 @@ describe("GraphStore", () => {
     s.setNodes(5, {});
     s.flagNodes(new Uint32Array([4, 1]), CONSTANTS.STATE_SELECTED, true);
     s.flagNodes(new Uint32Array([2]), CONSTANTS.STATE_FOCUSED, true);
-    const out = new Uint32Array(8);
-    expect(s.listNodes(CONSTANTS.STATE_SELECTED, out, 0)).toBe(2);
-    expect(s.listNodes(CONSTANTS.STATE_FOCUSED, out, 2)).toBe(1);
-    expect(Array.from(out.subarray(0, 3))).toEqual([1, 4, 2]);
+    const st = () => s.channels.nodeState.data as Uint32Array;
+    expect(Array.from(s.looks.nodes[0].entries(st()))).toEqual([4, 1]);
+    expect(Array.from(s.looks.nodes[1].entries(st()))).toEqual([2]);
     s.removeNodes(new Uint32Array([4]));
-    expect(s.listNodes(CONSTANTS.STATE_SELECTED, out, 0)).toBe(1);
+    expect(Array.from(s.looks.nodes[0].entries(st()))).toEqual([1]);
   });
 
   it("setNodes keeps a hidden reserve past the slots that bounds and the hidden count skip", () => {
-    const s = new GraphStore();
+    const s = new GraphStore(2);
     const H = CONSTANTS.STATE_HIDDEN;
-    s.setNodes(2, { positions: new Float32Array([1, 2, 3, 4]), colors: new Uint32Array([7, 8]) }, 2);
+    s.setNodes(2, { positions: new Float32Array([1, 2, 3, 4]), colors: new Uint32Array([7, 8]) });
     expect(s.nodeCount).toBe(4);
     expect(s.nodeSlots).toBe(2);
     expect(Array.from(s.channels.nodePos.data)).toEqual([1, 2, 3, 4, 0, 0, 0, 0]);
@@ -231,9 +230,9 @@ describe("GraphStore", () => {
   });
 
   it("removeNodes hides the nodes and returns the live edges that touch them", () => {
-    const s = new GraphStore();
+    const s = new GraphStore(1);
     const H = CONSTANTS.STATE_HIDDEN;
-    s.setNodes(4, {}, 1);
+    s.setNodes(4, {});
     s.setEdges(4, { indices: new Uint32Array([0, 1, 1, 2, 2, 3, 3, 1]) });
     s.hideEdges(new Uint32Array([3]));
     s.flagNodes(new Uint32Array([1]), H, true);
@@ -247,9 +246,9 @@ describe("GraphStore", () => {
   });
 
   it("flagNodes on all leaves removed and reserve nodes hidden", () => {
-    const s = new GraphStore();
+    const s = new GraphStore(1);
     const H = CONSTANTS.STATE_HIDDEN;
-    s.setNodes(3, {}, 1);
+    s.setNodes(3, {});
     s.removeNodes(new Uint32Array([1]));
     s.flagNodes(null, H, true);
     expect(s.hiddenCount).toBe(2);
@@ -260,8 +259,8 @@ describe("GraphStore", () => {
   });
 
   it("addNodes shows the nodes and writes defaults for missing channels", () => {
-    const s = new GraphStore();
-    s.setNodes(2, { colors: new Uint32Array([7, 8]), positions: new Float32Array([1, 1, 2, 2]) }, 2);
+    const s = new GraphStore(2);
+    s.setNodes(2, { colors: new Uint32Array([7, 8]), positions: new Float32Array([1, 1, 2, 2]) });
     s.removeNodes(new Uint32Array([0]));
     s.addNodes(new Uint32Array([0, 2]), 3, { positions: new Float32Array([5, 6, -3, 9]) });
     expect(s.nodeSlots).toBe(3);
@@ -276,10 +275,10 @@ describe("GraphStore", () => {
   });
 
   it("growNodes adds hidden default slots and keeps the data", () => {
-    const s = new GraphStore();
-    s.setNodes(2, { colors: new Uint32Array([7, 8]) }, 1);
+    const s = new GraphStore(1);
+    s.setNodes(2, { colors: new Uint32Array([7, 8]) });
     for (const ch of Object.values(s.channels)) ch.realloc = false;
-    s.growNodes(6);
+    s.growNodes(5);
     expect(s.nodeCount).toBe(6);
     expect(s.nodeSlots).toBe(2);
     expect(s.channels.nodePos.realloc).toBe(true);
@@ -289,21 +288,19 @@ describe("GraphStore", () => {
   });
 
   it("compactNodes packs the node mirrors, keeps a reserve and remaps edge ends", () => {
-    const s = new GraphStore();
-    s.setNodes(3, { positions: new Float32Array([1, 1, 2, 2, 3, 3]), colors: new Uint32Array([1, 2, 3]) }, 1);
-    s.nodeLabels = ["a", "b", "c"];
+    const s = new GraphStore(2);
+    s.setNodes(3, { positions: new Float32Array([1, 1, 2, 2, 3, 3]), colors: new Uint32Array([1, 2, 3]) });
     s.setEdges(3, { indices: new Uint32Array([1, 2, 0, 1, 2, 0]) });
     s.hideEdges(s.removeNodes(new Uint32Array([0])));
     s.flagNodes(new Uint32Array([2]), CONSTANTS.STATE_HIDDEN, true);
     for (const ch of Object.values(s.channels)) ch.realloc = false;
-    s.compactNodes(new Uint32Array([0xffffffff, 0, 1]), 2);
+    s.compactNodes(new Uint32Array([0xffffffff, 0, 1]));
     expect(s.nodeSlots).toBe(2);
     expect(s.nodeCount).toBe(4);
     expect(Array.from(s.channels.nodePos.data)).toEqual([2, 2, 3, 3, 0, 0, 0, 0]);
     expect(Array.from(s.channels.nodeColor.data)).toEqual([2, 3, DEFAULT_NODE_COLOR, DEFAULT_NODE_COLOR]);
     expect(Array.from(s.channels.nodeState.data, (w) => w & CONSTANTS.STATE_HIDDEN)).toEqual([0, 8, 8, 8]);
     expect(s.hiddenCount).toBe(1);
-    expect(s.nodeLabels).toEqual(["b", "c"]);
     expect(Array.from(s.channels.edgeIdx.data)).toEqual([0, 1, 0, 0, 1, 1]);
     expect(s.channels.edgeIdx.realloc).toBe(true);
     expect(s.channels.nodeState.realloc).toBe(true);
@@ -355,7 +352,7 @@ describe("GraphStore", () => {
     const s = new GraphStore();
     s.setEdges(2, { indices: new Uint32Array([0, 1, 1, 2]) });
     for (const ch of Object.values(s.channels)) ch.realloc = false;
-    s.addEdges(new Uint32Array([2]), 3, { indices: new Uint32Array([2, 0]) }, 0);
+    s.addEdges(new Uint32Array([2]), 3, { indices: new Uint32Array([2, 0]) });
     expect(s.edgeCount).toBe(3);
     expect(s.liveEdges).toBe(3);
     expect(Array.from(s.channels.edgeIdx.data)).toEqual([0, 1, 1, 2, 2, 0]);
@@ -369,7 +366,7 @@ describe("GraphStore", () => {
     s.hideEdges(new Uint32Array([1]));
     expect(s.liveEdges).toBe(2);
     expect(s.edgeState![1]! & CONSTANTS.EDGE_STATE_HIDDEN).toBe(CONSTANTS.EDGE_STATE_HIDDEN);
-    expect(s.edgeStateUploads.count).toBe(1);
+    expect(s.edgeStateChannel.scattered.count).toBe(1);
     s.flagEdges(null, Flag.hidden, false);
     expect(s.edgeState![1]! & CONSTANTS.EDGE_STATE_HIDDEN).toBe(CONSTANTS.EDGE_STATE_HIDDEN);
     expect(s.edgeState![0]! & CONSTANTS.EDGE_STATE_HIDDEN).toBe(0);
@@ -388,37 +385,37 @@ describe("GraphStore", () => {
     s.flagEdges(null, Flag.focused, true);
     const F = CONSTANTS.EDGE_STATE_FOCUSED;
     expect(Array.from(s.edgeState!)).toEqual([D | S | F, F, D | F]);
-    expect(s.edgeStateAll).toBe(true);
+    expect(s.edgeStateChannel.dirty.count).toBe(1);
   });
 
   it("a first per-edge style allocates the channel and re-sorts, later ones scatter", () => {
     const s = new GraphStore();
     s.setEdges(3, { indices: new Uint32Array(6) });
     for (const ch of Object.values(s.channels)) ch.realloc = false;
-    s.updateEdgesAt(new Uint32Array([1]), { styles: new Uint32Array([7]) }, 0);
+    s.updateEdgesAt(new Uint32Array([1]), { styles: new Uint32Array([7]) });
     expect(s.hasEdgeStyles).toBe(true);
     expect(Array.from(s.channels.edgeStyle.data)).toEqual([0, 7, 0]);
     expect(s.channels.edgeIdx.realloc).toBe(true);
     for (const ch of Object.values(s.channels)) ch.realloc = false;
-    s.updateEdgesAt(new Uint32Array([2]), { styles: new Uint32Array([9]) }, 0);
+    s.updateEdgesAt(new Uint32Array([2]), { styles: new Uint32Array([9]) });
     expect(s.channels.edgeStyle.realloc).toBe(false);
     expect(s.channels.edgeStyle.scattered.count).toBe(1);
     expect(Array.from(s.channels.edgeStyle.data)).toEqual([0, 7, 9]);
   });
 
-  it("a first per-edge colour fills the other edges with the tint", () => {
+  it("a first per-edge colour fills the other edges with 0", () => {
     const s = new GraphStore();
     s.setEdges(2, { indices: new Uint32Array(4) });
-    s.updateEdgesAt(new Uint32Array([1]), { colors: new Uint32Array([1, 2]) }, 5);
+    s.updateEdgesAt(new Uint32Array([1]), { colors: new Uint32Array([1, 2]) });
     expect(s.hasEdgeColors).toBe(true);
-    expect(Array.from(s.channels.edgeColor.data)).toEqual([5, 5, 1, 2]);
+    expect(Array.from(s.channels.edgeColor.data)).toEqual([0, 0, 1, 2]);
   });
 
   it("edge updates with ends rewrite the mirror and re-sort", () => {
     const s = new GraphStore();
     s.setEdges(2, { indices: new Uint32Array([0, 1, 1, 2]) });
     for (const ch of Object.values(s.channels)) ch.realloc = false;
-    s.updateEdgesAt(new Uint32Array([1]), { indices: new Uint32Array([2, 0]) }, 0);
+    s.updateEdgesAt(new Uint32Array([1]), { indices: new Uint32Array([2, 0]) });
     expect(Array.from(s.channels.edgeIdx.data)).toEqual([0, 1, 2, 0]);
     expect(s.channels.edgeIdx.realloc).toBe(true);
   });
@@ -437,7 +434,7 @@ describe("GraphStore", () => {
     const s = new GraphStore();
     s.setEdges(2, { indices: new Uint32Array([0, 1, 1, 0]) });
     s.hideEdges(new Uint32Array([0]));
-    s.addEdges(new Uint32Array([0]), 2, { indices: new Uint32Array([1, 1]) }, 0);
+    s.addEdges(new Uint32Array([0]), 2, { indices: new Uint32Array([1, 1]) });
     expect(s.edgeState![0]).toBe(0);
     expect(s.liveEdges).toBe(2);
   });
@@ -472,11 +469,11 @@ describe("GraphStore", () => {
     const s = new GraphStore();
     s.setEdges(2, { indices: new Uint32Array(4), styles: new Uint32Array([8, 8]) });
     expect(s.hasDirected).toBe(false);
-    s.addEdges(new Uint32Array([2]), 3, { indices: new Uint32Array(2), styles: new Uint32Array([D]) }, 0);
+    s.addEdges(new Uint32Array([2]), 3, { indices: new Uint32Array(2), styles: new Uint32Array([D]) });
     expect(s.hasDirected).toBe(true);
     s.updateEdges({ styles: new Uint32Array([1, 2, 3]) });
     expect(s.hasDirected).toBe(false);
-    s.updateEdgesAt(new Uint32Array([1]), { styles: new Uint32Array([D | 8]) }, 0);
+    s.updateEdgesAt(new Uint32Array([1]), { styles: new Uint32Array([D | 8]) });
     expect(s.hasDirected).toBe(true);
     s.setEdges(1, { indices: new Uint32Array(2) });
     expect(s.hasDirected).toBe(false);
@@ -485,33 +482,26 @@ describe("GraphStore", () => {
   });
 
   it("lists the edges carrying a state bit and follows remove, compact and set", () => {
-    const SEL = CONSTANTS.EDGE_STATE_SELECTED;
-    const FOC = CONSTANTS.EDGE_STATE_FOCUSED;
     const s = new GraphStore();
     s.setEdges(4, { indices: new Uint32Array(8) });
-    const out = new Uint32Array(4);
-    expect(s.listEdges(SEL, out, 0)).toBe(0);
+    const [sel, foc] = s.looks.edges;
+    const list = (l: typeof sel) => Array.from(l.entries(s.edgeState ?? new Uint32Array(0)));
+    expect(list(sel)).toEqual([]);
     s.flagEdges(new Uint32Array([1, 3]), Flag.selected, true);
     s.flagEdges(new Uint32Array([2]), Flag.focused, true);
-    expect(s.listEdges(SEL, out, 0)).toBe(2);
-    expect(Array.from(out.subarray(0, 2))).toEqual([1, 3]);
-    expect(s.listEdges(FOC, out, 2)).toBe(1);
-    expect(out[2]).toBe(2);
-    expect(s.listEdges(SEL, new Uint32Array(1), 0)).toBe(2);
+    expect(list(sel)).toEqual([1, 3]);
+    expect(list(foc)).toEqual([2]);
 
     s.hideEdges(new Uint32Array([3]));
-    expect(s.listEdges(SEL, out, 0)).toBe(1);
-    expect(out[0]).toBe(1);
+    expect(list(sel)).toEqual([1]);
 
     s.compactEdges(new Uint32Array([0xffffffff, 0, 1, 0xffffffff]));
-    expect(s.listEdges(SEL, out, 0)).toBe(1);
-    expect(out[0]).toBe(0);
-    expect(s.listEdges(FOC, out, 0)).toBe(1);
-    expect(out[0]).toBe(1);
+    expect(list(sel)).toEqual([0]);
+    expect(list(foc)).toEqual([1]);
 
     s.setEdges(2, { indices: new Uint32Array(4) });
-    expect(s.listEdges(SEL, out, 0)).toBe(0);
-    expect(s.listEdges(FOC, out, 0)).toBe(0);
+    expect(list(sel)).toEqual([]);
+    expect(list(foc)).toEqual([]);
   });
 
   it("edges of a removed node leave the edge look list", () => {
@@ -520,61 +510,7 @@ describe("GraphStore", () => {
     s.setEdges(2, { indices: new Uint32Array([0, 1, 1, 2]) });
     s.flagEdges(null, Flag.selected, true);
     s.hideEdges(s.removeNodes(new Uint32Array([2])));
-    const out = new Uint32Array(2);
-    expect(s.listEdges(CONSTANTS.EDGE_STATE_SELECTED, out, 0)).toBe(1);
-    expect(out[0]).toBe(0);
-  });
-
-  it("edges filled with the tint follow a tint change and host colours stay", () => {
-    const s = new GraphStore();
-    s.setEdges(3, { indices: new Uint32Array(6) });
-    s.updateEdgesAt(new Uint32Array([1]), { colors: new Uint32Array([1, 2]) }, 5);
-    for (const ch of Object.values(s.channels)) {
-      ch.realloc = false;
-      ch.dirty.clear();
-      ch.scattered.clear();
-    }
-    s.edgeRankWanted = false;
-    expect(s.retintEdges(9)).toBe(2);
-    expect(Array.from(s.channels.edgeColor.data)).toEqual([9, 9, 1, 2, 9, 9]);
-    expect(s.channels.edgeColor.dirty.isEmpty).toBe(false);
-    expect(s.channels.edgeColor.realloc).toBe(false);
-    expect(s.edgeRankWanted).toBe(true);
-  });
-
-  it("a host colour clears the tint bit and new edges without colours take it", () => {
-    const s = new GraphStore();
-    s.setEdges(2, { indices: new Uint32Array(4), colors: new Uint32Array([1, 1, 2, 2]) });
-    expect(s.retintEdges(9)).toBe(0);
-    s.addEdges(new Uint32Array([2]), 3, { indices: new Uint32Array(2) }, 7);
-    expect(Array.from(s.channels.edgeColor.data)).toEqual([1, 1, 2, 2, 7, 7]);
-    expect(s.retintEdges(9)).toBe(1);
-    expect(Array.from(s.channels.edgeColor.data)).toEqual([1, 1, 2, 2, 9, 9]);
-    s.updateEdgesAt(new Uint32Array([2]), { colors: new Uint32Array([3, 3]) }, 9);
-    expect(s.retintEdges(4)).toBe(0);
-    s.addEdges(new Uint32Array([0]), 3, { indices: new Uint32Array(2) }, 4);
-    s.updateEdges({ colors: new Uint32Array([5, 5, 6, 6, 7, 7]) });
-    expect(s.retintEdges(8)).toBe(0);
-  });
-
-  it("the first colours given on add fill the other edges with the tint, and they follow it", () => {
-    const s = new GraphStore();
-    s.setEdges(2, { indices: new Uint32Array(4) });
-    s.addEdges(new Uint32Array([2]), 3, { indices: new Uint32Array(2), colors: new Uint32Array([3, 3]) }, 5);
-    expect(Array.from(s.channels.edgeColor.data)).toEqual([5, 5, 5, 5, 3, 3]);
-    expect(s.retintEdges(9)).toBe(2);
-    expect(Array.from(s.channels.edgeColor.data)).toEqual([9, 9, 9, 9, 3, 3]);
-  });
-
-  it("compact and set keep the tint mask right", () => {
-    const s = new GraphStore();
-    s.setEdges(3, { indices: new Uint32Array(6) });
-    s.updateEdgesAt(new Uint32Array([1]), { colors: new Uint32Array([1, 1]) }, 5);
-    s.compactEdges(new Uint32Array([0xffffffff, 0, 1]));
-    expect(s.retintEdges(9)).toBe(1);
-    expect(Array.from(s.channels.edgeColor.data)).toEqual([1, 1, 9, 9]);
-    s.setEdges(2, { indices: new Uint32Array(4) });
-    expect(s.retintEdges(4)).toBe(0);
+    expect(Array.from(s.looks.edges[0].entries(s.edgeState!))).toEqual([0]);
   });
 
   it("shrinks the scatter slot tables when the store resets", () => {
@@ -582,11 +518,11 @@ describe("GraphStore", () => {
     s.setNodes(100000, {});
     s.flagNodes(new Uint32Array([99999]), CONSTANTS.STATE_SELECTED, true);
     s.updateNodesAt(new Uint32Array([99998]), { colors: new Uint32Array([1]) });
-    expect(s.channels.nodeState.scattered.slotCapacity).toBeGreaterThanOrEqual(100000);
-    expect(s.channels.nodeColor.scattered.slotCapacity).toBeGreaterThanOrEqual(99999);
+    expect(s.channels.nodeState.scattered.capacity).toBeGreaterThanOrEqual(100000);
+    expect(s.channels.nodeColor.scattered.capacity).toBeGreaterThanOrEqual(99999);
     s.setNodes(10, {});
-    expect(s.channels.nodeState.scattered.slotCapacity).toBeLessThanOrEqual(10);
-    expect(s.channels.nodeColor.scattered.slotCapacity).toBeLessThanOrEqual(10);
+    expect(s.channels.nodeState.scattered.capacity).toBeLessThanOrEqual(10);
+    expect(s.channels.nodeColor.scattered.capacity).toBeLessThanOrEqual(10);
 
     s.setNodes(100000, {});
     s.flagNodes(new Uint32Array([99999]), CONSTANTS.STATE_SELECTED, true);
@@ -594,24 +530,210 @@ describe("GraphStore", () => {
     remap[0] = 0;
     remap[1] = 1;
     s.compactNodes(remap);
-    expect(s.channels.nodeState.scattered.slotCapacity).toBeLessThanOrEqual(2);
+    expect(s.channels.nodeState.scattered.capacity).toBeLessThanOrEqual(2);
 
     s.setEdges(50000, { indices: new Uint32Array(100000), styles: new Uint32Array(50000) });
     s.flagEdges(new Uint32Array([49999]), Flag.selected, true);
-    s.updateEdgesAt(new Uint32Array([49999]), { styles: new Uint32Array([1]) }, 0);
-    expect(s.edgeStateUploads.slotCapacity).toBeGreaterThanOrEqual(50000);
-    expect(s.channels.edgeStyle.scattered.slotCapacity).toBeGreaterThanOrEqual(50000);
+    s.updateEdgesAt(new Uint32Array([49999]), { styles: new Uint32Array([1]) });
+    expect(s.edgeStateChannel.scattered.capacity).toBeGreaterThanOrEqual(50000);
+    expect(s.channels.edgeStyle.scattered.capacity).toBeGreaterThanOrEqual(50000);
     s.setEdges(5, { indices: new Uint32Array(10), styles: new Uint32Array(5) });
-    expect(s.edgeStateUploads.slotCapacity).toBeLessThanOrEqual(5);
-    expect(s.channels.edgeStyle.scattered.slotCapacity).toBeLessThanOrEqual(5);
+    expect(s.edgeStateChannel.scattered.capacity).toBeLessThanOrEqual(5);
+    expect(s.channels.edgeStyle.scattered.capacity).toBeLessThanOrEqual(5);
 
     s.setEdges(50000, { indices: new Uint32Array(100000), styles: new Uint32Array(50000) });
     s.flagEdges(new Uint32Array([49999]), Flag.selected, true);
-    s.updateEdgesAt(new Uint32Array([49999]), { styles: new Uint32Array([1]) }, 0);
+    s.updateEdgesAt(new Uint32Array([49999]), { styles: new Uint32Array([1]) });
     const edgeRemap = new Uint32Array(50000).fill(0xffffffff);
     edgeRemap[0] = 0;
     s.compactEdges(edgeRemap);
-    expect(s.edgeStateUploads.slotCapacity).toBeLessThanOrEqual(1);
-    expect(s.channels.edgeStyle.scattered.slotCapacity).toBeLessThanOrEqual(1);
+    expect(s.edgeStateChannel.scattered.capacity).toBeLessThanOrEqual(1);
+    expect(s.channels.edgeStyle.scattered.capacity).toBeLessThanOrEqual(1);
+  });
+});
+
+const D = CONSTANTS.EDGE_FLAG_DIRECTED;
+const settle = (s: GraphStore) => {
+  for (const ch of Object.values(s.channels)) ch.realloc = false;
+};
+
+describe("GraphStore directed count", () => {
+  it("counts a removed edge once, however often it is hidden", () => {
+    const s = new GraphStore();
+    s.setEdges(3, { indices: new Uint32Array(6), styles: new Uint32Array([D, D, 0]) });
+    expect(s.directedEdges).toBe(2);
+    s.hideEdges(new Uint32Array([0]));
+    s.hideEdges(new Uint32Array([0]));
+    expect(s.directedEdges).toBe(1);
+    s.hideEdges(new Uint32Array([1, 1]));
+    expect(s.directedEdges).toBe(0);
+    expect(s.hasDirected).toBe(false);
+  });
+
+  it("keeps counting an edge hidden with a flag, which is not removed", () => {
+    const s = new GraphStore();
+    s.setEdges(2, { indices: new Uint32Array(4), styles: new Uint32Array([D, 0]) });
+    s.flagEdges(new Uint32Array([0]), Flag.hidden, true);
+    expect(s.hasDirected).toBe(true);
+  });
+
+  it("recounts on compact without the removed edges", () => {
+    const s = new GraphStore();
+    s.setEdges(3, { indices: new Uint32Array(6), styles: new Uint32Array([D, 0, D]) });
+    s.hideEdges(new Uint32Array([2]));
+    s.compactEdges(new Uint32Array([0, 1, 0xffffffff]));
+    expect(s.directedEdges).toBe(1);
+    s.hideEdges(new Uint32Array([0]));
+    s.compactEdges(new Uint32Array([0xffffffff, 0]));
+    expect(s.directedEdges).toBe(0);
+  });
+
+  it("counts a slot listed twice in one add once, and a restyle of a removed edge not at all", () => {
+    const s = new GraphStore();
+    s.setEdges(1, { indices: new Uint32Array(2), styles: new Uint32Array([0]) });
+    s.addEdges(new Uint32Array([1, 1]), 2, { indices: new Uint32Array(4), styles: new Uint32Array([D, D]) });
+    expect(s.directedEdges).toBe(1);
+    s.hideEdges(new Uint32Array([0]));
+    s.updateEdgesAt(new Uint32Array([0]), { styles: new Uint32Array([D]) });
+    expect(s.directedEdges).toBe(1);
+    s.addEdges(new Uint32Array([0]), 2, { indices: new Uint32Array(2), styles: new Uint32Array([D]) });
+    expect(s.directedEdges).toBe(2);
+  });
+});
+
+describe("GraphStore edge reload", () => {
+  it("edges.set at the same count reloads the edge buffer, with or without new ends", () => {
+    const s = new GraphStore();
+    s.setEdges(2, { indices: new Uint32Array([0, 1, 1, 0]) });
+    settle(s);
+    s.setEdges(2, { indices: new Uint32Array([1, 1, 0, 0]) });
+    expect(s.channels.edgeIdx.realloc).toBe(true);
+    expect(Array.from(s.channels.edgeIdx.data)).toEqual([1, 1, 0, 0]);
+    settle(s);
+    s.setEdges(2, { styles: new Uint32Array(2) });
+    expect(s.channels.edgeIdx.realloc).toBe(true);
+  });
+});
+
+describe("GraphStore edge colour word 0", () => {
+  it("fills the other edges with 0 when the first colours come with an add", () => {
+    const s = new GraphStore();
+    s.setEdges(2, { indices: new Uint32Array(4) });
+    s.addEdges(new Uint32Array([2]), 3, { indices: new Uint32Array(2), colors: new Uint32Array([5, 6]) });
+    expect(s.hasEdgeColors).toBe(true);
+    expect(Array.from(s.channels.edgeColor.data)).toEqual([0, 0, 0, 0, 5, 6]);
+  });
+
+  it("writes 0 for a new edge without colours among coloured edges", () => {
+    const s = new GraphStore();
+    s.setEdges(1, { indices: new Uint32Array(2), colors: new Uint32Array([5, 6]) });
+    s.addEdges(new Uint32Array([1]), 2, { indices: new Uint32Array(2) });
+    expect(Array.from(s.channels.edgeColor.data)).toEqual([5, 6, 0, 0]);
+  });
+
+  it("scatters a colour update back to 0 without a reload", () => {
+    const s = new GraphStore();
+    s.setEdges(2, { indices: new Uint32Array(4), colors: new Uint32Array([5, 6, 7, 8]) });
+    settle(s);
+    s.updateEdgesAt(new Uint32Array([1]), { colors: new Uint32Array([0, 0]) });
+    expect(Array.from(s.channels.edgeColor.data)).toEqual([5, 6, 0, 0]);
+    expect(s.channels.edgeColor.realloc).toBe(false);
+    expect(s.channels.edgeColor.scattered.count).toBe(1);
+  });
+
+  it("keeps colour word 0 through a compact", () => {
+    const s = new GraphStore();
+    s.setEdges(3, { indices: new Uint32Array(6), colors: new Uint32Array([0, 0, 5, 6, 0, 0]) });
+    s.hideEdges(new Uint32Array([1]));
+    s.compactEdges(new Uint32Array([0, 0xffffffff, 1]));
+    expect(Array.from(s.channels.edgeColor.data)).toEqual([0, 0, 0, 0]);
+  });
+});
+
+const R = 100;
+
+describe("GraphStore node removal and reserve", () => {
+  it("compact collapses an edge whose two ends were removed", () => {
+    const s = new GraphStore();
+    s.setNodes(3, {});
+    s.setEdges(2, { indices: new Uint32Array([0, 1, 1, 2]) });
+    s.hideEdges(s.removeNodes(new Uint32Array([0, 1])));
+    s.compactNodes(new Uint32Array([0xffffffff, 0xffffffff, 0]));
+    expect(Array.from(s.channels.edgeIdx.data)).toEqual([0, 0, 0, 0]);
+    expect(s.liveEdges).toBe(0);
+  });
+
+  it("an add inside the reserve is a scatter and leaves the rest of the reserve hidden", () => {
+    const s = new GraphStore(R);
+    s.setNodes(10, {});
+    expect(s.nodeCount).toBe(10 + R);
+    settle(s);
+    const added = Uint32Array.from({ length: R - 1 }, (_, k) => 10 + k);
+    s.addNodes(added, 10 + R - 1, {});
+    expect(Object.values(s.channels).some((ch) => ch.realloc)).toBe(false);
+    expect(s.channels.nodeState.scattered.count).toBe(R - 1);
+    expect(s.nodeCount).toBe(10 + R);
+    const st = s.channels.nodeState.data as Uint32Array;
+    expect(st[10 + R - 2]).toBe(0);
+    expect(st[10 + R - 1]! & CONSTANTS.STATE_HIDDEN).toBe(CONSTANTS.STATE_HIDDEN);
+  });
+
+  it("growing by the reserve keeps the nodes and hides the new slots", () => {
+    const s = new GraphStore(R);
+    s.setNodes(2, { colors: new Uint32Array([7, 8]) });
+    s.addNodes(Uint32Array.from({ length: R }, (_, k) => 2 + k), 2 + R, {});
+    settle(s);
+    s.growNodes(2 + R);
+    expect(s.nodeCount).toBe(2 + 2 * R);
+    expect(s.channels.nodeState.realloc).toBe(true);
+    expect(Array.from(s.channels.nodeColor.data.slice(0, 2))).toEqual([7, 8]);
+    const st = s.channels.nodeState.data as Uint32Array;
+    let hidden = 0;
+    for (let i = 0; i < st.length; i++) if ((st[i]! & CONSTANTS.STATE_HIDDEN) !== 0) hidden++;
+    expect(hidden).toBe(R);
+    expect(s.hiddenCount).toBe(0);
+  });
+  it("keeps exactly the reserve hidden after set, compact and a growth", () => {
+    for (const reserve of [0, 7]) {
+      const s = new GraphStore(reserve);
+      const tailHidden = () => {
+        const st = s.channels.nodeState.data as Uint32Array;
+        expect(s.nodeCount - s.nodeSlots).toBe(reserve);
+        expect(st.length).toBe(s.nodeCount);
+        for (let i = s.nodeSlots; i < s.nodeCount; i++) expect(st[i]! & CONSTANTS.STATE_HIDDEN).toBe(CONSTANTS.STATE_HIDDEN);
+      };
+      s.setNodes(5, {});
+      tailHidden();
+      s.removeNodes(new Uint32Array([1, 3]));
+      s.compactNodes(new Uint32Array([0, 0xffffffff, 1, 0xffffffff, 2]));
+      expect(s.nodeSlots).toBe(3);
+      tailHidden();
+      const added = Math.max(1, reserve);
+      expect(s.needsGrowth(3 + added - 1)).toBe(false);
+      expect(s.needsGrowth(3 + added)).toBe(true);
+      s.growNodes(3 + added);
+      s.addNodes(Uint32Array.from({ length: added }, (_, k) => 3 + k), 3 + added, {});
+      expect(s.nodeSlots).toBe(3 + added);
+      tailHidden();
+    }
+  });
+
+  it("does not grow for an add that reuses freed slots", () => {
+    const s = new GraphStore(0);
+    s.setNodes(3, {});
+    s.removeNodes(new Uint32Array([1]));
+    expect(s.needsGrowth(3)).toBe(false);
+    expect(s.needsGrowth(4)).toBe(true);
+    s.growNodes(4);
+    expect(s.nodeCount).toBe(4);
+  });
+
+  it("clamps the reserve so the node count never passes the node limit", () => {
+    expect(MAX_NODES).toBe(CONSTANTS.EDGE_END_MASK + 1);
+    expect(new GraphStore(100).withReserve(10)).toBe(110);
+    expect(new GraphStore(100).withReserve(MAX_NODES - 40)).toBe(MAX_NODES);
+    expect(new GraphStore(100).withReserve(MAX_NODES)).toBe(MAX_NODES);
+    expect(new GraphStore(2 ** 40).withReserve(1)).toBe(MAX_NODES);
+    expect(new GraphStore(0).withReserve(MAX_NODES)).toBe(MAX_NODES);
   });
 });

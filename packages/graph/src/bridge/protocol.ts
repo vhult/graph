@@ -6,8 +6,8 @@
 import type { GraphErrorCode } from "../api/errors";
 import type { ResolvedInput } from "../api/input";
 import type { ResolvedStyle } from "../api/style";
-import type { BenchmarkOptions, BenchmarkResult, CameraEasing, CameraView, DebugTune, GraphCaps, GraphInput, GraphStyle, Hit, IconSource, LabelSnapshot, PanEvent, RotateEvent, SelectEvent, WorldBounds, ZoomEvent } from "../api/types";
-import type { NodeArrays } from "../data/GraphStore";
+import type { BenchmarkOptions, CameraEasing, CameraView, DebugTune, GraphCaps, GraphInput, GraphStyle, Hit, IconSource, PanEvent, RotateEvent, SelectEvent, WorldBounds, ZoomEvent } from "../api/types";
+import type { EdgeArrays, NodeArrays } from "../data/GraphStore";
 
 export type DebugLevel = 0 | 1 | 2;
 
@@ -29,6 +29,7 @@ export interface InitOptions {
   style: ResolvedStyle;
   input: ResolvedInput;
   timeOrigin: number;
+  nodeReserve: number;
 }
 
 export type ToWorker =
@@ -59,11 +60,11 @@ export type ToWorker =
   | { t: "defineIcons"; id: number; icons: IconSource[] }
   | { t: "setIcons"; id: number; ids: Uint16Array; icons: IconSource[] }
   | { t: "removeIcons"; ids: Uint16Array }
-  | { t: "edges"; count: number; indices?: Uint32Array; styles?: Uint32Array; colors?: Uint32Array; labels?: string[] }
-  | { t: "addEdges"; indices: Uint32Array; count: number; ends: Uint32Array; styles?: Uint32Array; colors?: Uint32Array; labels?: string[] }
+  | ({ t: "edges"; count: number; labels?: string[] } & EdgeArrays)
+  | ({ t: "addEdges"; at: Uint32Array; count: number; labels?: string[] } & EdgeArrays)
   | { t: "removeEdges"; indices: Uint32Array }
-  | { t: "updateEdgesAt"; indices: Uint32Array; ends?: Uint32Array; styles?: Uint32Array; colors?: Uint32Array; labels?: string[] }
-  | { t: "updateEdges"; ends?: Uint32Array; styles?: Uint32Array; colors?: Uint32Array; labels?: string[] | null }
+  | ({ t: "updateEdgesAt"; at: Uint32Array; labels?: string[] } & EdgeArrays)
+  | ({ t: "updateEdges"; labels?: string[] | null } & EdgeArrays)
   | { t: "flagEdges"; indices: Uint32Array | null; flags: number; on: boolean }
   | { t: "compactEdges"; remap: Uint32Array }
   | { t: "nodeStream"; buffer: SharedArrayBuffer; count: number; positions: boolean; colors: boolean; zIndex: boolean }
@@ -89,13 +90,8 @@ export type FromWorker =
   | { t: "error"; code: GraphErrorCode; message: string; fatal: boolean }
   /** Fallback state snapshot when the state block is not shared. */
   | { t: "state"; data: Float64Array }
-  | { t: "benchmark"; id: number; result: BenchmarkResult }
-  | { t: "labelSnapshot"; id: number; snapshot: LabelSnapshot }
-  | { t: "snapshot"; id: number; blob?: Blob; code?: GraphErrorCode; message?: string }
-  | { t: "icons"; id: number; code?: GraphErrorCode; message?: string }
+  | { t: "reply"; id: number; value?: unknown; code?: GraphErrorCode; message?: string }
   | { t: "edgesRemoved"; id: number; edges: Uint32Array }
-  | { t: "queryAt"; id: number; hit: Hit }
-  | { t: "queryInside"; id: number; nodes?: Uint32Array; code?: GraphErrorCode; message?: string }
   | { t: HitEventName; hit: Hit }
   | GestureMessage
   | { t: "dragStart"; index: number; nodes: Uint32Array; x: number; y: number }

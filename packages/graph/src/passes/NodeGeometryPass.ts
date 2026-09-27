@@ -5,7 +5,7 @@
  */
 import { ENGINE_CONSTANTS } from "../data/Layouts";
 import type { ContractLayouts } from "../gpu/BindLayouts";
-import { Stage, type FrameContext, type RenderNode } from "../gpu/FrameGraph";
+import { PREMULTIPLIED, Stage, type FrameContext, type RenderNode } from "../gpu/FrameGraph";
 import { Lazy } from "../gpu/Lazy";
 import { createShaderModule } from "../gpu/ShaderModules";
 import type { IconAtlas } from "../icons/IconAtlas";
@@ -55,10 +55,6 @@ export class NodeGeometryPass implements RenderNode {
 
   static async create(device: GPUDevice, format: GPUTextureFormat, layouts: ContractLayouts): Promise<NodeGeometryPass> {
     const module = await createShaderModule(device, "passes/node_geometry.wgsl");
-    const blend: GPUBlendState = {
-      color: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
-      alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
-    };
     const V = GPUShaderStage.VERTEX;
     const F = GPUShaderStage.FRAGMENT;
     const variant = async (icons: boolean): Promise<Variant> => {
@@ -80,7 +76,7 @@ export class NodeGeometryPass implements RenderNode {
           label: `nodes/bucket${bucket}#${shapes}${icons ? "#icons" : ""}`,
           layout: pipelineLayout,
           vertex: { module, entryPoint: icons ? "vs_icons" : "vs", constants: { BUCKET: bucket, NODE_SHAPES: shapes } },
-          fragment: { module, entryPoint: icons ? "fs_icons" : "fs", targets: [{ format, blend }], constants: { NODE_SHAPES: shapes } },
+          fragment: { module, entryPoint: icons ? "fs_icons" : "fs", targets: [{ format, blend: PREMULTIPLIED }], constants: { NODE_SHAPES: shapes } },
           primitive: { topology: "triangle-strip" },
         });
       const byShapes = async (shapes: number) => {

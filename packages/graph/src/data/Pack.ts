@@ -28,20 +28,20 @@ const Float16 = (globalThis as { Float16Array?: Float16ArrayCtor }).Float16Array
 
 /**
  * Pack diameters into the `nodeSize` layout: low half = size (f16), high half =
- * icon colour index, kept from `previous[start + i]`. Uses native `Float16Array` when available.
+ * icon colour index, kept from `previous[i]`. Uses native `Float16Array` when available.
  */
-export function packNodeSizes(sizes: Float32Array, previous: Uint32Array, start = 0): Uint32Array {
+export function packNodeSizes(sizes: Float32Array, previous: Uint32Array): Uint32Array {
   const { SIZE_ICON_COLOR_SHIFT } = CONSTANTS;
   const n = sizes.length;
   const out = new Uint32Array(n);
-  const m = Math.max(0, Math.min(n, previous.length - start));
+  const m = Math.min(n, previous.length);
   if (Float16) {
     const h = new Float16(out.buffer, out.byteOffset, n * 2);
     for (let i = 0; i < n; i++) h[i * 2] = sizes[i]!;
     const hi = new Uint16Array(out.buffer, out.byteOffset, n * 2);
-    for (let i = 0; i < m; i++) hi[i * 2 + 1] = previous[start + i]! >>> SIZE_ICON_COLOR_SHIFT;
+    for (let i = 0; i < m; i++) hi[i * 2 + 1] = previous[i]! >>> SIZE_ICON_COLOR_SHIFT;
   } else {
-    for (let i = 0; i < n; i++) out[i] = (toHalfBits(sizes[i]!) | (i < m ? (previous[start + i]! >>> SIZE_ICON_COLOR_SHIFT) << SIZE_ICON_COLOR_SHIFT : 0)) >>> 0;
+    for (let i = 0; i < n; i++) out[i] = (toHalfBits(sizes[i]!) | (i < m ? (previous[i]! >>> SIZE_ICON_COLOR_SHIFT) << SIZE_ICON_COLOR_SHIFT : 0)) >>> 0;
   }
   return out;
 }

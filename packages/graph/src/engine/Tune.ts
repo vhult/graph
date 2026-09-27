@@ -19,10 +19,10 @@ export interface Tunable {
 export const DEFAULT_TUNE: Readonly<Tune> = { lodTargetPx: 2.5, maxOverdraw: 1.5, minLengthPx: 6, debug: 0, arrows: false };
 
 export function applyTune(t: Tune, d: DebugTune): void {
-  if (d.lodTargetPx !== undefined) t.lodTargetPx = Math.max(0, d.lodTargetPx);
-  if (d.edgeMaxOverdraw !== undefined) t.maxOverdraw = Math.max(0, d.edgeMaxOverdraw);
-  if (d.edgeMinLengthPx !== undefined) t.minLengthPx = Math.max(0, d.edgeMinLengthPx);
-  if (d.edgeMode !== undefined) t.debug = Math.max(0, EDGE_DEBUG_MODES.indexOf(d.edgeMode));
+  if (d.lodTargetPx !== undefined) t.lodTargetPx = d.lodTargetPx;
+  if (d.edgeMaxOverdraw !== undefined) t.maxOverdraw = d.edgeMaxOverdraw;
+  if (d.edgeMinLengthPx !== undefined) t.minLengthPx = d.edgeMinLengthPx;
+  if (d.edgeMode !== undefined) t.debug = EDGE_DEBUG_MODES.indexOf(d.edgeMode);
 }
 
 export function sameTune(a: Tune, b: Tune): boolean {

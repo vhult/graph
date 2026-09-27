@@ -1,11 +1,12 @@
 import type { ResolvedLook } from "../api/style";
 import { CONSTANTS, HOVER_PARAMS, LOOK_PARAMS, PICK_CONSTANTS } from "../data/Layouts";
+import type { LookList } from "../data/LookList";
 import { packRgba } from "../data/Pack";
-import type { Tunable, Tune } from "../engine/Tune";
+import type { Tune } from "../engine/Tune";
 import type { ContractLayouts } from "../gpu/BindLayouts";
-import type { FrameContext } from "../gpu/FrameGraph";
+import { PREMULTIPLIED, type FrameContext } from "../gpu/FrameGraph";
 import type { GraphBuffers } from "../gpu/GraphBuffers";
-import { Lazy, Variants } from "../gpu/Lazy";
+import { Lazy, Tuned } from "../gpu/Lazy";
 import { createShaderModule } from "../gpu/ShaderModules";
 import type { IconAtlas } from "../icons/IconAtlas";
 
@@ -21,19 +22,35 @@ const EDGE_LOOK_MASKS = [
 ] as const;
 const arrowKey = (t: Tune) => (t.arrows ? "1" : "0");
 
+interface EdgePipes {
+  edge: GPURenderPipeline;
+  look: GPURenderPipeline;
+  vertices: number;
+}
+const LOOK_NODES = 0;
+const LOOK_EDGES = 1;
+const LIST_BINDINGS = [
+  [1, 3],
+  [4, 5],
+] as const;
+
+interface LookDraw {
+  list: GPUBuffer;
+  count: number;
+  version: number;
+  group: GPUBindGroup | null;
+}
+
 interface LookSlot {
   readonly buffer: GPUBuffer;
   readonly data: ArrayBuffer;
   readonly f32: Float32Array;
   readonly u32: Uint32Array;
   look: ResolvedLook | null;
-  count: number;
-  group: GPUBindGroup | null;
-  edgeCount: number;
-  edgeGroup: GPUBindGroup | null;
+  readonly draws: readonly [LookDraw, LookDraw];
 }
 
-export class HoverPass implements Tunable {
+export class HoverPass {
   node = -1;
   edge = -1;
   readonly iconPipe: Lazy<GPURenderPipeline>;
@@ -51,41 +68,35 @@ export class HoverPass implements Tunable {
   private pixelRatio = 0;
   private hoverLook: ResolvedLook | false = false;
   private readonly looks: readonly [LookSlot, LookSlot];
-  private list: GPUBuffer;
-  private listRank: GPUBuffer | null = null;
+  private readonly listRanks: (GPUBuffer | null)[] = [null, null];
+  private readonly listLayouts: readonly [GPUBindGroupLayout, GPUBindGroupLayout];
   private lookShapes = false;
   private lookEdgeStyles = false;
   private lookPixelRatio = 0;
-  private edgeList: GPUBuffer;
-  private edgeListRank: GPUBuffer | null = null;
-  private readonly edgePipes = new Variants<GPURenderPipeline>();
-  private readonly edgeLookPipes = new Variants<GPURenderPipeline>();
-  private edgeVertices = 4;
 
   private constructor(
     private readonly device: GPUDevice,
     private readonly graph: GraphBuffers,
     private readonly layout: GPUBindGroupLayout,
     private readonly iconLayout: GPUBindGroupLayout,
-    private readonly lookLayout: GPUBindGroupLayout,
-    private readonly edgeLookLayout: GPUBindGroupLayout,
+    lookLayout: GPUBindGroupLayout,
+    edgeLookLayout: GPUBindGroupLayout,
     makeIconPipe: () => Promise<GPURenderPipeline>,
     private readonly nodePipe: GPURenderPipeline,
-    private readonly makeEdgePipe: (arrows: boolean) => Promise<GPURenderPipeline>,
-    private readonly makeEdgeLookPipe: (arrows: boolean) => Promise<GPURenderPipeline>,
+    readonly edgePipes: Tuned<EdgePipes>,
     private readonly lookPipe: GPURenderPipeline,
     private readonly retire: (b: GPUBuffer) => void,
   ) {
     this.iconPipe = new Lazy(makeIconPipe);
     this.params = device.createBuffer({ label: "hover/params", size: Math.ceil(HOVER_PARAMS.size / 16) * 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    this.listLayouts = [lookLayout, edgeLookLayout];
+    const draw = (): LookDraw => ({ list: this.createList(16), count: 0, version: -1, group: null });
     const slot = (name: string): LookSlot => {
       const data = new ArrayBuffer(LOOK_BYTES);
       const buffer = device.createBuffer({ label: `hover/look.${name}`, size: LOOK_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-      return { buffer, data, f32: new Float32Array(data), u32: new Uint32Array(data), look: null, count: 0, group: null, edgeCount: 0, edgeGroup: null };
+      return { buffer, data, f32: new Float32Array(data), u32: new Uint32Array(data), look: null, draws: [draw(), draw()] };
     };
     this.looks = [slot("selected"), slot("focused")];
-    this.list = this.createList(16);
-    this.edgeList = this.createList(16);
   }
 
   static async create(device: GPUDevice, format: GPUTextureFormat, contract: ContractLayouts, graph: GraphBuffers, tune: Tune, retire: (b: GPUBuffer) => void): Promise<HoverPass> {
@@ -126,40 +137,22 @@ export class HoverPass implements Tunable {
       ],
     });
     const layoutOf = (l: GPUBindGroupLayout) => device.createPipelineLayout({ bindGroupLayouts: [contract.frame, contract.graph, l] });
-    const blend: GPUBlendState = {
-      color: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
-      alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
-    };
     const make = (vs: string, fs: string, l = layout, constants: Record<string, number> = {}) =>
       device.createRenderPipelineAsync({
         label: `hover/${vs}`,
         layout: layoutOf(l),
         vertex: { module, entryPoint: vs, constants },
-        fragment: { module, entryPoint: fs, targets: [{ format, blend }], constants },
+        fragment: { module, entryPoint: fs, targets: [{ format, blend: PREMULTIPLIED }], constants },
         primitive: { topology: "triangle-strip" },
       });
     const makeIconPipe = () => make("node_vs_icons", "node_fs_icons", iconLayout);
-    const makeEdgePipe = (arrows: boolean) => make("edge_vs", "edge_fs", layout, { EDGE_ARROWS: arrows ? 1 : 0 });
-    const makeEdgeLookPipe = (arrows: boolean) => make("edge_look_vs", "edge_look_fs", edgeLookLayout, { EDGE_ARROWS: arrows ? 1 : 0 });
+    const edgePipes = new Tuned(arrowKey, (t) =>
+      Promise.all([make("edge_vs", "edge_fs", layout, { EDGE_ARROWS: t.arrows ? 1 : 0 }), make("edge_look_vs", "edge_look_fs", edgeLookLayout, { EDGE_ARROWS: t.arrows ? 1 : 0 })]).then(([edge, look]) => ({ edge, look, vertices: t.arrows ? 10 : 4 })),
+    );
     const [nodePipe, lookPipe] = await Promise.all([make("node_vs", "node_fs"), make("look_vs", "look_fs", lookLayout)]);
-    const pass = new HoverPass(device, graph, layout, iconLayout, lookLayout, edgeLookLayout, makeIconPipe, nodePipe, makeEdgePipe, makeEdgeLookPipe, lookPipe, retire);
-    await pass.loadTune(tune);
-    pass.useTune(tune);
-    return pass;
-  }
-
-  loadTune(t: Tune): Promise<unknown> {
-    return Promise.all([this.edgePipes.load(arrowKey(t), () => this.makeEdgePipe(t.arrows)), this.edgeLookPipes.load(arrowKey(t), () => this.makeEdgeLookPipe(t.arrows))]);
-  }
-
-  hasTune(t: Tune): boolean {
-    return this.edgePipes.get(arrowKey(t)) !== null && this.edgeLookPipes.get(arrowKey(t)) !== null;
-  }
-
-  useTune(t: Tune): void {
-    this.edgePipes.use(arrowKey(t));
-    this.edgeLookPipes.use(arrowKey(t));
-    this.edgeVertices = t.arrows ? 10 : 4;
+    await edgePipes.loadTune(tune);
+    edgePipes.useTune(tune);
+    return new HoverPass(device, graph, layout, iconLayout, lookLayout, edgeLookLayout, makeIconPipe, nodePipe, edgePipes, lookPipe, retire);
   }
 
   setHoverLook(look: ResolvedLook | false): void {
@@ -179,46 +172,15 @@ export class HoverPass implements Tunable {
     this.writeLooks();
   }
 
-  setLookList(list: Uint32Array, selected: number, focused: number): void {
-    const total = selected + focused;
-    if (total * 4 > this.list.size) {
-      this.retire(this.list);
-      this.list = this.createList(total * 2);
-      this.listRank = null;
-    }
-    if (total > 0) this.device.queue.writeBuffer(this.list, 0, list, 0, total);
-    this.looks[0].count = selected;
-    this.looks[1].count = focused;
-    const at = this.looks[1].u32;
-    if (at[F(L.offset)] !== selected) {
-      at[F(L.offset)] = selected;
-      this.device.queue.writeBuffer(this.looks[1].buffer, 0, this.looks[1].data);
+  syncLists(looks: { readonly nodes: readonly [LookList, LookList]; readonly edges: readonly [LookList, LookList] }): void {
+    for (let k = 0; k < 2; k++) {
+      this.setList(LOOK_NODES, k, looks.nodes[k]!);
+      this.setList(LOOK_EDGES, k, looks.edges[k]!);
     }
   }
 
-  setEdgeLookList(list: Uint32Array, selected: number, focused: number): void {
-    const total = selected + focused;
-    if (total * 4 > this.edgeList.size) {
-      this.retire(this.edgeList);
-      this.edgeList = this.createList(total * 2);
-      this.edgeListRank = null;
-    }
-    if (total > 0) this.device.queue.writeBuffer(this.edgeList, 0, list, 0, total);
-    this.looks[0].edgeCount = selected;
-    this.looks[1].edgeCount = focused;
-    const at = this.looks[1].u32;
-    if (at[F(L.edgeOffset)] !== selected) {
-      at[F(L.edgeOffset)] = selected;
-      this.device.queue.writeBuffer(this.looks[1].buffer, 0, this.looks[1].data);
-    }
-  }
-
-  get lookCount(): number {
-    return this.looks[0].count + this.looks[1].count;
-  }
-
-  get edgeLookCount(): number {
-    return this.looks[0].edgeCount + this.looks[1].edgeCount;
+  private lookCount(kind: number): number {
+    return this.looks[0].draws[kind]!.count + this.looks[1].draws[kind]!.count;
   }
 
   syncLooks(shapes: boolean, edgeStyles: boolean, pixelRatio: number): void {
@@ -258,7 +220,7 @@ export class HoverPass implements Tunable {
   }
 
   encodeNode(pass: GPURenderPassEncoder, ctx: FrameContext): void {
-    if (this.lookCount > 0) this.encodeLooks(pass, ctx);
+    if (this.lookCount(LOOK_NODES) > 0) this.encodeList(LOOK_NODES, pass, ctx);
     if (!this.hoverLook || this.node < 0 || this.node >= ctx.nodeCount) return;
     const icons = ctx.icons;
     const iconPipe = icons ? this.iconPipe.value : null;
@@ -267,59 +229,50 @@ export class HoverPass implements Tunable {
   }
 
   encodeEdge(pass: GPURenderPassEncoder, ctx: FrameContext): void {
-    if (this.edgeLookCount > 0) this.encodeEdgeLooks(pass, ctx);
+    if (this.lookCount(LOOK_EDGES) > 0) this.encodeList(LOOK_EDGES, pass, ctx);
     if (!this.hoverLook || this.edge < 0 || this.edge >= ctx.edgeCount) return;
-    this.draw(pass, ctx, this.edgePipes.value!, this.edgeVertices, 1, this.bindGroup());
+    const edge = this.edgePipes.value!;
+    this.draw(pass, ctx, edge.edge, edge.vertices, 1, this.bindGroup());
   }
 
-  private encodeEdgeLooks(pass: GPURenderPassEncoder, ctx: FrameContext): void {
-    const rank = this.graph.edgeRank;
-    if (ctx.nodeCount === 0 || ctx.edgeCount === 0 || !rank) return;
-    const looks = this.looks;
-    if (rank !== this.edgeListRank) {
-      this.edgeListRank = rank;
-      looks[0].edgeGroup = null;
-      looks[1].edgeGroup = null;
+  private setList(kind: number, k: number, l: LookList): void {
+    const d = this.looks[k]!.draws[kind]!;
+    if (d.version === l.version) return;
+    d.version = l.version;
+    d.count = l.count;
+    if (l.count * 4 > d.list.size) {
+      this.retire(d.list);
+      d.list = this.createList(l.count * 2);
+      d.group = null;
     }
-    const pipe = this.edgeLookPipes.value!;
-    for (let k = 0; k < looks.length; k++) {
-      const s = looks[k]!;
-      if (s.edgeCount === 0) continue;
-      s.edgeGroup ??= this.device.createBindGroup({
-        label: "group2/hover.edgeLooks",
-        layout: this.edgeLookLayout,
-        entries: [
-          { binding: 2, resource: { buffer: s.buffer } },
-          { binding: 4, resource: { buffer: rank } },
-          { binding: 5, resource: { buffer: this.edgeList } },
-        ],
-      });
-      this.draw(pass, ctx, pipe, this.edgeVertices, s.edgeCount, s.edgeGroup);
-    }
+    if (l.count > 0) this.device.queue.writeBuffer(d.list, 0, l.list, 0, l.count);
   }
 
-  private encodeLooks(pass: GPURenderPassEncoder, ctx: FrameContext): void {
-    if (ctx.nodeCount === 0) return;
-    const rank = this.graph.rank;
+  private encodeList(kind: number, pass: GPURenderPassEncoder, ctx: FrameContext): void {
+    const rank: GPUBuffer | null = kind === LOOK_NODES ? this.graph.rank : this.graph.edgeRank;
+    if (ctx.nodeCount === 0 || rank === null || (kind === LOOK_EDGES && ctx.edgeCount === 0)) return;
     const looks = this.looks;
-    if (rank !== this.listRank) {
-      this.listRank = rank;
-      looks[0].group = null;
-      looks[1].group = null;
+    if (rank !== this.listRanks[kind]) {
+      this.listRanks[kind] = rank;
+      looks[0].draws[kind]!.group = null;
+      looks[1].draws[kind]!.group = null;
     }
+    const pipe = kind === LOOK_NODES ? this.lookPipe : this.edgePipes.value!.look;
+    const vertices = kind === LOOK_NODES ? 4 : this.edgePipes.value!.vertices;
     for (let k = 0; k < looks.length; k++) {
       const s = looks[k]!;
-      if (s.count === 0) continue;
-      s.group ??= this.device.createBindGroup({
+      const d = s.draws[kind]!;
+      if (d.count === 0) continue;
+      d.group ??= this.device.createBindGroup({
         label: "group2/hover.looks",
-        layout: this.lookLayout,
+        layout: this.listLayouts[kind]!,
         entries: [
-          { binding: 1, resource: { buffer: rank } },
+          { binding: LIST_BINDINGS[kind]![0], resource: { buffer: rank } },
           { binding: 2, resource: { buffer: s.buffer } },
-          { binding: 3, resource: { buffer: this.list } },
+          { binding: LIST_BINDINGS[kind]![1], resource: { buffer: d.list } },
         ],
       });
-      this.draw(pass, ctx, this.lookPipe, 4, s.count, s.group);
+      this.draw(pass, ctx, pipe, vertices, d.count, d.group);
     }
   }
 
@@ -398,8 +351,9 @@ export class HoverPass implements Tunable {
 
   destroy(): void {
     this.params.destroy();
-    this.list.destroy();
-    this.edgeList.destroy();
-    for (const s of this.looks) s.buffer.destroy();
+    for (const s of this.looks) {
+      s.buffer.destroy();
+      for (const d of s.draws) d.list.destroy();
+    }
   }
 }

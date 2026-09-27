@@ -172,90 +172,50 @@ export type GesturePhase = "start" | "move" | "end";
 
 // @public
 export class Graph {
-    readonly camera: {
-        fit: (opts?: CameraFitOptions) => void;
-        set: (view: Partial<CameraView>, anim?: CameraAnimOptions) => void;
-        get: () => CameraView;
-        rotate: (angle: number, opts?: CameraRotateOptions) => void;
-        limits: (l: CameraLimits) => void;
-        toWorld: (x: number, y: number, out?: {
-            x: number;
-            y: number;
-        }) => {
-            x: number;
-            y: number;
-        };
-        toScreen: (x: number, y: number, out?: {
-            x: number;
-            y: number;
-        }) => {
-            x: number;
-            y: number;
-        };
-    };
-    readonly canvas: {
-        resize: (width: number, height: number) => void;
-        render: () => void;
-        snapshot: (type?: string) => Promise<Blob>;
-    };
+    readonly camera: GraphCamera;
+    readonly canvas: GraphCanvas;
     readonly caps: GraphCaps;
     static create(canvas: HTMLCanvasElement, options?: GraphOptions): Promise<Graph>;
-    readonly debug: {
-        open: () => void;
-        close: () => void;
-        toggle: () => void;
-        isOpen: () => boolean;
-        expand: (expanded?: boolean) => void;
-        record: () => Promise<DebugRecording>;
-        stop: () => void;
-        benchmark: (options: BenchmarkOptions) => Promise<BenchmarkResult>;
-        labelSnapshot: () => Promise<LabelSnapshot>;
-        tune: (tune: DebugTune) => void;
-    };
+    readonly debug: GraphDebug;
     destroy(): void;
-    readonly edges: {
-        set: (data: EdgeData, opts?: CopyOption) => void;
-        add: (data: EdgeData, opts?: CopyOption) => Uint32Array;
-        remove: (indices: Uint32Array | number[]) => void;
-        update: (indices: Uint32Array, data: EdgeUpdate, opts?: CopyOption) => void;
-        updateAll: (data: EdgeUpdate, opts?: CopyOption) => void;
-        flag: (target: Uint32Array | "all", flags: number, on: boolean) => void;
-        clear: () => void;
-        compact: () => Uint32Array;
-        readonly count: number;
-        readonly slots: number;
-    };
-    readonly icons: {
-        define: (sources: readonly IconSource[]) => Promise<void>;
-        add: (sources: readonly IconSource[]) => Promise<Uint16Array>;
-        replace: (id: number, source: IconSource) => Promise<void>;
-        remove: (ids: readonly number[] | Uint16Array) => void;
-    };
-    readonly input: {
-        set: (partial: GraphInput) => void;
-    };
-    readonly nodes: {
-        set: (data: NodeData, opts?: CopyOption) => void;
-        add: (data: NodeData, opts?: CopyOption) => Uint32Array;
-        remove: (indices: Uint32Array | number[]) => void;
-        update: (indices: Uint32Array, data: NodeUpdate, opts?: CopyOption) => void;
-        updateAll: (data: NodeUpdate, opts?: CopyOption) => void;
-        stream: (channels: NodeStreamChannels) => NodeStream;
-        flag: (target: Uint32Array | "all", flags: number, on: boolean) => void;
-        clear: () => void;
-        compact: () => Uint32Array;
-        readonly count: number;
-        readonly slots: number;
-    };
+    readonly edges: GraphEdges;
+    readonly icons: GraphIcons;
+    readonly input: GraphInputApi;
+    readonly nodes: GraphNodes;
     on<K extends keyof GraphEvents>(event: K, fn: (payload: GraphEvents[K]) => void): () => void;
-    readonly query: {
-        at: (x: number, y: number) => Promise<Hit>;
-        inside: (shape: Rect | Polygon) => Promise<Uint32Array>;
-    };
+    readonly query: GraphQuery;
     stats(out?: GraphStats): GraphStats;
-    readonly style: {
-        set: (style: GraphStyle) => void;
+    readonly style: GraphStyleApi;
+}
+
+// @public
+export interface GraphCamera {
+    fit(opts?: CameraFitOptions): void;
+    get(): CameraView;
+    limits(l: CameraLimits): void;
+    rotate(angle: number, opts?: CameraRotateOptions): void;
+    set(view: Partial<CameraView>, anim?: CameraAnimOptions): void;
+    toScreen(x: number, y: number, out?: {
+        x: number;
+        y: number;
+    }): {
+        x: number;
+        y: number;
     };
+    toWorld(x: number, y: number, out?: {
+        x: number;
+        y: number;
+    }): {
+        x: number;
+        y: number;
+    };
+}
+
+// @public
+export interface GraphCanvas {
+    render(): void;
+    resize(width: number, height: number): void;
+    snapshot(type?: string): Promise<Blob>;
 }
 
 // @public
@@ -273,6 +233,34 @@ export interface GraphCaps {
     sharedMemory: boolean;
     subgroups: boolean;
     timestampQuery: boolean;
+}
+
+// @public
+export interface GraphDebug {
+    benchmark(options: BenchmarkOptions): Promise<BenchmarkResult>;
+    close(): void;
+    expand(expanded?: boolean): void;
+    isOpen(): boolean;
+    labelSnapshot(): Promise<LabelSnapshot>;
+    open(): void;
+    record(): Promise<DebugRecording>;
+    stop(): void;
+    toggle(): void;
+    tune(tune: DebugTune): void;
+}
+
+// @public
+export interface GraphEdges {
+    add(data: EdgeData, opts?: CopyOption): Uint32Array;
+    clear(): void;
+    compact(): Uint32Array;
+    readonly count: number;
+    flag(target: Uint32Array | "all", flags: number, on: boolean): void;
+    remove(indices: Uint32Array | number[]): void;
+    set(data: EdgeData, opts?: CopyOption): void;
+    readonly slots: number;
+    update(indices: Uint32Array, data: EdgeUpdate, opts?: CopyOption): void;
+    updateAll(data: EdgeUpdate, opts?: CopyOption): void;
 }
 
 // @public
@@ -305,6 +293,14 @@ export interface GraphEvents {
 }
 
 // @public
+export interface GraphIcons {
+    add(sources: readonly IconSource[]): Promise<Uint16Array>;
+    define(sources: readonly IconSource[]): Promise<void>;
+    remove(ids: readonly number[] | Uint16Array): void;
+    replace(id: number, source: IconSource): Promise<void>;
+}
+
+// @public
 export interface GraphInput {
     drag?: Mode;
     edgePickRadius?: number;
@@ -323,11 +319,38 @@ export interface GraphInput {
 }
 
 // @public
+export interface GraphInputApi {
+    set(partial: GraphInput): void;
+}
+
+// @public
+export interface GraphNodes {
+    add(data: NodeData, opts?: CopyOption): Uint32Array;
+    clear(): void;
+    compact(): Uint32Array;
+    readonly count: number;
+    flag(target: Uint32Array | "all", flags: number, on: boolean): void;
+    remove(indices: Uint32Array | number[]): void;
+    set(data: NodeData, opts?: CopyOption): void;
+    readonly slots: number;
+    stream(channels: NodeStreamChannels): NodeStream;
+    update(indices: Uint32Array, data: NodeUpdate, opts?: CopyOption): void;
+    updateAll(data: NodeUpdate, opts?: CopyOption): void;
+}
+
+// @public
 export interface GraphOptions {
     autoResize?: boolean;
     input?: GraphInput;
+    nodeReserve?: number;
     pixelRatio?: number;
     style?: GraphStyle;
+}
+
+// @public
+export interface GraphQuery {
+    at(x: number, y: number): Promise<Hit>;
+    inside(shape: Rect | Polygon): Promise<Uint32Array>;
 }
 
 // @public
@@ -383,6 +406,11 @@ export interface GraphStyle {
         fill?: RGBA;
         stroke?: RGBA;
     };
+}
+
+// @public
+export interface GraphStyleApi {
+    set(style: GraphStyle): void;
 }
 
 // @public

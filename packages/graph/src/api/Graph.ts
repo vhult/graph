@@ -5,7 +5,7 @@
 import { InputRing } from "../bridge/InputRing";
 import { StreamSlots } from "../bridge/StreamSlots";
 import { WORKER_EVENTS, type FromWorker, type ToWorker } from "../bridge/protocol";
-import type { NodeArrays } from "../data/GraphStore";
+import type { EdgeArrays, NodeArrays } from "../data/GraphStore";
 import { createStateBuffer, STATE_SLOT } from "../bridge/SharedState";
 import { Camera2D } from "../camera/Camera2D";
 import { DebugOverlay } from "./DebugOverlay";
@@ -13,10 +13,11 @@ import { errorFromCode, GraphError, UnsupportedError } from "./errors";
 import { copyInput, DEFAULT_INPUT, mergeInput, type ResolvedInput } from "./input";
 import { PointerInput, type InputSink } from "./PointerInput";
 import { NO_INDEX, Slots } from "./Slots";
-import { CONSTANTS, NODE_RESERVE } from "../data/Layouts";
+import { CONSTANTS, MAX_NODES } from "../data/Layouts";
 import { resolveStyle } from "./style";
 import { Flag } from "./types";
 import { packShape } from "../data/QueryShape";
+import { EDGE_DEBUG_MODES } from "../engine/Tune";
 import type {
   BenchmarkOptions,
   BenchmarkResult,
@@ -28,8 +29,17 @@ import type {
   CopyOption,
   DebugRecording,
   DebugTune,
+  GraphCamera,
+  GraphCanvas,
   GraphCaps,
+  GraphDebug,
+  GraphEdges,
   GraphEvents,
+  GraphIcons,
+  GraphInputApi,
+  GraphNodes,
+  GraphQuery,
+  GraphStyleApi,
   GraphInput,
   GraphOptions,
   GraphStats,
@@ -50,7 +60,7 @@ import type {
 
 const DEFAULT_FIT_PADDING = 24;
 const FLAG_BITS = Flag.selected | Flag.dimmed | Flag.hidden | Flag.focused;
-const MAX_NODES = CONSTANTS.EDGE_END_MASK + 1 - NODE_RESERVE;
+const DEFAULT_NODE_RESERVE = 100;
 
 type Listener<K extends keyof GraphEvents> = (payload: GraphEvents[K]) => void;
 
@@ -64,6 +74,8 @@ export class Graph {
     if (typeof canvas.transferControlToOffscreen !== "function") {
       throw new UnsupportedError("offscreen-canvas-unavailable", "OffscreenCanvas is not supported in this browser.");
     }
+    const nodeReserve = options.nodeReserve ?? DEFAULT_NODE_RESERVE;
+    if (!Number.isInteger(nodeReserve) || nodeReserve < 0) throw new GraphError("invalid-argument", `Graph.create: nodeReserve must be an integer >= 0, got ${nodeReserve}`);
 
     const shared = typeof SharedArrayBuffer !== "undefined" && globalThis.crossOriginIsolated === true;
     const ring = shared ? InputRing.create() : null;
@@ -86,6 +98,7 @@ export class Graph {
         style: resolveStyle(options.style),
         input,
         timeOrigin: performance.timeOrigin,
+        nodeReserve,
       },
     };
 
@@ -109,23 +122,16 @@ export class Graph {
   }
 
   /** Camera: view, fit, rotation, limits and coordinate conversion. */
-  readonly camera = {
-    /** Frames every node, a list of nodes or a world rectangle. */
+  readonly camera: GraphCamera = {
     fit: (opts: CameraFitOptions = {}): void => this.fitImpl(opts),
-    /** Moves the camera, animated when a duration is given. */
     set: (view: Partial<CameraView>, anim?: CameraAnimOptions): void => this.setViewImpl(view, anim),
-    /** Returns the last drawn view, at most one frame old. */
     get: (): CameraView => this.cssView(this.state[STATE_SLOT.CAMERA_X]!, this.state[STATE_SLOT.CAMERA_Y]!, this.state[STATE_SLOT.CAMERA_ZOOM]!, this.state[STATE_SLOT.CAMERA_ROTATION]!),
-    /** Turns the view by an angle in radians around a canvas point. */
     rotate: (angle: number, opts: CameraRotateOptions = {}): void => this.rotateImpl(angle, opts),
-    /** Sets the zoom range and the world bounds the camera can reach. */
     limits: (l: CameraLimits): void => this.limitsImpl(l),
-    /** Converts a canvas point in CSS px to world units. */
     toWorld: (x: number, y: number, out: { x: number; y: number } = { x: 0, y: 0 }): { x: number; y: number } => {
       this.publishedCamera().screenToWorld(x, y, out);
       return out;
     },
-    /** Converts a world point to canvas CSS px. */
     toScreen: (x: number, y: number, out: { x: number; y: number } = { x: 0, y: 0 }): { x: number; y: number } => {
       this.publishedCamera().worldToScreen(x, y, out);
       return out;
@@ -133,76 +139,55 @@ export class Graph {
   };
 
   /** Nodes: set, add, remove, update, flag and stream node channels. */
-  readonly nodes = this.nodesApi();
+  readonly nodes: GraphNodes = this.nodesApi();
 
   /** Edges: set, add, remove, update and flag edge channels. */
-  readonly edges = this.edgesApi();
+  readonly edges: GraphEdges = this.edgesApi();
 
   /** Style: the look of the graph. */
-  readonly style = {
-    /** Changes part of the look; fields left out keep their value. */
+  readonly style: GraphStyleApi = {
     set: (style: GraphStyle): void => this.send({ t: "style", style }),
   };
 
   /** Input: interactions and picking. */
-  readonly input = {
-    /** Changes part of the interaction settings; fields left out keep their value. */
+  readonly input: GraphInputApi = {
     set: (partial: GraphInput): void => this.setInputImpl(partial),
   };
 
   /** Icons: the icon set nodes draw from. */
-  readonly icons = {
-    /** Replaces the whole icon set; an icon's id is its position in the list. */
+  readonly icons: GraphIcons = {
     define: (sources: readonly IconSource[]): Promise<void> => this.defineIconsImpl(sources),
-    /** Adds icons and resolves with their ids. */
     add: (sources: readonly IconSource[]): Promise<Uint16Array> => this.addIconsImpl(sources),
-    /** Swaps the shape behind an icon id. */
     replace: (id: number, source: IconSource): Promise<void> => this.replaceIconImpl(id, source),
-    /** Removes icons; nodes that used them show no icon. */
     remove: (ids: readonly number[] | Uint16Array): void => this.removeIconsImpl(ids),
   };
 
   /** Query: what is at a point or inside a shape. */
-  readonly query = {
-    /** Resolves with what is at a canvas point in CSS px. */
+  readonly query: GraphQuery = {
     at: (x: number, y: number): Promise<Hit> => this.queryAtImpl(x, y),
-    /** Resolves with the nodes inside a canvas box or polygon. */
     inside: (shape: Rect | Polygon): Promise<Uint32Array> => this.queryInsideImpl(shape),
   };
 
   /** Canvas: size, frames and snapshots. */
-  readonly canvas = {
-    /** Sets the canvas size in CSS px. */
+  readonly canvas: GraphCanvas = {
     resize: (width: number, height: number): void =>
       this.send({ t: "resize", width: width * this.pixelRatio, height: height * this.pixelRatio, pixelRatio: this.pixelRatio }),
-    /** Draws one frame now. */
     render: (): void => this.send({ t: "render" }),
-    /** Resolves with an image of the current frame. */
     snapshot: (type = "image/png"): Promise<Blob> => this.snapshotImpl(type),
   };
 
   /** Debug: the overlay, recordings, benchmarks and engine tuning. */
-  readonly debug = {
-    /** Opens the debug overlay. */
+  readonly debug: GraphDebug = {
     open: (): void => this.overlay().show(),
-    /** Closes the debug overlay. */
     close: (): void => this.debugOverlay?.hide(),
-    /** Opens or closes the debug overlay. */
     toggle: (): void => (this.debugOverlay?.open ? this.debugOverlay.hide() : this.overlay().show()),
-    /** Returns whether the debug overlay is open. */
     isOpen: (): boolean => this.debugOverlay?.open ?? false,
-    /** Expands or collapses the debug overlay. */
     expand: (expanded = true): void => this.overlay().setExpanded(expanded),
-    /** Starts a recording and resolves with it when stopped. */
     record: (): Promise<DebugRecording> => (this.destroyed ? Promise.reject(new GraphError("destroyed", "Graph destroyed")) : this.overlay().record()),
-    /** Stops the recording. */
     stop: (): void => this.debugOverlay?.stopRecord(),
-    /** Plays a camera path and resolves with every frame's timings. */
     benchmark: (options: BenchmarkOptions): Promise<BenchmarkResult> => this.benchmarkImpl(options),
-    /** Resolves with the candidates and decisions of the next label placement. */
     labelSnapshot: (): Promise<LabelSnapshot> => this.labelSnapshotImpl(),
-    /** Sets engine tuning; not stable API. */
-    tune: (tune: DebugTune): void => this.send({ t: "tune", tune }),
+    tune: (tune: DebugTune): void => this.send({ t: "tune", tune: checkTune(tune) }),
   };
 
   private debugOverlay: DebugOverlay | null = null;
@@ -217,15 +202,10 @@ export class Graph {
   private logBase = 0;
   private readonly edgeLog: (Uint32Array | null)[] = [];
   private destroyed = false;
-  private benchSeq = 0;
-  private benchPending: { id: number; resolve: (r: BenchmarkResult) => void; reject: (e: Error) => void } | null = null;
-  private readonly snapshotPending = new Map<number, { resolve: (s: LabelSnapshot) => void; reject: (e: Error) => void }>();
-  private readonly iconsPending = new Map<number, { resolve: () => void; reject: (e: Error) => void }>();
-  private iconSlots = new Slots();
-  private readonly shotPending = new Map<number, { resolve: (b: Blob) => void; reject: (e: Error) => void }>();
-  private querySeq = 0;
-  private readonly atPending = new Map<number, { resolve: (h: Hit) => void; reject: (e: Error) => void }>();
-  private readonly insidePending = new Map<number, { resolve: (n: Uint32Array) => void; reject: (e: Error) => void }>();
+  private replySeq = 0;
+  private benchId = 0;
+  private readonly replies = new Map<number, { resolve: (value: never) => void; reject: (e: Error) => void }>();
+  private readonly iconSlots = new Slots();
   private readonly listeners: { [K in keyof GraphEvents]: Set<Listener<K>> } = {
     error: new Set(),
     hover: new Set(),
@@ -282,32 +262,21 @@ export class Graph {
 
   // ---- data ---------------------------------------------------------------------
 
-  private nodesApi() {
+  private nodesApi(): GraphNodes {
     const graph = this;
     return {
-      /** Starts over with these nodes; every edge is removed. */
       set: (data: NodeData, opts?: CopyOption): void => this.setNodesImpl(data, opts),
-      /** Adds nodes and returns their indices. */
       add: (data: NodeData, opts?: CopyOption): Uint32Array => this.addNodesImpl(data, opts),
-      /** Removes nodes and their edges. */
       remove: (indices: Uint32Array | number[]): void => this.removeNodesImpl(indices),
-      /** Changes channels of the listed nodes. */
       update: (indices: Uint32Array, data: NodeUpdate, opts?: CopyOption): void => this.updateAtImpl(indices, data, opts),
-      /** Changes channels of every node slot. */
       updateAll: (data: NodeUpdate, opts?: CopyOption): void => this.updateAllImpl(data, opts),
-      /** Returns a buffer the host writes node channels into every frame. */
       stream: (channels: NodeStreamChannels): NodeStream => this.streamImpl(channels),
-      /** Turns flags on or off for the listed nodes or all of them. */
       flag: (target: Uint32Array | "all", flags: number, on: boolean): void => this.flagImpl(target, flags, on),
-      /** Removes every node and every edge. */
       clear: (): void => this.setNodesImpl({ count: 0 }),
-      /** Packs live nodes into the first slots and returns the old-to-new index table. */
       compact: (): Uint32Array => this.compactNodesImpl(),
-      /** Number of live nodes. */
       get count(): number {
         return graph.nodeSlots.count;
       },
-      /** Number of node slots, live plus freed. */
       get slots(): number {
         return graph.nodeSlots.slots;
       },
@@ -351,12 +320,9 @@ export class Graph {
   }
 
   private removeNodesImpl(list: Uint32Array | number[]): void {
-    if (list instanceof Uint32Array && isDetached(list.buffer)) throw new GraphError("detached-array", "nodes.remove: indices are detached (they were transferred earlier)");
-    if (list.length === 0) return;
     const t0 = this.apiStart();
-    this.nodeSlots.check(list, "nodes.remove");
-    const indices = Uint32Array.from(list);
-    this.nodeSlots.release(indices);
+    const indices = releaseImpl(this.nodeSlots, list, "nodes.remove");
+    if (!indices) return;
     const id = ++this.removalSeq;
     this.removals.set(id, this.edgeEpoch);
     this.send({ t: "removeNodes", id, indices }, [indices.buffer]);
@@ -365,7 +331,9 @@ export class Graph {
 
   private compactNodesImpl(): Uint32Array {
     const t0 = this.apiStart();
+    const same = this.nodeSlots.count === this.nodeSlots.slots;
     const remap = this.nodeSlots.compact();
+    if (same) return remap;
     this.slotsChanged();
     const copy = remap.slice();
     this.send({ t: "compactNodes", remap: copy }, [copy.buffer]);
@@ -373,7 +341,7 @@ export class Graph {
     return remap;
   }
 
-  private updateAllImpl(data: NodeUpdate, opts?: CopyOption): void {
+  private updateAllImpl(data: NodeUpdate, opts?: CopyOption, clampZ = false): void {
     const n = updateCount(data, "nodes.updateAll");
     if (n === 0 && data.labels === undefined) return;
     const slots = this.nodeSlots.slots;
@@ -381,7 +349,7 @@ export class Graph {
     const t0 = this.apiStart();
     const transfer: Transferable[] = [];
     const labels = convertUpdateLabels(data.labels, slots, "nodes.updateAll: labels");
-    this.send({ t: "updateNodes", start: 0, labels, ...nodeArrays(data, n, opts, transfer) }, transfer);
+    this.send({ t: "updateNodes", start: 0, labels, ...nodeArrays(data, n, opts, transfer, clampZ) }, transfer);
     if (t0) this.apiEnd("nodes.updateAll", t0);
   }
 
@@ -415,12 +383,9 @@ export class Graph {
   }
 
   private updateAtImpl(indices: Uint32Array, data: NodeUpdate, opts?: CopyOption): void {
-    if (!(indices instanceof Uint32Array)) throw new GraphError("invalid-argument", "nodes.update: indices must be a Uint32Array");
-    if (data.labels === null) throw new GraphError("invalid-argument", "nodes.update: labels cannot be null; null only clears labels in nodes.updateAll");
-    if (!hasNodeArrays(data) && data.labels === undefined) return;
     const transfer: Transferable[] = [];
-    const idx = take(indices, indices.length, "indices", opts, transfer);
-    if (idx.length === 0) return;
+    const idx = indexedUpdate(indices, data.labels, hasNodeArrays(data), "nodes.update", opts, transfer);
+    if (!idx) return;
     const t0 = this.apiStart();
     const arrays = nodeArrays(data, idx.length, opts, transfer);
     const labels = data.labels ? convertLabels(data.labels, idx.length, "nodes.update: labels") : undefined;
@@ -442,7 +407,7 @@ export class Graph {
       return;
     }
     if (!(target instanceof Uint32Array)) throw new GraphError("invalid-argument", `${name}: target must be a Uint32Array or "all"`);
-    if (isDetached(target.buffer)) throw new GraphError("detached-array", `${name}: target is detached (it was transferred earlier)`);
+    checkAttached(target, `${name}: target`);
     if (target.length === 0) return;
     const t0 = this.apiStart();
     (edges ? this.edgeSlots : this.nodeSlots).check(target, name);
@@ -450,30 +415,20 @@ export class Graph {
     if (t0) this.apiEnd(name, t0);
   }
 
-  private edgesApi() {
+  private edgesApi(): GraphEdges {
     const graph = this;
     return {
-      /** Replaces every edge. */
       set: (data: EdgeData, opts?: CopyOption): void => this.setEdgesImpl(data, opts),
-      /** Adds edges and returns their indices. */
       add: (data: EdgeData, opts?: CopyOption): Uint32Array => this.addEdgesImpl(data, opts),
-      /** Removes edges. */
       remove: (indices: Uint32Array | number[]): void => this.removeEdgesImpl(indices),
-      /** Changes channels of the listed edges. */
       update: (indices: Uint32Array, data: EdgeUpdate, opts?: CopyOption): void => this.updateEdgesAtImpl(indices, data, opts),
-      /** Changes channels of every edge slot. */
       updateAll: (data: EdgeUpdate, opts?: CopyOption): void => this.updateEdgesImpl(data, opts),
-      /** Turns flags on or off for the listed edges or all of them. */
       flag: (target: Uint32Array | "all", flags: number, on: boolean): void => this.flagImpl(target, flags, on, true),
-      /** Removes every edge. */
       clear: (): void => this.setEdgesImpl({ count: 0, indices: new Uint32Array(0) }),
-      /** Packs live edges into the first slots and returns the old-to-new index table. */
       compact: (): Uint32Array => this.compactEdgesImpl(),
-      /** Number of live edges. */
       get count(): number {
         return graph.edgeSlots.count;
       },
-      /** Number of edge slots, live plus freed. */
       get slots(): number {
         return graph.edgeSlots.slots;
       },
@@ -486,13 +441,11 @@ export class Graph {
     const n = data.count;
     if (!Number.isInteger(n) || n < 0) throw new GraphError("invalid-argument", "edges.set: count must be a non-negative integer");
     const transfer: Transferable[] = [];
-    const indices = data.indices && take(data.indices, n * 2, "indices", opts, transfer);
-    const styles = data.styles && take(data.styles, n, "styles", opts, transfer);
-    const colors = data.colors && take(data.colors, n * 2, "colors", opts, transfer);
+    const arrays = edgeArrays(data, n, opts, transfer);
     const labels = data.labels ? convertLabels(data.labels, n, "edges.set: labels") : [];
     this.edgeSlots.reset(n);
     this.edgesRenumbered(null);
-    this.send({ t: "edges", count: n, indices, styles, colors, labels }, transfer);
+    this.send({ t: "edges", count: n, labels, ...arrays }, transfer);
     if (t0) this.apiEnd("edges.set", t0);
   }
 
@@ -502,63 +455,53 @@ export class Graph {
     if (!(data.indices instanceof Uint32Array)) throw new GraphError("invalid-argument", "edges.add: indices must be a Uint32Array");
     const t0 = this.apiStart();
     const transfer: Transferable[] = [];
-    const ends = take(data.indices, n * 2, "indices", opts, transfer);
-    const styles = data.styles && take(data.styles, n, "styles", opts, transfer);
-    const colors = data.colors && take(data.colors, n * 2, "colors", opts, transfer);
+    const arrays = edgeArrays(data, n, opts, transfer);
     const labels = data.labels ? convertLabels(data.labels, n, "edges.add: labels") : undefined;
-    this.checkEnds(ends, "edges.add");
+    this.checkEnds(arrays.indices!, "edges.add");
+    if (n === 0) return new Uint32Array(0);
     const indices = this.edgeSlots.take(n, this.removals.size === 0);
-    this.send({ t: "addEdges", indices: indices.slice(), count: this.edgeSlots.slots, ends, styles, colors, labels }, transfer);
+    this.send({ t: "addEdges", at: indices.slice(), count: this.edgeSlots.slots, labels, ...arrays }, transfer);
     if (t0) this.apiEnd("edges.add", t0);
     return indices;
   }
 
   private removeEdgesImpl(list: Uint32Array | number[]): void {
-    if (list instanceof Uint32Array && isDetached(list.buffer)) throw new GraphError("detached-array", "edges.remove: indices are detached (they were transferred earlier)");
-    if (list.length === 0) return;
     const t0 = this.apiStart();
-    this.edgeSlots.check(list, "edges.remove");
-    const indices = Uint32Array.from(list);
-    this.edgeSlots.release(indices);
+    const indices = releaseImpl(this.edgeSlots, list, "edges.remove");
+    if (!indices) return;
     this.send({ t: "removeEdges", indices }, [indices.buffer]);
     if (t0) this.apiEnd("edges.remove", t0);
   }
 
   private updateEdgesAtImpl(indices: Uint32Array, data: EdgeUpdate, opts?: CopyOption): void {
-    if (!(indices instanceof Uint32Array)) throw new GraphError("invalid-argument", "edges.update: indices must be a Uint32Array");
-    if (data.labels === null) throw new GraphError("invalid-argument", "edges.update: labels cannot be null; null only clears labels in edges.updateAll");
-    if (!data.indices && !data.styles && !data.colors && data.labels === undefined) return;
     const transfer: Transferable[] = [];
-    const idx = take(indices, indices.length, "indices", opts, transfer);
-    if (idx.length === 0) return;
+    const at = indexedUpdate(indices, data.labels, hasEdgeArrays(data), "edges.update", opts, transfer);
+    if (!at) return;
     const t0 = this.apiStart();
-    const n = idx.length;
-    const ends = data.indices && take(data.indices, n * 2, "indices", opts, transfer);
-    const styles = data.styles && take(data.styles, n, "styles", opts, transfer);
-    const colors = data.colors && take(data.colors, n * 2, "colors", opts, transfer);
-    const labels = data.labels ? convertLabels(data.labels, n, "edges.update: labels") : undefined;
-    this.edgeSlots.check(idx, "edges.update");
-    if (ends) this.checkEnds(ends, "edges.update");
-    this.send({ t: "updateEdgesAt", indices: idx, ends, styles, colors, labels }, transfer);
+    const arrays = edgeArrays(data, at.length, opts, transfer);
+    const labels = data.labels ? convertLabels(data.labels, at.length, "edges.update: labels") : undefined;
+    this.edgeSlots.check(at, "edges.update");
+    if (arrays.indices) this.checkEnds(arrays.indices, "edges.update");
+    this.send({ t: "updateEdgesAt", at, labels, ...arrays }, transfer);
     if (t0) this.apiEnd("edges.update", t0);
   }
 
   private updateEdgesImpl(data: EdgeUpdate, opts?: CopyOption): void {
-    if (!data.indices && !data.styles && !data.colors && data.labels === undefined) return;
+    if (!hasEdgeArrays(data) && data.labels === undefined) return;
     const n = this.edgeSlots.slots;
     const t0 = this.apiStart();
     const transfer: Transferable[] = [];
-    const ends = data.indices && take(data.indices, n * 2, "indices", opts, transfer);
-    const styles = data.styles && take(data.styles, n, "styles", opts, transfer);
-    const colors = data.colors && take(data.colors, n * 2, "colors", opts, transfer);
+    const arrays = edgeArrays(data, n, opts, transfer);
     const labels = convertUpdateLabels(data.labels, n, "edges.updateAll: labels");
-    if (ends) this.checkEnds(ends, "edges.updateAll", true);
-    this.send({ t: "updateEdges", ends, styles, colors, labels }, transfer);
+    if (arrays.indices) this.checkEnds(arrays.indices, "edges.updateAll", true);
+    this.send({ t: "updateEdges", labels, ...arrays }, transfer);
     if (t0) this.apiEnd("edges.updateAll", t0);
   }
 
   private compactEdgesImpl(): Uint32Array {
+    const same = this.edgeSlots.count === this.edgeSlots.slots;
     const remap = this.edgeSlots.compact();
+    if (same) return remap;
     this.edgesRenumbered(this.removals.size > 0 ? remap.slice() : null);
     const copy = remap.slice();
     this.send({ t: "compactEdges", remap: copy }, [copy.buffer]);
@@ -579,21 +522,8 @@ export class Graph {
     const list = iconList(icons, "icons.define");
     const max = this.caps.maxIcons;
     if (list.length > max) throw new GraphError("limits-exceeded", `icons.define: this GPU holds at most ${max} icons, got ${list.length}`);
-    const prev = this.iconSlots;
-    const next = new Slots();
-    next.reset(list.length);
-    this.iconSlots = next;
-    const id = ++this.benchSeq;
-    const done = new Promise<void>((resolve, reject) =>
-      this.iconsPending.set(id, {
-        resolve,
-        reject: (e) => {
-          if (this.iconSlots === next) this.iconSlots = prev;
-          reject(e);
-        },
-      }),
-    );
-    this.send({ t: "defineIcons", id, icons: list });
+    this.iconSlots.reset(list.length);
+    const done = this.request<void>((id) => ({ t: "defineIcons", id, icons: list }));
     if (t0) this.apiEnd("icons.define", t0);
     return done;
   }
@@ -605,28 +535,15 @@ export class Graph {
     const max = this.caps.maxIcons;
     if (slots.count + list.length > max) throw new GraphError("limits-exceeded", `icons.add: this GPU holds at most ${max} icons, ${slots.count} are in use`);
     const ids = Uint16Array.from(slots.take(list.length));
-    const id = ++this.benchSeq;
-    const done = new Promise<Uint16Array>((resolve, reject) =>
-      this.iconsPending.set(id, {
-        resolve: () => resolve(ids),
-        reject: (e) => {
-          slots.release(ids);
-          reject(e);
-        },
-      }),
-    );
-    this.send({ t: "setIcons", id, ids: ids.slice(), icons: list });
-    return done;
+    if (ids.length === 0) return Promise.resolve(ids);
+    return this.request<void>((id) => ({ t: "setIcons", id, ids: ids.slice(), icons: list })).then(() => ids);
   }
 
   private replaceIconImpl(icon: number, source: IconSource): Promise<void> {
     if (this.destroyed) return Promise.reject(new GraphError("destroyed", "Graph destroyed"));
     if (!this.iconSlots.isLive(icon)) throw new GraphError("invalid-argument", `icons.replace: ${icon} is not an icon id in use`);
     const list = iconList([source], "icons.replace");
-    const id = ++this.benchSeq;
-    const done = new Promise<void>((resolve, reject) => this.iconsPending.set(id, { resolve, reject }));
-    this.send({ t: "setIcons", id, ids: new Uint16Array([icon]), icons: list });
-    return done;
+    return this.request<void>((id) => ({ t: "setIcons", id, ids: new Uint16Array([icon]), icons: list }));
   }
 
   private removeIconsImpl(ids: readonly number[] | Uint16Array): void {
@@ -652,7 +569,7 @@ export class Graph {
       const z = new Uint8Array(zIndex ? count : 0);
       const commit = (): void => {
         current();
-        this.nodes.updateAll({ positions: positions ? p : undefined, colors: colors ? c : undefined, zIndex: zIndex ? z : undefined }, { copy: true });
+        this.updateAllImpl({ positions: positions ? p : undefined, colors: colors ? c : undefined, zIndex: zIndex ? z : undefined }, { copy: true }, true);
       };
       return { positions: p, colors: c, zIndex: z, commit };
     }
@@ -685,54 +602,45 @@ export class Graph {
    * Rendering is continuous while it runs; one benchmark at a time.
    */
   private benchmarkImpl(options: BenchmarkOptions): Promise<BenchmarkResult> {
-    if (this.benchPending) return Promise.reject(new GraphError("invalid-argument", "A benchmark is already running"));
+    if (this.destroyed) return Promise.reject(new GraphError("destroyed", "Graph destroyed"));
+    if (this.benchId !== 0) return Promise.reject(new GraphError("invalid-argument", "A benchmark is already running"));
     if (options.path.length === 0 || !(options.frames > 0)) {
       return Promise.reject(new GraphError("invalid-argument", "debug.benchmark: path needs ≥ 1 key and frames > 0"));
     }
-    const id = ++this.benchSeq;
-    return new Promise<BenchmarkResult>((resolve, reject) => {
-      this.benchPending = { id, resolve, reject };
-      this.send({ t: "benchmark", id, options: { path: options.path.map((k) => ({ ...k })), frames: options.frames, warmup: options.warmup, timing: options.timing } });
-    });
+    const done = this.request<BenchmarkResult>((id) => ({ t: "benchmark", id, options: { path: options.path.map((k) => ({ ...k })), frames: options.frames, warmup: options.warmup, timing: options.timing } }));
+    this.benchId = this.replySeq;
+    return done;
   }
 
   /** Candidates and decisions of the next label placement. */
   private labelSnapshotImpl(): Promise<LabelSnapshot> {
-    if (this.destroyed) return Promise.reject(new GraphError("destroyed", "Graph destroyed"));
-    const id = ++this.benchSeq;
-    return new Promise<LabelSnapshot>((resolve, reject) => {
-      this.snapshotPending.set(id, { resolve, reject });
-      this.send({ t: "labelSnapshot", id });
-    });
+    return this.request((id) => ({ t: "labelSnapshot", id }));
   }
 
   private snapshotImpl(type: string): Promise<Blob> {
     if (this.destroyed) return Promise.reject(new GraphError("destroyed", "Graph destroyed"));
     if (typeof type !== "string") throw new GraphError("invalid-argument", `canvas.snapshot: type must be a string, got ${String(type)}`);
-    const id = ++this.benchSeq;
-    return new Promise<Blob>((resolve, reject) => {
-      this.shotPending.set(id, { resolve, reject });
-      this.send({ t: "snapshot", id, type });
-    });
+    return this.request((id) => ({ t: "snapshot", id, type }));
   }
 
   private queryAtImpl(x: number, y: number): Promise<Hit> {
     if (this.destroyed) return Promise.reject(new GraphError("destroyed", "Graph destroyed"));
     if (!Number.isFinite(x) || !Number.isFinite(y)) throw new GraphError("invalid-argument", `query.at: x and y must be finite numbers, got ${x} and ${y}`);
-    const id = ++this.querySeq;
-    return new Promise<Hit>((resolve, reject) => {
-      this.atPending.set(id, { resolve, reject });
-      this.send({ t: "queryAt", id, x, y });
-    });
+    return this.request((id) => ({ t: "queryAt", id, x, y }));
   }
 
   private queryInsideImpl(shape: Rect | Polygon): Promise<Uint32Array> {
     if (this.destroyed) return Promise.reject(new GraphError("destroyed", "Graph destroyed"));
     const points = packShape(shape, this.pixelRatio);
-    const id = ++this.querySeq;
-    return new Promise<Uint32Array>((resolve, reject) => {
-      this.insidePending.set(id, { resolve, reject });
-      this.send({ t: "queryInside", id, points }, [points.buffer]);
+    return this.request((id) => ({ t: "queryInside", id, points }), [points.buffer]);
+  }
+
+  private request<T>(make: (id: number) => ToWorker, transfer?: Transferable[]): Promise<T> {
+    if (this.destroyed) return Promise.reject(new GraphError("destroyed", "Graph destroyed"));
+    const id = ++this.replySeq;
+    return new Promise<T>((resolve, reject) => {
+      this.replies.set(id, { resolve: resolve as (value: never) => void, reject });
+      this.send(make(id), transfer);
     });
   }
 
@@ -832,7 +740,7 @@ export class Graph {
       return;
     }
     if (!(list instanceof Uint32Array)) throw new GraphError("invalid-argument", "camera.fit: nodes must be a Uint32Array");
-    if (isDetached(list.buffer)) throw new GraphError("detached-array", "camera.fit: nodes are detached (they were transferred earlier)");
+    checkAttached(list, "camera.fit: nodes");
     if (list.length === 0) return;
     this.nodeSlots.check(list, "camera.fit");
     const nodes = list.slice();
@@ -863,18 +771,8 @@ export class Graph {
     this.debugOverlay?.destroy();
     this.send({ t: "destroy" });
     this.destroyed = true;
-    this.benchPending?.reject(new GraphError("destroyed", "Graph destroyed during benchmark"));
-    this.benchPending = null;
-    for (const p of this.snapshotPending.values()) p.reject(new GraphError("destroyed", "Graph destroyed"));
-    this.snapshotPending.clear();
-    for (const p of this.iconsPending.values()) p.reject(new GraphError("destroyed", "Graph destroyed"));
-    this.iconsPending.clear();
-    for (const p of this.shotPending.values()) p.reject(new GraphError("destroyed", "Graph destroyed"));
-    this.shotPending.clear();
-    for (const p of this.atPending.values()) p.reject(new GraphError("destroyed", "Graph destroyed"));
-    this.atPending.clear();
-    for (const p of this.insidePending.values()) p.reject(new GraphError("destroyed", "Graph destroyed"));
-    this.insidePending.clear();
+    for (const p of this.replies.values()) p.reject(new GraphError("destroyed", "Graph destroyed"));
+    this.replies.clear();
     this.pointer.dispose();
     this.resizeObserver?.disconnect();
     // The worker closes itself after releasing the device; terminate as a backstop.
@@ -920,12 +818,12 @@ export class Graph {
       case "state":
         this.state.set(m.data);
         return;
-      case "benchmark": {
-        const p = this.benchPending;
-        if (p && p.id === m.id) {
-          this.benchPending = null;
-          p.resolve(m.result);
-        }
+      case "reply": {
+        const p = this.replies.get(m.id);
+        this.replies.delete(m.id);
+        if (m.id === this.benchId) this.benchId = 0;
+        if (m.code) p?.reject(errorFromCode(m.code, m.message ?? ""));
+        else p?.resolve(m.value as never);
         return;
       }
       case "debugRing":
@@ -978,42 +876,9 @@ export class Graph {
         for (const fn of this.listeners.view) fn(v);
         return;
       }
-      case "icons": {
-        const p = this.iconsPending.get(m.id);
-        this.iconsPending.delete(m.id);
-        if (m.code) p?.reject(errorFromCode(m.code, m.message ?? ""));
-        else p?.resolve();
-        return;
-      }
       case "edgesRemoved":
         this.onEdgesRemoved(m.id, m.edges);
         return;
-      case "labelSnapshot": {
-        const p = this.snapshotPending.get(m.id);
-        this.snapshotPending.delete(m.id);
-        p?.resolve(m.snapshot);
-        return;
-      }
-      case "snapshot": {
-        const p = this.shotPending.get(m.id);
-        this.shotPending.delete(m.id);
-        if (m.code) p?.reject(errorFromCode(m.code, m.message ?? ""));
-        else p?.resolve(m.blob!);
-        return;
-      }
-      case "queryAt": {
-        const p = this.atPending.get(m.id);
-        this.atPending.delete(m.id);
-        p?.resolve(m.hit);
-        return;
-      }
-      case "queryInside": {
-        const p = this.insidePending.get(m.id);
-        this.insidePending.delete(m.id);
-        if (m.code) p?.reject(errorFromCode(m.code, m.message ?? ""));
-        else p?.resolve(m.nodes!);
-        return;
-      }
       case "destroyed":
         this.worker.terminate();
         return;
@@ -1060,13 +925,13 @@ function asWords(colors: Uint32Array | Uint8Array, name: string): Uint32Array {
   throw new GraphError("invalid-argument", `${name}: Uint8Array must be 4-byte aligned RGBA`);
 }
 
-function nodeArrays(data: NodeUpdate, n: number, opts: CopyOption | undefined, transfer: Transferable[]): NodeArrays {
+function nodeArrays(data: NodeUpdate, n: number, opts: CopyOption | undefined, transfer: Transferable[], clampZ = false): NodeArrays {
   const zIndex = data.zIndex && take(data.zIndex, n, "zIndex", opts, transfer);
-  if (zIndex) {
-    const max = CONSTANTS.STYLE_ZLAYER_MASK;
-    for (let i = 0; i < zIndex.length; i++) {
-      if (zIndex[i]! > max) throw new GraphError("invalid-argument", `zIndex: ${zIndex[i]} at ${i} is above ${max}`);
-    }
+  const max = CONSTANTS.STYLE_ZLAYER_MASK;
+  for (let i = 0; zIndex && i < zIndex.length; i++) {
+    if (zIndex[i]! <= max) continue;
+    if (!clampZ) throw new GraphError("invalid-argument", `zIndex: ${zIndex[i]} at ${i} is above ${max}`);
+    zIndex[i] = max;
   }
   return {
     positions: data.positions && take(data.positions, n * 2, "positions", opts, transfer),
@@ -1077,6 +942,49 @@ function nodeArrays(data: NodeUpdate, n: number, opts: CopyOption | undefined, t
     icons: data.icons && take(data.icons, n, "icons", opts, transfer),
     iconColors: data.iconColors && take(asWords(data.iconColors, "iconColors"), n, "iconColors", opts, transfer),
   };
+}
+
+function edgeArrays(data: EdgeUpdate, n: number, opts: CopyOption | undefined, transfer: Transferable[]): EdgeArrays {
+  return {
+    indices: data.indices && take(data.indices, n * 2, "indices", opts, transfer),
+    styles: data.styles && take(data.styles, n, "styles", opts, transfer),
+    colors: data.colors && take(data.colors, n * 2, "colors", opts, transfer),
+  };
+}
+
+function hasEdgeArrays(data: EdgeUpdate): boolean {
+  return !!(data.indices || data.styles || data.colors);
+}
+
+function releaseImpl(slots: Slots, list: Uint32Array | number[], name: string): Uint32Array | null {
+  checkAttached(list, `${name}: indices`);
+  if (list.length === 0) return null;
+  slots.check(list, name);
+  const indices = Uint32Array.from(list);
+  slots.release(indices);
+  return indices;
+}
+
+function indexedUpdate(indices: Uint32Array, labels: unknown, arrays: boolean, name: string, opts: CopyOption | undefined, transfer: Transferable[]): Uint32Array | null {
+  if (!(indices instanceof Uint32Array)) throw new GraphError("invalid-argument", `${name}: indices must be a Uint32Array`);
+  if (labels === null) throw new GraphError("invalid-argument", `${name}: labels cannot be null; null only clears labels in ${name}All`);
+  if (!arrays && labels === undefined) return null;
+  const idx = take(indices, indices.length, "indices", opts, transfer);
+  return idx.length > 0 ? idx : null;
+}
+
+function checkAttached(arr: unknown, name: string): void {
+  if (arr instanceof Uint32Array && isDetached(arr.buffer)) throw new GraphError("detached-array", `${name} array is detached (it was transferred earlier)`);
+}
+
+function checkTune(t: DebugTune): DebugTune {
+  for (const k of ["lodTargetPx", "edgeMaxOverdraw", "edgeMinLengthPx", "pickRate"] as const) {
+    const v = t[k];
+    const min = k === "pickRate" ? 1 : 0;
+    if (v !== undefined && !(Number.isFinite(v) && v >= min)) throw new GraphError("invalid-argument", `debug.tune: ${k} must be a finite number >= ${min}, got ${v}`);
+  }
+  if (t.edgeMode !== undefined && !EDGE_DEBUG_MODES.includes(t.edgeMode)) throw new GraphError("invalid-argument", `debug.tune: edgeMode must be one of ${EDGE_DEBUG_MODES.join(", ")}, got ${String(t.edgeMode)}`);
+  return t;
 }
 
 function remapIndices(indices: Uint32Array, remap: Uint32Array): Uint32Array {

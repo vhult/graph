@@ -1,76 +1,57 @@
-const NO_SLOTS = new Int32Array(0);
+const NO_BITS = new Uint32Array(0);
 
 export class IndexUploads {
-  private pairBuf = new Uint32Array(128);
-  private vals = new Uint32Array(64);
-  private slot = NO_SLOTS;
+  private bits = NO_BITS;
+  private items = new Uint32Array(64);
   private n = 0;
-  private words = 1;
 
   get count(): number {
     return this.n;
   }
 
-  get slotCapacity(): number {
-    return this.slot.length;
+  get capacity(): number {
+    return this.bits.length * 32;
   }
 
-  add(indices: Uint32Array, words: Uint32Array, wordsPerItem: number, slots: number): void {
-    this.words = wordsPerItem;
-    let top = -1;
+  get list(): Uint32Array {
+    return this.items;
+  }
+
+  add(indices: Uint32Array): void {
+    if (indices.length === 0) return;
+    let top = 0;
     for (let j = 0; j < indices.length; j++) if (indices[j]! > top) top = indices[j]!;
-    if (top >= this.slot.length) {
-      const next = new Int32Array(Math.max(top + 1, Math.min(this.slot.length * 2, slots)));
-      next.set(this.slot);
-      this.slot = next;
+    if (top >>> 5 >= this.bits.length) {
+      const next = new Uint32Array(Math.max((top >>> 5) + 1, this.bits.length * 2));
+      next.set(this.bits);
+      this.bits = next;
     }
-    const slot = this.slot;
+    if (this.n + indices.length > this.items.length) {
+      const next = new Uint32Array(Math.max(this.n + indices.length, this.items.length * 2));
+      next.set(this.items);
+      this.items = next;
+    }
+    const bits = this.bits;
+    const items = this.items;
+    let n = this.n;
     for (let j = 0; j < indices.length; j++) {
       const i = indices[j]!;
-      let at = slot[i]! - 1;
-      if (at < 0) {
-        at = this.n++;
-        slot[i] = at + 1;
-        this.grow(this.n);
-        this.pairBuf[at * 2] = i;
-        this.pairBuf[at * 2 + 1] = at;
-      }
-      const src = j * wordsPerItem;
-      const dst = at * wordsPerItem;
-      for (let k = 0; k < wordsPerItem; k++) this.vals[dst + k] = words[src + k]!;
+      const w = i >>> 5;
+      const m = 1 << (i & 31);
+      if ((bits[w]! & m) !== 0) continue;
+      bits[w] = bits[w]! | m;
+      items[n++] = i;
     }
-  }
-
-  pairs(): Uint32Array {
-    return this.pairBuf.subarray(0, this.n * 2);
-  }
-
-  values(): Uint32Array {
-    return this.vals.subarray(0, this.n * this.words);
+    this.n = n;
   }
 
   clear(): void {
-    const pairs = this.pairBuf;
-    const slot = this.slot;
-    for (let k = 0; k < this.n; k++) slot[pairs[k * 2]!] = 0;
+    for (let k = 0; k < this.n; k++) this.bits[this.items[k]! >>> 5] = 0;
     this.n = 0;
   }
 
   reset(slots: number): void {
     this.clear();
-    if (this.slot.length > slots) this.slot = NO_SLOTS;
-  }
-
-  private grow(n: number): void {
-    if (n * 2 > this.pairBuf.length) {
-      const next = new Uint32Array(Math.max(n * 2, this.pairBuf.length * 2));
-      next.set(this.pairBuf);
-      this.pairBuf = next;
-    }
-    if (n * this.words > this.vals.length) {
-      const next = new Uint32Array(Math.max(n * this.words, this.vals.length * 2));
-      next.set(this.vals);
-      this.vals = next;
-    }
+    if (this.bits.length > (slots + 31) >>> 5) this.bits = NO_BITS;
   }
 }

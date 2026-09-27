@@ -1,90 +1,91 @@
 import { describe, expect, it } from "vitest";
 import { IndexUploads } from "../src/data/IndexUploads";
 
+const listed = (u: IndexUploads): number[] => Array.from(u.list.subarray(0, u.count));
+
 describe("IndexUploads", () => {
-  it("packs one pair and one value block per index", () => {
+  it("lists each index once, in first-write order", () => {
     const u = new IndexUploads();
-    u.add(new Uint32Array([9, 3]), new Uint32Array([10, 11, 30, 31]), 2, 1024);
-    expect(Array.from(u.pairs())).toEqual([9, 0, 3, 1]);
-    expect(Array.from(u.values())).toEqual([10, 11, 30, 31]);
+    u.add(new Uint32Array([9, 3]));
+    expect(listed(u)).toEqual([9, 3]);
     expect(u.count).toBe(2);
   });
 
-  it("keeps the last value when an index is written twice in one frame", () => {
+  it("keeps one entry when an index is written twice in one frame", () => {
     const u = new IndexUploads();
-    u.add(new Uint32Array([5]), new Uint32Array([1]), 1, 1024);
-    u.add(new Uint32Array([5]), new Uint32Array([2]), 1, 1024);
+    u.add(new Uint32Array([5]));
+    u.add(new Uint32Array([5]));
     expect(u.count).toBe(1);
-    expect(Array.from(u.values())).toEqual([2]);
   });
 
-  it("grows past its first capacity with two words per item", () => {
+  it("grows past its first capacity", () => {
     const u = new IndexUploads();
-    const n = 150;
-    const idx = Uint32Array.from({ length: n }, (_, k) => 1000 - k);
-    const words = Uint32Array.from({ length: n * 2 }, (_, k) => k + 7);
-    u.add(idx, words, 2, 1024);
-    expect(u.count).toBe(n);
-    expect(Array.from(u.values())).toEqual(Array.from(words));
-    expect(Array.from(u.pairs())).toEqual(Array.from({ length: n * 2 }, (_, k) => (k % 2 === 0 ? 1000 - k / 2 : (k - 1) / 2)));
+    const idx = Uint32Array.from({ length: 150 }, (_, k) => 1000 - k);
+    u.add(idx);
+    expect(u.count).toBe(150);
+    expect(listed(u)).toEqual(Array.from(idx));
   });
 
-  it("reuses its slots across clear with no stale entry", () => {
+  it("reuses its bits across clear with no stale entry", () => {
     const u = new IndexUploads();
-    u.add(new Uint32Array([3, 7, 40]), new Uint32Array([30, 70, 400]), 1, 1024);
+    u.add(new Uint32Array([3, 7, 40]));
     u.clear();
-    u.add(new Uint32Array([7]), new Uint32Array([71]), 1, 1024);
-    u.add(new Uint32Array([3]), new Uint32Array([31]), 1, 1024);
-    u.add(new Uint32Array([7]), new Uint32Array([72]), 1, 1024);
-    expect(u.count).toBe(2);
-    expect(Array.from(u.pairs())).toEqual([7, 0, 3, 1]);
-    expect(Array.from(u.values())).toEqual([72, 31]);
+    u.add(new Uint32Array([7]));
+    u.add(new Uint32Array([3]));
+    u.add(new Uint32Array([7]));
+    expect(listed(u)).toEqual([7, 3]);
     u.clear();
-    u.add(new Uint32Array([500, 40]), new Uint32Array([5, 4]), 1, 1024);
-    expect(Array.from(u.pairs())).toEqual([500, 0, 40, 1]);
-    expect(Array.from(u.values())).toEqual([5, 4]);
+    u.add(new Uint32Array([500, 40]));
+    expect(listed(u)).toEqual([500, 40]);
+  });
+
+  it("keeps indices that share a bit word apart", () => {
+    const u = new IndexUploads();
+    u.add(new Uint32Array([31, 32, 0, 63, 64]));
+    u.add(new Uint32Array([32, 31, 1]));
+    expect(listed(u)).toEqual([31, 32, 0, 63, 64, 1]);
+  });
+
+  it("still dedupes an index written before the bits grew", () => {
+    const u = new IndexUploads();
+    u.add(new Uint32Array([3]));
+    u.add(new Uint32Array([100000, 3]));
+    expect(listed(u)).toEqual([3, 100000]);
+  });
+
+  it("ignores an empty list", () => {
+    const u = new IndexUploads();
+    u.add(new Uint32Array(0));
+    expect(u.count).toBe(0);
+    expect(u.capacity).toBe(0);
+  });
+
+  it("clears only the words it set, so a cleared index can be listed again", () => {
+    const u = new IndexUploads();
+    u.add(new Uint32Array([2, 33]));
+    u.clear();
+    u.add(new Uint32Array([33, 2, 33]));
+    expect(listed(u)).toEqual([33, 2]);
   });
 
   it("clears", () => {
     const u = new IndexUploads();
-    u.add(new Uint32Array([1]), new Uint32Array([1]), 1, 1024);
+    u.add(new Uint32Array([1]));
     u.clear();
     expect(u.count).toBe(0);
   });
 
-  it("grows its slot table geometrically, capped at the slot count", () => {
+  it("reset drops pending entries and releases bits past the slot count", () => {
     const u = new IndexUploads();
-    const sizes = new Set<number>();
-    for (let i = 0; i < 1000; i++) {
-      u.add(new Uint32Array([i]), new Uint32Array([i]), 1, 1000);
-      u.clear();
-      sizes.add(u.slotCapacity);
-    }
-    expect(sizes.size).toBeLessThanOrEqual(11);
-    expect(u.slotCapacity).toBe(1000);
-    const v = new IndexUploads();
-    v.add(new Uint32Array([10]), new Uint32Array([1]), 1, 1000);
-    expect(v.slotCapacity).toBe(11);
-    v.add(new Uint32Array([12]), new Uint32Array([1]), 1, 1000);
-    expect(v.slotCapacity).toBe(22);
-    v.add(new Uint32Array([800]), new Uint32Array([1]), 1, 1000);
-    expect(v.slotCapacity).toBe(801);
-    v.add(new Uint32Array([801]), new Uint32Array([1]), 1, 1000);
-    expect(v.slotCapacity).toBe(1000);
-  });
-
-  it("reset drops pending entries and releases a slot table larger than the slot count", () => {
-    const u = new IndexUploads();
-    u.add(new Uint32Array([5000]), new Uint32Array([1]), 1, 10000);
+    u.add(new Uint32Array([5000]));
     u.reset(20000);
     expect(u.count).toBe(0);
-    expect(u.slotCapacity).toBe(5001);
-    u.add(new Uint32Array([7]), new Uint32Array([1]), 1, 20000);
+    expect(u.capacity).toBeGreaterThan(5000);
+    u.add(new Uint32Array([7]));
     u.reset(100);
     expect(u.count).toBe(0);
-    expect(u.slotCapacity).toBe(0);
-    u.add(new Uint32Array([3, 9]), new Uint32Array([30, 90]), 1, 100);
-    expect(Array.from(u.pairs())).toEqual([3, 0, 9, 1]);
-    expect(Array.from(u.values())).toEqual([30, 90]);
+    expect(u.capacity).toBe(0);
+    u.add(new Uint32Array([3, 9]));
+    expect(listed(u)).toEqual([3, 9]);
   });
 });

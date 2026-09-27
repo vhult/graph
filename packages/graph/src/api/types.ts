@@ -11,7 +11,7 @@ export interface GraphStyle {
   background?: RGBA;
   /** Multiplies every node size. */
   nodeScale?: number;
-  /** Colour and width in CSS px of edges without their own colour or width. */
+  /** Colour of edges without their own colour or with colour word 0, and width in CSS px of edges without their own width. */
   edge?: { color?: RGBA; width?: number };
   /** Label size in CSS px, font, colour and padding in CSS px. */
   label?: { size?: number; font?: string; color?: RGBA; padding?: number };
@@ -61,6 +61,8 @@ export interface GraphOptions {
   style?: GraphStyle;
   /** First interaction settings, the same shape as `input.set`. */
   input?: GraphInput;
+  /** Hidden empty node slots kept past `nodes.slots`; the add that takes the last one grows by this many. Default: 100. */
+  nodeReserve?: number;
 }
 
 /** How an interaction runs: the engine does it ("auto"), only reports it ("manual"), or ignores it (false). */
@@ -98,7 +100,7 @@ export type SelectKey = "shift" | "alt" | "ctrl" | "meta";
 
 /** Payload of the `select` event. */
 export interface SelectEvent {
-  /** Selected nodes in "auto", or the nodes inside the shape or the clicked node in "manual". */
+  /** Selected nodes in "auto", in first-selection order, or the nodes inside the shape or the clicked node in "manual". */
   nodes: Uint32Array;
   /** Gesture that made the selection. */
   shape: "click" | SelectShape;
@@ -231,7 +233,7 @@ export interface DebugTune {
   edgeMaxOverdraw?: number;
   /** On-screen length in CSS px at or below which an edge is not drawn. Default: 6. */
   edgeMinLengthPx?: number;
-  /** Hover picks per second. Default: 60. */
+  /** Hover picks per second, at least 1. Default: 60. */
   pickRate?: number;
   /** Diagnostic edge colouring. Default: "off". */
   edgeMode?: EdgeDebugMode;
@@ -333,7 +335,7 @@ export interface NodeStream {
   readonly positions: Float32Array;
   /** Packed RGBA per node slot. */
   readonly colors: Uint32Array;
-  /** Layer per node slot. */
+  /** Layer per node slot; values above 15 are clamped to 15. */
   readonly zIndex: Uint8Array;
   /** Sends what was written to the engine. */
   commit(): void;
@@ -355,7 +357,7 @@ export interface EdgeData {
   indices: Uint32Array;
   /** Style word per edge, see `packEdgeStyle`. */
   styles?: Uint32Array;
-  /** Packed RGBA at the source, then at the target, per edge. */
+  /** Packed RGBA at the source, then at the target, per edge; 0 uses `style.edge.color`. */
   colors?: Uint32Array;
   /** Label text per edge. */
   labels?: readonly (string | null | undefined)[];
@@ -677,4 +679,138 @@ export interface GraphEvents {
   edgesRemoved: Uint32Array;
   /** The camera moved, at most once per frame. */
   view: CameraView;
+}
+
+/** The `graph.camera` namespace. */
+export interface GraphCamera {
+  /** Frames every node, a list of nodes or a world rectangle. */
+  fit(opts?: CameraFitOptions): void;
+  /** Moves the camera, animated when a duration is given. */
+  set(view: Partial<CameraView>, anim?: CameraAnimOptions): void;
+  /** Returns the last drawn view, at most one frame old. */
+  get(): CameraView;
+  /** Turns the view by an angle in radians around a canvas point. */
+  rotate(angle: number, opts?: CameraRotateOptions): void;
+  /** Sets the zoom range and the world bounds the camera can reach. */
+  limits(l: CameraLimits): void;
+  /** Converts a canvas point in CSS px to world units. */
+  toWorld(x: number, y: number, out?: { x: number; y: number }): { x: number; y: number };
+  /** Converts a world point to canvas CSS px. */
+  toScreen(x: number, y: number, out?: { x: number; y: number }): { x: number; y: number };
+}
+
+/** The `graph.nodes` namespace. */
+export interface GraphNodes {
+  /** Starts over with these nodes; every edge is removed. */
+  set(data: NodeData, opts?: CopyOption): void;
+  /** Adds nodes and returns their indices. */
+  add(data: NodeData, opts?: CopyOption): Uint32Array;
+  /** Removes nodes and their edges. */
+  remove(indices: Uint32Array | number[]): void;
+  /** Changes channels of the listed nodes. */
+  update(indices: Uint32Array, data: NodeUpdate, opts?: CopyOption): void;
+  /** Changes channels of every node slot. */
+  updateAll(data: NodeUpdate, opts?: CopyOption): void;
+  /** Returns a buffer the host writes node channels into every frame. */
+  stream(channels: NodeStreamChannels): NodeStream;
+  /** Turns flags on or off for the listed nodes or all of them. */
+  flag(target: Uint32Array | "all", flags: number, on: boolean): void;
+  /** Removes every node and every edge. */
+  clear(): void;
+  /** Packs live nodes into the first slots and returns the old-to-new index table. */
+  compact(): Uint32Array;
+  /** Number of live nodes. */
+  readonly count: number;
+  /** Number of node slots, live plus freed. */
+  readonly slots: number;
+}
+
+/** The `graph.edges` namespace. */
+export interface GraphEdges {
+  /** Replaces every edge. */
+  set(data: EdgeData, opts?: CopyOption): void;
+  /** Adds edges and returns their indices. */
+  add(data: EdgeData, opts?: CopyOption): Uint32Array;
+  /** Removes edges. */
+  remove(indices: Uint32Array | number[]): void;
+  /** Changes channels of the listed edges. */
+  update(indices: Uint32Array, data: EdgeUpdate, opts?: CopyOption): void;
+  /** Changes channels of every edge slot. */
+  updateAll(data: EdgeUpdate, opts?: CopyOption): void;
+  /** Turns flags on or off for the listed edges or all of them. */
+  flag(target: Uint32Array | "all", flags: number, on: boolean): void;
+  /** Removes every edge. */
+  clear(): void;
+  /** Packs live edges into the first slots and returns the old-to-new index table. */
+  compact(): Uint32Array;
+  /** Number of live edges. */
+  readonly count: number;
+  /** Number of edge slots, live plus freed. */
+  readonly slots: number;
+}
+
+/** The `graph.style` namespace. */
+export interface GraphStyleApi {
+  /** Changes part of the look; fields left out keep their value. */
+  set(style: GraphStyle): void;
+}
+
+/** The `graph.input` namespace. */
+export interface GraphInputApi {
+  /** Changes part of the interaction settings; fields left out keep their value. */
+  set(partial: GraphInput): void;
+}
+
+/** The `graph.icons` namespace. */
+export interface GraphIcons {
+  /** Replaces the whole icon set; an icon's id is its position in the list, and a bad icon is drawn blank and reported by `error`. */
+  define(sources: readonly IconSource[]): Promise<void>;
+  /** Adds icons and resolves with their ids; a bad icon is drawn blank and reported by `error`. */
+  add(sources: readonly IconSource[]): Promise<Uint16Array>;
+  /** Swaps the shape behind an icon id; a bad shape is drawn blank and reported by `error`. */
+  replace(id: number, source: IconSource): Promise<void>;
+  /** Removes icons; nodes that used them show no icon. */
+  remove(ids: readonly number[] | Uint16Array): void;
+}
+
+/** The `graph.query` namespace. */
+export interface GraphQuery {
+  /** Resolves with what is at a canvas point in CSS px. */
+  at(x: number, y: number): Promise<Hit>;
+  /** Resolves with the nodes inside a canvas box or polygon. */
+  inside(shape: Rect | Polygon): Promise<Uint32Array>;
+}
+
+/** The `graph.canvas` namespace. */
+export interface GraphCanvas {
+  /** Sets the canvas size in CSS px. */
+  resize(width: number, height: number): void;
+  /** Draws one frame now. */
+  render(): void;
+  /** Resolves with an image of the current frame. */
+  snapshot(type?: string): Promise<Blob>;
+}
+
+/** The `graph.debug` namespace. */
+export interface GraphDebug {
+  /** Opens the debug overlay. */
+  open(): void;
+  /** Closes the debug overlay. */
+  close(): void;
+  /** Opens or closes the debug overlay. */
+  toggle(): void;
+  /** Returns whether the debug overlay is open. */
+  isOpen(): boolean;
+  /** Expands or collapses the debug overlay. */
+  expand(expanded?: boolean): void;
+  /** Starts a recording and resolves with it when stopped. */
+  record(): Promise<DebugRecording>;
+  /** Stops the recording. */
+  stop(): void;
+  /** Plays a camera path and resolves with every frame's timings. */
+  benchmark(options: BenchmarkOptions): Promise<BenchmarkResult>;
+  /** Resolves with the candidates and decisions of the next label placement, or an empty snapshot when there is nothing to place. */
+  labelSnapshot(): Promise<LabelSnapshot>;
+  /** Sets engine tuning, not stable API; throws on a value that is not finite or is below its minimum. */
+  tune(tune: DebugTune): void;
 }

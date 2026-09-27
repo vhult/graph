@@ -43,6 +43,15 @@ class FakeWorker {
   }
 }
 
+function errorCode(fn: () => unknown): string {
+  try {
+    fn();
+  } catch (e) {
+    return e instanceof GraphError ? e.code : String(e);
+  }
+  return "none";
+}
+
 async function createGraph(options: GraphOptions = {}): Promise<Graph> {
   const canvas = document.createElement("canvas");
   Object.assign(canvas, { transferControlToOffscreen: () => ({}) });
@@ -382,19 +391,19 @@ describe("Graph.destroy", () => {
     const msg = worker.sent.at(-1) as Extract<ToWorker, { t: "defineIcons" }>;
     expect(msg.t).toBe("defineIcons");
     expect(msg.icons).toEqual([{ path: "M0 0H1V1Z", viewBox: undefined, fillRule: undefined }, { svg: "<svg/>" }]);
-    worker.onmessage?.({ data: { t: "icons", id: msg.id } });
+    worker.onmessage?.({ data: { t: "reply", id: msg.id } });
     await expect(done).resolves.toBeUndefined();
     const failed = graph.icons.define([{ path: "X" }]);
     const second = worker.sent.at(-1) as Extract<ToWorker, { t: "defineIcons" }>;
-    worker.onmessage?.({ data: { t: "icons", id: second.id, code: "invalid-argument", message: "bad" } });
+    worker.onmessage?.({ data: { t: "reply", id: second.id, code: "invalid-argument", message: "bad" } });
     await expect(failed).rejects.toThrow("bad");
     expect(() => graph.icons.define([{} as never])).toThrow(/path/);
   });
 
-  it("icons.add resolves with its ids, reuses removed ids and frees them when it fails", async () => {
+  it("icons.add resolves with its ids, reuses removed ids and keeps the ids of a bad icon", async () => {
     const graph = await createGraph();
     const worker = FakeWorker.last;
-    const reply = (id: number, error?: { code: string; message: string }) => worker.onmessage?.({ data: { t: "icons", id, ...error } });
+    const reply = (id: number, error?: { code: string; message: string }) => worker.onmessage?.({ data: { t: "reply", id, ...error } });
     const last = () => worker.sent.at(-1) as Extract<ToWorker, { t: "setIcons" }>;
     const square = { path: "M0 0H1V1Z" };
     const defined = graph.icons.define([square, square]);
@@ -420,12 +429,16 @@ describe("Graph.destroy", () => {
     reply(last().id);
     await expect(replaced).resolves.toBeUndefined();
 
-    const failed = graph.icons.add([{ path: "X" }]);
+    const errors: string[] = [];
+    graph.on("error", (e) => errors.push(e.message));
+    const bad = graph.icons.add([{ path: "X" }]);
     expect(Array.from(last().ids)).toEqual([4]);
-    reply(last().id, { code: "invalid-argument", message: "bad" });
-    await expect(failed).rejects.toThrow("bad");
+    worker.onmessage?.({ data: { t: "error", code: "invalid-argument", message: "icons: icon 0: bad", fatal: false } });
+    reply(last().id);
+    expect(Array.from(await bad)).toEqual([4]);
+    expect(errors).toEqual(["icons: icon 0: bad"]);
     graph.icons.add([square]);
-    expect(Array.from(last().ids)).toEqual([4]);
+    expect(Array.from(last().ids)).toEqual([5]);
   });
 
   it("icons.remove and icons.replace of an unknown id throw, and add stops at maxIcons", async () => {
@@ -455,7 +468,7 @@ describe("Graph.destroy", () => {
     const worker = FakeWorker.last;
     const square = { path: "M0 0H1V1Z" };
     const defined = graph.icons.define([square, square]);
-    worker.onmessage?.({ data: { t: "icons", id: (worker.sent.at(-1) as Extract<ToWorker, { t: "defineIcons" }>).id } });
+    worker.onmessage?.({ data: { t: "reply", id: (worker.sent.at(-1) as Extract<ToWorker, { t: "defineIcons" }>).id } });
     await defined;
     const sent = worker.sent.length;
     let err: unknown;
@@ -471,41 +484,6 @@ describe("Graph.destroy", () => {
     expect(Array.from((worker.sent.at(-1) as Extract<ToWorker, { t: "setIcons" }>).ids)).toEqual([2]);
     void graph.icons.add(Array.from({ length: CAPS.maxIcons - 3 }, () => square));
     expect(() => graph.icons.add([square])).toThrow(GraphError);
-  });
-
-  it("a define the worker rejects restores the ids from before it, unless a newer define ran", async () => {
-    const graph = await createGraph();
-    const worker = FakeWorker.last;
-    const square = { path: "M0 0H1V1Z" };
-    const reply = (id: number, error?: { code: string; message: string }) => worker.onmessage?.({ data: { t: "icons", id, ...error } });
-    const defineId = () => (worker.sent.at(-1) as Extract<ToWorker, { t: "defineIcons" }>).id;
-    const addIds = () => Array.from((worker.sent.at(-1) as Extract<ToWorker, { t: "setIcons" }>).ids);
-    const bad = { code: "invalid-argument", message: "bad" };
-
-    const defined = graph.icons.define([square, square, square]);
-    reply(defineId());
-    await defined;
-    graph.icons.remove([1]);
-
-    const failed = graph.icons.define([square]);
-    reply(defineId(), bad);
-    await expect(failed).rejects.toThrow("bad");
-    expect(() => graph.icons.replace(2, square)).not.toThrow();
-    expect(() => graph.icons.replace(1, square)).toThrow(GraphError);
-    void graph.icons.add([square, square]);
-    expect(addIds()).toEqual([1, 3]);
-
-    const older = graph.icons.define([square]);
-    const olderId = defineId();
-    const newer = graph.icons.define([square, square]);
-    const newerId = defineId();
-    reply(olderId, bad);
-    reply(newerId);
-    await expect(older).rejects.toThrow("bad");
-    await newer;
-    expect(() => graph.icons.replace(2, square)).toThrow(GraphError);
-    void graph.icons.add([square]);
-    expect(addIds()).toEqual([2]);
   });
 
   it("streams through messages without shared memory", async () => {
@@ -569,7 +547,7 @@ describe("Graph.destroy", () => {
     const msg = worker.sent.at(-1) as Extract<ToWorker, { t: "queryInside" }>;
     expect(msg.t).toBe("queryInside");
     expect(Array.from(msg.points)).toEqual([2, 4, 8, 4, 8, 12, 2, 12]);
-    worker.onmessage?.({ data: { t: "queryInside", id: msg.id, nodes: new Uint32Array([4, 9]) } });
+    worker.onmessage?.({ data: { t: "reply", id: msg.id, value: new Uint32Array([4, 9]) } });
     await expect(found).resolves.toEqual(new Uint32Array([4, 9]));
     expect(() => graph.query.inside({ points: [0, 0] })).toThrow();
   });
@@ -579,7 +557,7 @@ describe("Graph.destroy", () => {
     const worker = FakeWorker.last;
     const found = graph.query.inside({ x: 0, y: 0, width: 5, height: 5 });
     const msg = worker.sent.at(-1) as Extract<ToWorker, { t: "queryInside" }>;
-    worker.onmessage?.({ data: { t: "queryInside", id: msg.id, code: "internal", message: "query.inside: readback failed" } });
+    worker.onmessage?.({ data: { t: "reply", id: msg.id, code: "internal", message: "query.inside: readback failed" } });
     await expect(found).rejects.toBeInstanceOf(GraphError);
     await expect(found).rejects.toMatchObject({ code: "internal", message: "query.inside: readback failed" });
   });
@@ -595,8 +573,8 @@ describe("Graph.destroy", () => {
     const secondId = (worker.sent.at(-1) as Extract<ToWorker, { t: "queryInside" }>).id;
     const message = "query.inside: pipeline failed to load: no pipeline";
     worker.onmessage?.({ data: { t: "error", code: "internal", message } });
-    worker.onmessage?.({ data: { t: "queryInside", id: firstId, code: "internal", message } });
-    worker.onmessage?.({ data: { t: "queryInside", id: secondId, code: "internal", message } });
+    worker.onmessage?.({ data: { t: "reply", id: firstId, code: "internal", message } });
+    worker.onmessage?.({ data: { t: "reply", id: secondId, code: "internal", message } });
     await expect(first).rejects.toBeInstanceOf(GraphError);
     await expect(second).rejects.toMatchObject({ code: "internal", message });
     expect(errors).toHaveLength(1);
@@ -610,7 +588,7 @@ describe("Graph.destroy", () => {
     const msg = worker.sent.at(-1) as Extract<ToWorker, { t: "queryAt" }>;
     expect(msg).toMatchObject({ t: "queryAt", x: 10, y: 20 });
     const hit: Hit = { node: 3, edge: null, group: null, x: 1, y: 2, screenX: 10, screenY: 20, button: -1, shift: false, ctrl: false, alt: false, meta: false };
-    worker.onmessage?.({ data: { t: "queryAt", id: msg.id, hit } });
+    worker.onmessage?.({ data: { t: "reply", id: msg.id, value: hit } });
     await expect(found).resolves.toEqual(hit);
     expect(() => graph.query.at(NaN, 0)).toThrow();
   });
@@ -646,12 +624,12 @@ describe("Graph.destroy", () => {
     const msg = worker.sent.at(-1) as Extract<ToWorker, { t: "snapshot" }>;
     expect(msg).toEqual({ t: "snapshot", id: msg.id, type: "image/png" });
     const blob = new Blob(["png"], { type: "image/png" });
-    worker.onmessage?.({ data: { t: "snapshot", id: msg.id, blob } });
+    worker.onmessage?.({ data: { t: "reply", id: msg.id, value: blob } });
     await expect(shot).resolves.toBe(blob);
     const jpeg = graph.canvas.snapshot("image/jpeg");
     const second = worker.sent.at(-1) as Extract<ToWorker, { t: "snapshot" }>;
     expect(second.type).toBe("image/jpeg");
-    worker.onmessage?.({ data: { t: "snapshot", id: second.id, code: "internal", message: "no image" } });
+    worker.onmessage?.({ data: { t: "reply", id: second.id, code: "internal", message: "no image" } });
     await expect(jpeg).rejects.toThrow("no image");
     const pending = graph.canvas.snapshot();
     graph.destroy();
@@ -681,6 +659,22 @@ describe("0.3 namespaces", () => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
     document.body.replaceChildren();
+  });
+
+  it("sends nodeReserve to the worker, 100 by default", async () => {
+    await createGraph();
+    const init = () => FakeWorker.last.sent[0] as Extract<ToWorker, { t: "init" }>;
+    expect(init().options.nodeReserve).toBe(100);
+    await createGraph({ nodeReserve: 0 });
+    expect(init().options.nodeReserve).toBe(0);
+    await createGraph({ nodeReserve: 100_000 });
+    expect(init().options.nodeReserve).toBe(100_000);
+  });
+
+  it("rejects a nodeReserve that is not an integer >= 0", async () => {
+    for (const nodeReserve of [-1, 1.5, NaN, Infinity, -Infinity]) {
+      await expect(createGraph({ nodeReserve })).rejects.toMatchObject({ code: "invalid-argument", message: expect.stringMatching(/nodeReserve/) });
+    }
   });
 
   it("nodes.set sends a nodes message", async () => {
@@ -810,9 +804,9 @@ describe("0.3 namespaces", () => {
     graph.edges.add({ count: 1, indices: new Uint32Array([1, 2]), styles: new Uint32Array([5]) });
     const last = FakeWorker.last.sent.at(-1) as Extract<ToWorker, { t: "addEdges" }>;
     expect(last.t).toBe("addEdges");
-    expect(Array.from(last.indices)).toEqual([1]);
+    expect(Array.from(last.at)).toEqual([1]);
     expect(last.count).toBe(2);
-    expect(Array.from(last.ends)).toEqual([1, 2]);
+    expect(Array.from(last.indices!)).toEqual([1, 2]);
     expect(Array.from(last.styles!)).toEqual([5]);
   });
 
@@ -823,9 +817,9 @@ describe("0.3 namespaces", () => {
     graph.edges.update(new Uint32Array([2, 0]), { colors: new Uint32Array([1, 2, 3, 4]) });
     const last = FakeWorker.last.sent.at(-1) as Extract<ToWorker, { t: "updateEdgesAt" }>;
     expect(last.t).toBe("updateEdgesAt");
-    expect(Array.from(last.indices)).toEqual([2, 0]);
+    expect(Array.from(last.at)).toEqual([2, 0]);
     expect(Array.from(last.colors!)).toEqual([1, 2, 3, 4]);
-    expect(last.ends).toBeUndefined();
+    expect(last.indices).toBeUndefined();
   });
 
   it("edges.update rejects a removed edge and an end past the node slots", async () => {
@@ -1119,5 +1113,123 @@ describe("0.3 namespaces", () => {
     const graph = await createGraph();
     graph.debug.tune({ lodTargetPx: 0 });
     expect(FakeWorker.last.sent.at(-1)).toEqual({ t: "tune", tune: { lodTargetPx: 0 } });
+  });
+
+  it("debug.tune rejects NaN, Infinity, negative values, a pickRate below 1 and an unknown edge mode, and posts nothing", async () => {
+    const graph = await createGraph();
+    const worker = FakeWorker.last;
+    const sent = worker.sent.length;
+    const bad = [{ lodTargetPx: NaN }, { edgeMaxOverdraw: Infinity }, { edgeMinLengthPx: -1 }, { pickRate: 0.5 }, { pickRate: -Infinity }, { edgeMode: "blue" as never }];
+    for (const tune of bad) expect(errorCode(() => graph.debug.tune(tune))).toBe("invalid-argument");
+    expect(worker.sent.length).toBe(sent);
+    graph.debug.tune({ pickRate: 1, edgeMinLengthPx: 0, edgeMode: "chunk" });
+    expect(worker.sent.at(-1)).toEqual({ t: "tune", tune: { pickRate: 1, edgeMinLengthPx: 0, edgeMode: "chunk" } });
+  });
+
+  it("the fallback stream clamps z-index above 15 and leaves the host array as written", async () => {
+    const graph = await createGraph();
+    const worker = FakeWorker.last;
+    graph.nodes.set({ count: 3 });
+    const stream = graph.nodes.stream({ zIndex: true });
+    stream.zIndex.set([20, 3, 255]);
+    stream.commit();
+    const update = worker.sent.at(-1) as Extract<ToWorker, { t: "updateNodes" }>;
+    expect(Array.from(update.zIndex!)).toEqual([15, 3, 15]);
+    expect(Array.from(stream.zIndex)).toEqual([20, 3, 255]);
+  });
+
+  it("z-index above 15 throws on add, update and updateAll", async () => {
+    const graph = await createGraph();
+    graph.nodes.set({ count: 2 });
+    const sent = FakeWorker.last.sent.length;
+    expect(errorCode(() => graph.nodes.add({ count: 1, zIndex: new Uint8Array([16]) }))).toBe("invalid-argument");
+    expect(errorCode(() => graph.nodes.update(new Uint32Array([0]), { zIndex: new Uint8Array([16]) }))).toBe("invalid-argument");
+    expect(errorCode(() => graph.nodes.updateAll({ zIndex: new Uint8Array([0, 16]) }))).toBe("invalid-argument");
+    expect(FakeWorker.last.sent.length).toBe(sent);
+  });
+
+  it("the shared-memory stream refuses to commit once the slots changed", async () => {
+    vi.stubGlobal("crossOriginIsolated", true);
+    const graph = await createGraph();
+    graph.nodes.set({ count: 2 });
+    const s = graph.nodes.stream({ positions: true });
+    expect(FakeWorker.last.sent.at(-1)).toMatchObject({ t: "nodeStream", count: 2, positions: true });
+    s.positions.set([1, 2, 3, 4]);
+    expect(() => s.commit()).not.toThrow();
+    graph.nodes.add({ count: 1 });
+    expect(() => s.commit()).toThrow(/take a new stream/);
+  });
+
+  it("compact with nothing removed returns the identity table and posts nothing", async () => {
+    const graph = await createGraph();
+    const worker = FakeWorker.last;
+    graph.nodes.set({ count: 3 });
+    graph.edges.set({ count: 2, indices: new Uint32Array([0, 1, 1, 2]) });
+    const sent = worker.sent.length;
+    expect(Array.from(graph.nodes.compact())).toEqual([0, 1, 2]);
+    expect(Array.from(graph.edges.compact())).toEqual([0, 1]);
+    expect(worker.sent.length).toBe(sent);
+    expect(Array.from(graph.nodes.add({ count: 1 }))).toEqual([3]);
+    expect(Array.from(graph.edges.add({ count: 1, indices: new Uint32Array([0, 3]) }))).toEqual([2]);
+  });
+
+  it("edges.add with count 0 and icons.add with no icons post nothing", async () => {
+    const graph = await createGraph();
+    const worker = FakeWorker.last;
+    graph.nodes.set({ count: 2 });
+    const sent = worker.sent.length;
+    expect(graph.edges.add({ count: 0, indices: new Uint32Array(0) })).toEqual(new Uint32Array(0));
+    await expect(graph.icons.add([])).resolves.toEqual(new Uint16Array(0));
+    expect(worker.sent.length).toBe(sent);
+  });
+
+  it("debug.benchmark, icons.define and icons.add reject with destroyed after destroy", async () => {
+    const graph = await createGraph();
+    const running = graph.debug.benchmark({ path: [{ x: 0.5, y: 0.5, zoom: 1 }], frames: 1 });
+    graph.destroy();
+    await expect(running).rejects.toMatchObject({ code: "destroyed" });
+    await expect(graph.debug.benchmark({ path: [{ x: 0.5, y: 0.5, zoom: 1 }], frames: 1 })).rejects.toMatchObject({ code: "destroyed" });
+    await expect(graph.icons.define([{ path: "M0 0H1V1Z" }])).rejects.toMatchObject({ code: "destroyed" });
+    await expect(graph.icons.add([{ path: "M0 0H1V1Z" }])).rejects.toMatchObject({ code: "destroyed" });
+    await expect(graph.icons.add([])).rejects.toMatchObject({ code: "destroyed" });
+    await expect(graph.icons.define([{} as never])).rejects.toMatchObject({ code: "destroyed" });
+  });
+
+  it("a define with a bad icon resolves, reports it through error and keeps its id in use", async () => {
+    const graph = await createGraph();
+    const worker = FakeWorker.last;
+    const errors: GraphError[] = [];
+    graph.on("error", (e) => errors.push(e));
+    const square = { path: "M0 0H1V1Z" };
+    const defined = graph.icons.define([square, { path: "X" }, square]);
+    const msg = worker.sent.at(-1) as Extract<ToWorker, { t: "defineIcons" }>;
+    worker.onmessage?.({ data: { t: "error", code: "invalid-argument", message: "icons: icon 1: bad", fatal: false } });
+    worker.onmessage?.({ data: { t: "reply", id: msg.id } });
+    await expect(defined).resolves.toBeUndefined();
+    expect(errors.map((e) => [e.code, e.message])).toEqual([["invalid-argument", "icons: icon 1: bad"]]);
+    void graph.icons.add([square]);
+    expect(Array.from((worker.sent.at(-1) as Extract<ToWorker, { t: "setIcons" }>).ids)).toEqual([3]);
+    expect(() => graph.icons.replace(1, square)).not.toThrow();
+  });
+
+  it("remove rejects an index that is not an integer", async () => {
+    const graph = await createGraph();
+    graph.nodes.set({ count: 3 });
+    graph.edges.set({ count: 1, indices: new Uint32Array([0, 1]) });
+    expect(errorCode(() => graph.nodes.remove([1.5]))).toBe("invalid-argument");
+    expect(errorCode(() => graph.edges.remove([0.5]))).toBe("invalid-argument");
+    expect(graph.nodes.count).toBe(3);
+    expect(graph.edges.count).toBe(1);
+  });
+
+  it("the compact table the caller gets is not the one sent to the worker", async () => {
+    const graph = await createGraph();
+    graph.nodes.set({ count: 2 });
+    graph.edges.set({ count: 2, indices: new Uint32Array([0, 1, 1, 0]) });
+    graph.edges.remove([0]);
+    const remap = graph.edges.compact();
+    const msg = FakeWorker.last.sent.at(-1) as Extract<ToWorker, { t: "compactEdges" }>;
+    expect(msg.remap.buffer).not.toBe(remap.buffer);
+    expect(Array.from(remap)).toEqual([NO_INDEX, 0]);
   });
 });

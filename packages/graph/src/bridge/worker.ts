@@ -1,7 +1,7 @@
 /**
  * Render worker entry. Pure message dispatch — all logic lives in Engine.
  */
-import { GraphError } from "../api/errors";
+import { toGraphError } from "../api/errors";
 import { Engine } from "../engine/Engine";
 import { InputRing, type InputRecord } from "./InputRing";
 import { StreamSlots } from "./StreamSlots";
@@ -35,7 +35,7 @@ const pending: ToWorker[] = [];
 const fallbackRec: InputRecord = { type: 0, t: 0, x: 0, y: 0, dx: 0, dy: 0, buttons: 0, mods: 0, button: -1 };
 
 function fail(e: unknown, fatal: boolean): void {
-  const err = e instanceof GraphError ? e : new GraphError("internal", e instanceof Error ? e.message : String(e));
+  const err = toGraphError(e);
   post({ t: "error", code: err.code, message: err.message, fatal });
 }
 
@@ -54,19 +54,13 @@ async function init(msg: Extract<ToWorker, { t: "init" }>): Promise<void> {
       gpu: scope.navigator.gpu,
       requestFrame,
       onError: fail,
-      onBenchmark: (id, result, transfer) => post({ t: "benchmark", id, result }, transfer),
-      onLabelSnapshot: (id, snapshot, transfer) => post({ t: "labelSnapshot", id, snapshot }, transfer),
-      onSnapshot: (id, blob, error) => post(error ? { t: "snapshot", id, code: error.code, message: error.message } : { t: "snapshot", id, blob: blob! }),
-      onIcons: (id, error) => post(error ? { t: "icons", id, code: error.code, message: error.message } : { t: "icons", id }),
+      onReply: (id, value, error, transfer) => post(error ? { t: "reply", id, code: error.code, message: error.message } : { t: "reply", id, value }, transfer),
       onHit: (event, hit) => post({ t: event, hit }),
       onGesture: (msg) => post(msg),
       onDragStart: (index, nodes, x, y) => post({ t: "dragStart", index, nodes, x, y }, [nodes.buffer as ArrayBuffer]),
       onDrag: (event, index, dx, dy) => post({ t: event, index, dx, dy }),
       onView: (x, y, zoom, rotation) => post({ t: "view", x, y, zoom, rotation }),
-      onQueryAt: (id, hit) => post({ t: "queryAt", id, hit }),
       onSelect: (event) => post({ t: "select", ...event }, [event.nodes.buffer as ArrayBuffer]),
-      onQueryInside: (id, nodes, error) =>
-        error ? post({ t: "queryInside", id, code: error.code, message: error.message }) : post({ t: "queryInside", id, nodes: nodes! }, [nodes!.buffer as ArrayBuffer]),
       probeSink: {
         ring: (layout, frames, buffer) => post({ t: "debugRing", columns: layout.columns, gpuGroups: layout.gpuGroups, frames, buffer }),
         rows: (data) => post({ t: "debugRows", data }, [data.buffer as ArrayBuffer]),
@@ -127,13 +121,13 @@ function dispatch(msg: ToWorker): void {
     case "edges":
       return e.setEdges(msg.count, msg, msg.labels ?? []);
     case "addEdges":
-      return e.addEdges(msg.indices, msg.count, { indices: msg.ends, styles: msg.styles, colors: msg.colors }, msg.labels);
+      return e.addEdges(msg.at, msg.count, msg, msg.labels);
     case "removeEdges":
       return e.hideEdges(msg.indices);
     case "updateEdgesAt":
-      return e.updateEdgesAt(msg.indices, { indices: msg.ends, styles: msg.styles, colors: msg.colors }, msg.labels);
+      return e.updateEdgesAt(msg.at, msg, msg.labels);
     case "updateEdges":
-      return e.updateEdges({ indices: msg.ends, styles: msg.styles, colors: msg.colors }, msg.labels);
+      return e.updateEdges(msg, msg.labels);
     case "flagEdges":
       return e.flagEdges(msg.indices, msg.flags, msg.on);
     case "compactEdges":

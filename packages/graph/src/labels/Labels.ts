@@ -1,3 +1,4 @@
+import { NO_INDEX } from "../api/Slots";
 import { LABEL_CONSTANTS, LABEL_PARAMS, LIVE_LABEL } from "../data/Layouts";
 import { GlyphAtlas } from "./GlyphAtlas";
 import { createRun, layoutLabel } from "./layoutLabel";
@@ -26,6 +27,8 @@ export interface LabelMetrics {
   fadeS: number;
   glyphTable: number;
 }
+
+export type TextKind = "nodes" | "edges";
 
 interface TextSet {
   texts: readonly string[] | null;
@@ -139,12 +142,44 @@ export class Labels {
     return true;
   }
 
-  setNodeTextAt(indices: Uint32Array, texts: readonly string[]): void {
-    this.writeAt(this.nodes, indices, texts);
+  textAt(kind: TextKind, indices: Uint32Array, texts: readonly string[] | null): boolean {
+    const set = kind === "edges" ? this.edges : this.nodes;
+    if (indices.length === 0 || (texts === null && set.texts === null)) return false;
+    const n = set.count;
+    const prev = set.texts;
+    let owned: string[];
+    if (prev && prev.length === n) owned = prev as string[];
+    else {
+      owned = new Array<string>(n).fill("");
+      if (prev) for (let i = 0; i < Math.min(prev.length, n); i++) owned[i] = prev[i]!;
+    }
+    const m = this.metrics();
+    let minWord = Infinity;
+    let maxWord = -Infinity;
+    for (let j = 0; j < indices.length; j++) {
+      const i = indices[j]!;
+      const text = texts?.[j] ?? "";
+      owned[i] = text;
+      const w = text ? layoutLabel(text, this.atlas.advance, m.maxWidth, this.atlas.inset, this.run) : 0;
+      if (w > 0 && w < set.minWidth) set.minWidth = w;
+      const word = i >>> 1;
+      set.words[word] = i & 1 ? (set.words[word]! & 0x0000ffff) | (w << 16) : (set.words[word]! & 0xffff0000) | w;
+      if (word < minWord) minWord = word;
+      if (word > maxWord) maxWord = word;
+    }
+    set.texts = owned;
+    this.device.queue.writeBuffer(set.buffer, minWord * 4, set.words, minWord, maxWord - minWord + 1);
+    return true;
   }
 
-  setEdgeTextAt(indices: Uint32Array, texts: readonly string[]): void {
-    this.writeAt(this.edges, indices, texts);
+  compactText(kind: TextKind, remap: Uint32Array): void {
+    const set = kind === "edges" ? this.edges : this.nodes;
+    const prev = set.texts;
+    if (!prev) return;
+    const out = new Array<string>(set.count).fill("");
+    for (let i = 0; i < Math.min(remap.length, prev.length); i++) if (remap[i] !== NO_INDEX) out[remap[i]!] = prev[i] ?? "";
+    set.texts = out;
+    this.restart(set);
   }
 
   setNodeCount(nodeCount: number): void {
@@ -242,34 +277,6 @@ export class Labels {
     const w0 = from >>> 1;
     this.device.queue.writeBuffer(set.buffer, w0 * 4, set.words, w0, Math.ceil(i / 2) - w0);
     return true;
-  }
-
-  private writeAt(set: TextSet, indices: Uint32Array, texts: readonly string[]): void {
-    if (indices.length === 0) return;
-    const n = set.count;
-    const prev = set.texts;
-    let owned: string[];
-    if (prev && prev.length === n) owned = prev as string[];
-    else {
-      owned = new Array<string>(n).fill("");
-      if (prev) for (let i = 0; i < Math.min(prev.length, n); i++) owned[i] = prev[i]!;
-    }
-    const m = this.metrics();
-    let minWord = Infinity;
-    let maxWord = -Infinity;
-    for (let j = 0; j < indices.length; j++) {
-      const i = indices[j]!;
-      const text = texts[j] ?? "";
-      owned[i] = text;
-      const w = text ? layoutLabel(text, this.atlas.advance, m.maxWidth, this.atlas.inset, this.run) : 0;
-      if (w > 0 && w < set.minWidth) set.minWidth = w;
-      const word = i >>> 1;
-      set.words[word] = i & 1 ? (set.words[word]! & 0x0000ffff) | (w << 16) : (set.words[word]! & 0xffff0000) | w;
-      if (word < minWord) minWord = word;
-      if (word > maxWord) maxWord = word;
-    }
-    set.texts = owned;
-    this.device.queue.writeBuffer(set.buffer, minWord * 4, set.words, minWord, maxWord - minWord + 1);
   }
 
   private readonly build = (user: number, slot: number, index: number): number => {

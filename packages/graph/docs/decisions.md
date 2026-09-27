@@ -8,6 +8,139 @@ bandwidth), Edge 153, 1M nodes / 3M edges at fit unless stated.
 
 ---
 
+## 0073 — The node reserve is an init option, 100 by default; an add inside it marks STYLE | STATE
+
+The reserve of 0055 is `GraphOptions.nodeReserve` (user decision): an integer
+>= 0 set at `Graph.create` only, 100 by default. An add that fits is an index
+scatter, the add that takes the last slot grows to `slots + reserve`, and an
+add larger than the reserve grows to its new count + reserve in one rebuild.
+With 0 every add that needs a new slot grows to exactly the slots it needs,
+and an add that reuses freed slots does not grow. The node limit stays
+`EDGE_END_MASK + 1` (2^28): the reserve is clamped so that slots + reserve
+never pass it, so a large reserve never lowers the limit, and a store already
+at the limit does not grow. `large` on an AMD Radeon 890M, 250 single
+adds, one run per value (mean / p95 ms, summed wall): 0 grows on every add,
+wall 25.33 / 50.49, GPU 20.38 / 29.43, CPU 8.01 / 11.35, summed wall 6,332;
+100 grows at adds 100 and 200 (wall 65.24, GPU 29.64, CPU 19.51) and is wall
+1.33 / 2.11, GPU 8.30 / 8.93 inside the reserve, summed wall 460; 100,000
+never grows, wall 1.41 / 2.24, GPU 8.21 / 8.79, summed wall 353. The hidden
+slots cost nothing per frame: `large` bench, 2 runs each, GPU mean
+3.85 -> 3.69 ms (−0.16 ms, −4.0%) and p95 8.08 -> 7.70 ms (−0.38 ms, −4.6%)
+from 100 to 100,000, worker CPU 0.681 ms for both; the drop is run noise (one
+100 run kept 149 of 200 GPU samples).
+
+An add inside the reserve marks `Dirty.STYLE | Dirty.STATE` instead of
+`POSITIONS | STYLE | STATE`: `STATE` already runs node chunk bounds, the node
+cull, the label solve and the pick, and new nodes have no
+edges, so the whole-graph edge bounds refit is skipped. Frame of one add
+inside the reserve, AMD Radeon 890M: GPU 7.58 -> 6.27 ms, `edge.bounds`
+2.61 -> 0 ms, measured on the Package 8 tree (1/16 reserve, bench communities
+story, 1M). On the final tree (`large`, flat reserve, mean / p95) an add
+inside the default reserve is GPU 8.33 / 9.07 ms, worker CPU 0.524 / 0.875 ms and
+1.34 / 2.14 ms to the next frame, against an idle frame 0 at the same view of
+8.09 / 8.63 ms GPU and 0.481 / 0.570 ms CPU. A reserve of 1/16
+of the slots was measured too (no per-frame cost, growth every 62,500 adds at
+1M) and not kept: at 10M a growth costs about 350 ms (node sort 74 ms, edge
+sort 90 ms), paid once every 100 adds with the default reserve.
+
+## 0072 — Replies share one message; a bad icon never fails a define
+
+The worker answers every request (`query.at`, `query.inside`, snapshots,
+label snapshots, icons, benchmark) with one `reply` message
+`{ id, value | code, message }`, and the facade keeps one map of pending
+replies. `destroy` rejects them all with `destroyed`; a second benchmark gets
+an `invalid-argument` reply. A label snapshot with nothing to place (no
+nodes, no label text, no cull buffers, or a failed readback) is answered at
+the end of the frame with an empty snapshot, and a placement in flight on a
+graph that empties stops. `icons.define`, `icons.add` and `icons.replace`
+never fail as a whole: each bad icon is drawn blank, keeps its id and is
+reported as one `error` event (`invalid-argument`, naming the icon); the call
+resolves. The rollback of the main-thread ids is gone. A define with bad
+icons packs the icon buffer once. `icons.add([])` resolves without a
+message. Checked on the sandbox story: define with one bad icon of three
+resolves with one error, and nodes drawn with every id show no other error.
+No speed effect: this runs on calls, not per frame.
+
+## 0071 — Picking is one queue in an Interaction module
+
+Press, drag, shape, selection, hover gating and pick routing moved from
+`Engine`, `Press`, `HoverGate` and `Selection` into one `Interaction` module
+that reaches the engine through a small host, so it runs in Node tests. The
+press is one state field (idle, picking, armed click, armed drag, armed
+shape, dragging, shaping). Presses, double clicks, context menus and
+`query.at` are jobs in a ring of reused objects: each tick submits the jobs
+not yet sent while a pick readback slot is free (three slots), and results
+are matched by token and finished in queue order, a later result waiting in
+its job. The hover is one merged pick in its own slot, so it never blocks a
+job. Two double clicks now give two events, a quick second press keeps the
+first click, and a failed readback finishes its job with an empty hit. Sandbox
+story (100,000 nodes), AMD Radeon 890M, mean / p95 of 2 runs: three parallel
+`query.at` 9.48 / 10.89 -> 6.08 / 7.29 ms; click with the pointer moving
+15.51 / 16.51 -> 15.10 / 16.59 ms. Bench against the Package 5 tree (GPU
+mean / p95, one run): large −3.4% / −1.8%, large-zoom −1.7% / −1.1%,
+large-icons −0.1% / +0.9%.
+A worker trace of that click (60 clicks) puts about 3 ms in the worker, from
+`pointerdown` to the posted click (readback 2.65 ms of it), and about 12 ms in
+the main thread holding the posted message: every click event arrived
+within 0.8 ms after the next main-thread animation frame. That wait is the
+main thread's frame cadence, not engine work, so the path is unchanged.
+
+## 0070 — Look lists follow each flag; flagged edges have one draw path
+
+The selected and focused lists (nodes and edges) are updated from the bits
+each flag call changes: an index is appended when its bit goes on, stale
+entries stay (the look shader checks the bit again), and the list is
+filtered only when stale entries outnumber live ones. A flag call no longer
+scans every node or edge, and the selection is read from the selected list
+in first-selection order, with no sorted copy. 1,000 `nodes.flag` calls of one
+index at 1M nodes: 0.2–2.8 ms in all, against 1.41–1.46 s for the removed
+scans (the deleted loop reproduced in Node). Selected and focused edges are
+drawn only by the look pass: the recolour in `edge_geometry` and its frame
+fields are gone (Frame 136 -> 120 B). `FRAME_FLAG_EDGE_LOOKS` now means "the
+look pass is loaded"; until then flagged edges stay in the main pass in
+their normal look, so none disappears while the pass compiles. The edge
+segment and distance code is shared by the draw, pick and hover shaders.
+Bench (AMD Radeon 890M, GPU mean / p95, mean of 2 runs, before -> after
+R4): large 3.82 / 8.05 -> 3.94 / 8.12 ms (one run +0.4%, one +6.0%, not
+attributed), large-zoom 6.28 / 8.58 -> 6.28 / 8.61 ms, large-icons
+3.81 / 7.90 -> 3.76 / 7.78 ms.
+
+## 0069 — Labels own the label text
+
+`Labels` is the only owner of node and edge label text, the compact remap
+included; the store copies and the engine's duplicate setters are gone, and
+one `textAt` writes or blanks text by index. No speed effect (message
+handlers only). LabelCorrectness at 1M with edge labels: 8 of 8 views, 0
+overlaps; set, add, update, remove and compact keep the right widths.
+
+## 0068 — Scattered writes keep a bitset and an index list
+
+A channel's scattered writes keep 1 bit per slot plus a list of the indices
+written (`IndexUploads`), instead of 4 B per slot per channel (about 120 MB
+per edge channel at 30M edges). The values are read from the CPU mirror at
+flush, so the latest write wins and there is no order rule between index and
+range jobs; dirty ranges upload straight from the mirror. Edge state is a
+channel like the others. A drag writes positions without allocating per
+frame. A restyle during a drag, or of every edge, runs the full edge bounds
+pass instead of the restyle list, and hidden edges no longer widen chunk
+bounds. Bench (AMD Radeon 890M, GPU mean / p95, before -> after): large
+3.62 / 7.61 -> 3.70 / 7.60 ms, large-zoom 5.92 / 8.16 -> 5.97 / 8.16 ms,
+large-icons 3.70 / 7.60 -> 3.70 / 7.43 ms. Drag at 1M, GPU / worker CPU mean:
+1 node 2.81 / 0.16 ms, 100 nodes 2.88 / 0.14 ms, 10,000 nodes 3.90 / 0.17 ms.
+
+## 0067 — Edge colour word 0 means the style colour
+
+A per-edge colour word of `0` draws with `style.edge.color`; the draw and the
+edge pick select on the word they already load. This replaces the tint mask
+and the rewrite of every tinted edge on a tint change: a tint change now
+costs one uniform write. New colour slots and the edges without colours in
+a first colour write get 0. Hosts hide edges with `Flag.hidden`, not with
+transparent black. The store also keeps a live count of directed edges, so
+the arrow variants turn off when the last directed edge goes. Bench (AMD
+Radeon 890M, GPU mean / p95, before -> after): large 3.67 / 7.78 ->
+3.62 / 7.61 ms, large-zoom 6.04 / 8.38 -> 5.92 / 8.16 ms, large-icons
+3.66 / 7.55 -> 3.70 / 7.60 ms.
+
 ## 0066 — Icons are added, replaced and removed by id; only changed layers are built
 
 `icons.add` takes ids from a main-thread `Slots` (freed ids first, capped at
@@ -35,10 +168,11 @@ decides the gesture: a press on a node drags (when drag is on); a press on
 empty space with the key held draws the shape; otherwise it pans; a press
 that does not move is a click. While the key is held the pan waits for the
 pick, like a node drag. Touch presses carry a `MOD.TOUCH` bit and never start
-a shape. In `"auto"` a `Selection` (sorted index list) turns click, shift-click,
-empty click and shape results into added / removed lists applied with
-`flagNodes(STATE_SELECTED)`; `select` fires with the selection after the
-change. `"manual"` only reports the clicked node or the nodes inside.
+a shape. In `"auto"` click, shift-click, empty click and shape results set
+or clear `STATE_SELECTED` through `flagNodes`, and the selection is read from
+the selected look list (0070); `select` fires with the selection after the
+change, in first-selection order. `"manual"` only reports the clicked node or
+the nodes inside.
 The key that starts a shape does not also mean "add" (`shapeAdds`): with
 `selectKey: "shift"` a plain shape replaces and ctrl or meta adds; with any
 other key or `null`, shift adds.
@@ -61,8 +195,8 @@ atomic and reserves its range with one global `atomicAdd`, then writes the
 user index (`order[i]`). The count is read back first, then only `count`
 words, so a small selection in 10M nodes does not copy 40 MB. The pass runs
 only on request, after the frame submit or on an idle tick, so it reads the
-same positions and camera as the last drawn frame. `query.at` reuses the
-pick pass with a one-off token. Timing, one run, 10 calls request to resolve
+same positions and camera as the last drawn frame. `query.at` is a job in
+the pick queue (0071). Timing, one run, 10 calls request to resolve
 (mean / p95): 1M nodes box 5.78 / 7.34 ms (287k hits), lasso 5.56 / 5.96 ms;
 10M nodes box 14.54 / 37.89 ms (the first call grows the buffer), lasso
 12.94 / 31.28 ms. The GPU result is the reference for `query.inside`: the
@@ -138,7 +272,8 @@ groups off) and `style.hover`, so the highlight draws with no listener at all.
 The worker posts `hover`, `click`, `doubleClick` and `contextMenu` only while
 the main thread says a listener exists. One `listen` message carries every
 worker event with a listener and replaces the old `pick` message. A press is
-tracked, and picked, only when a `click` listener exists or node drag is on. A
+tracked, and picked, only when a `click` listener exists, node drag is on or
+selection is on. A
 double click (the DOM `dblclick`, sent as input record 7) and a context menu
 (the DOM `contextmenu`, sent as input record 8) are picked only while their
 listener exists. A context menu record cancels the press in progress, with no
@@ -181,14 +316,16 @@ stay comparable. The `view` event is posted after `publishState` on frames with
 listener means no extra work. `toWorld` and `toScreen` run on the main thread
 from the published view, with no message.
 
-Numbers: measured at the end of the 0.3 rework.
+End bench (AMD Radeon 890M, 3 rounds, GPU mean / p95): large-zoom base `0d03e4e` -> final 6.25 / 8.52 -> 6.24 / 8.57 ms (−0.2% /
++0.6%), rework `c64fb4e` -> final 6.33 / 8.83 -> 6.24 / 8.57 ms (−1.5% /
+−2.9%); the other four cases move at most 0.09 ms GPU mean in both.
 
 ## 0059 — Arrowheads compile when an edge is directed; engine tuning moves to debug.tune
 
-The `directedEdges` option is gone. The store sets `hasDirected` when a style
-word written by `edges.set`, `add`, `update` or `updateAll` has the directed
-bit (`set` and `updateAll` rescan all styles, so the flag can clear). The
-engine then builds the `EDGE_ARROWS=1` variants of edge cull, edge geometry,
+The `directedEdges` option is gone. The store keeps a live count of the
+directed edges that are not removed: `edges.set`, `updateAll` with styles and
+`compact` recount it, and `add`, `update` and removal adjust it per edge
+(0067). While it is above 0 the engine builds the `EDGE_ARROWS=1` variants of edge cull, edge geometry,
 edge pick and edge hover, keeps drawing without arrows until all of them are
 ready, and switches them in one go, so the vertex count the cull writes always
 matches the geometry pipeline. Undirected graphs never build them.
@@ -209,20 +346,18 @@ large 3.83 / 7.82 -> 3.47 / 7.43 and 3.90 / 7.97 ms, large-zoom 6.07 / 8.53 ->
 `style.hover`, `style.selected`, `style.focused` and `style.dimmed` are runtime
 looks. The hover pass still draws the one hovered node and edge; it now also
 draws selected and focused nodes as instanced outline rings, one draw per look,
-over a GPU list of user indices mapped through `rank`. The worker rebuilds the
-list with one scan of the node state mirror when a flag call touches those
-bits, and on `nodes.set`/`nodes.compact`; the vertex
+over a GPU list of user indices mapped through `rank`. The worker keeps the
+list up to date from the bits each flag call changes (0070); the vertex
 shader skips entries whose bit is gone, so remove and add need no rebuild. The
 ring pipeline has no icon bindings, so it stays within the 10 storage buffers
 per stage. Selected and focused edges get the same treatment: an instanced
 draw per look over a worker-kept list of user edge indices, mapped through
 `edgeRank` (graph 8 + edgeRank + list = 10 storage buffers), run only while
 the list is non-empty. It ignores thinning, the minimum length and the chunk
-bound, so a flagged edge shows at any zoom. While it runs, `FRAME_FLAG_EDGE_LOOKS`
-makes `edge_geometry` skip flagged edges so none is drawn twice; otherwise
-`edge_geometry` recolours them from the frame uniform. The edge list is rebuilt
-on `edges.flag` (look bits), `edges.remove`, node removal, `edges.compact`,
-`edges.set` and `nodes.set`. Dimmed nodes get the alpha factor in the cull scatter (the
+bound, so a flagged edge shows at any zoom. Once the look pass is loaded,
+`FRAME_FLAG_EDGE_LOOKS` makes `edge_geometry` skip flagged edges, so they are
+drawn only by the look pass (0070). The edge list follows the same flag
+updates as the node list. Dimmed nodes get the alpha factor in the cull scatter (the
 instance has no node index, and once per node beats once per vertex), gated
 by `FRAME_FLAG_DIMMED`, set only while the exact dimmed count is non-zero;
 edges with a dimmed end use the same flag. `style.hover: false` stops the
@@ -263,8 +398,10 @@ API's `camera.get()` divides the published device-px zoom back down, and
 `Engine.resize` rescales `camera.zoom` on a pixel-ratio change so the CSS
 zoom a caller already set stays put. No speed impact: the conversion is one
 multiply or divide per `camera.set`/`camera.get` call, not per frame or per
-node. Measured at the end of the 0.3 rework (the runner is at pixel ratio 1,
-where the conversion is a no-op).
+node. End bench (AMD Radeon 890M, 3 rounds, the runner at pixel ratio 1 where
+the conversion is a no-op), GPU mean, base `0d03e4e` -> final: large 4.07 ->
+3.98 ms (−2.1%), large-zoom 6.25 -> 6.24 ms (−0.2%), large-icons 3.76 -> 3.84
+ms (+2.1%), mesh 2.43 -> 2.37 ms (−2.6%), hierarchy 3.01 -> 3.01 ms (+0.0%).
 
 ## 0055 — Nodes and edges live in stable slots; removal scans the edge list
 
@@ -280,14 +417,25 @@ flight, and maps late answers through any `edges.compact` (dropped after an
 30M edges. An adjacency table was rejected: 280 MB and a 1.26 s build at 30M
 edges, paid by every graph to speed up a call most graphs never make.
 
-The engine keeps 100 hidden empty node slots past `nodes.slots`. An add that
-fits in them is an index scatter (no rebuild); the add that takes the last one
-grows the buffers to `slots + 100` (one rebuild: identity order, node sort,
-edge reload and re-sort). `nodes.set` and `nodes.compact` also leave 100. The
-reserve is internal: `nodes.slots`, `stats().nodeCount`, streams, `updateAll`
-and labels never include it, and CPU bounds skip hidden nodes. Growth timing
-(`add-nodes.js` on `large`, 250 single adds, before = `nodes.set` with
-`count + 1` on every add): measured at the end of the 0.3 rework.
+The engine keeps a reserve of hidden empty node slots past `nodes.slots`
+(`GraphOptions.nodeReserve`, 100 by default, see 0073). An add that fits in
+them is an index scatter (no rebuild); the add that takes the last one grows
+the buffers to `slots + reserve` (one rebuild: identity order, node sort,
+edge reload and re-sort). `nodes.set` and `nodes.compact` also leave the
+reserve. The reserve is internal: `nodes.slots`, `stats().nodeCount`,
+streams, `updateAll` and labels never include it, and CPU bounds skip hidden
+nodes. With the default, the add that takes the last of the 100 slots grows
+(the 100th and 200th adds of a run).
+Growth timing (`add-nodes.js` on `large`, 1M nodes and 1,511,683 edges, 250
+single adds, AMD Radeon 890M, mean; before = base `0d03e4e` `setNodes` with
+`count + 1` on every add, edges kept; after = `nodes.add`): an add inside the
+reserve GPU 19.22 -> 8.33 ms (−10.89 ms, −56.7%), worker CPU 7.764 -> 0.524 ms
+(−7.240 ms, −93.3%), wall to the next frame 19.39 -> 1.34 ms (−18.06 ms,
+−93.1%); a growth add wall 19.39 -> 61.77 ms (+42.38 ms, +218.5%), GPU
+19.22 -> 30.07 ms (+10.85 ms, +56.5%), CPU 7.764 -> 16.72 ms (+8.96 ms,
++115.4%; node sort 8.42 ms, edge sort 13.46 ms). Summed wall over the 250
+adds: 4,848 -> 455 ms (−4,394 ms, −90.6%). The GPU lines also compare two
+engines: an idle frame 0 at this view is about 3.4 ms on base, 8.09 ms on final.
 
 ## 0054 — Edges get slots and a state word; the partial path is b
 
@@ -317,7 +465,8 @@ edited partially allocates nothing new. Style and colour scatters by index mark
 label tree costs 17 + 7 ms on `xlarge`. Instead `edge_restyle` lists the chunks
 of the restyled edges (`edgeRank[user] >> EDGE_CHUNK_SHIFT`, deduped by a mark
 word in the chunk record) into the drag move list, and `edge_bounds_list`
-recomputes only those, so the width bound follows both widening and narrowing
+recomputes only those (during a drag, or when every edge is restyled, the full
+bounds pass runs instead, 0068), so the width bound follows both widening and narrowing
 (on `large`, 1,000 edges widened 1 -> 8 px: visible edges 183,614 -> 128,811,
 equal to a full rebuild, and back to 183,614 when narrowed). `updateAll` with
 styles marks `Dirty.EDGES` and rebuilds every bound.
@@ -354,8 +503,9 @@ zero-length edge. The edge pick select step keeps a group 1 layout without
 
 The end reads are gated on `FRAME_FLAG_HIDDEN` in the frame uniform. The store
 counts the nodes hidden through `nodes.flag` exactly (old bit against new bit
-per index, set or zero on `"all"`, recounted from the mirror when the node count
-changes), and the flag is on only while that count is above 0. Ungated, the two reads per edge
+on every indexed state write, recounted from the mirror on `"all"` and on
+compact, removed nodes never counted), and the flag is on only while that
+count is above 0. Ungated, the two reads per edge
 cost +4% to +5% GPU mean with nothing flagged (large 3.89 / 3.83 -> 4.29 /
 3.83 / 4.10 ms, large-zoom 6.13 / 6.12 -> 6.50 / 6.33 / 6.33 ms, large-icons
 3.75 / 3.72 -> 3.92 / 3.90 / 3.92 ms), in `render` and `label.edges`.
@@ -382,10 +532,10 @@ against about 95,000 in the others.
 `nodes.update(indices, data)` replaces `updateNodes(start, data)`. Scattered
 writes no longer go through `DirtyRanges`, which folds into one covering range
 past 64 ranges and uploads most of the buffer. Each node channel keeps an index
-list for the frame (a later write of the same node wins) and uploads one
-(index, slot) pair and the packed value per node, through the existing
-`scatter_update` kernel. The index job runs before the range job of the same
-channel: range jobs read the mirror at flush time, so they are never stale.
+list for the frame, deduped by a bitset (0068), and uploads one (index, slot)
+pair and the packed value per node, through the existing `scatter_update`
+kernel. Index and range jobs both read the mirror at flush time, so the latest
+write wins in any order.
 
 Measured on AMD Radeon 890M, Edge headless, 1M nodes, positions of n scattered
 nodes written every frame (worker CPU mean / p95). Upload before is the mean

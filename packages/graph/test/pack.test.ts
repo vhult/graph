@@ -33,8 +33,6 @@ describe("Pack", () => {
     const out = packNodeSizes(new Float32Array([1, 2]), new Uint32Array(2));
     expect(out[0]).toBe(0x3c00);
     expect(out[1]).toBe(0x4000);
-    const kept = packNodeSizes(new Float32Array([1, 2]), new Uint32Array([0, 5 << 16, 7 << 16]), 1);
-    expect(Array.from(kept)).toEqual([0x3c00 | (5 << 16), (0x4000 | (7 << 16)) >>> 0]);
     expect(packNodeSizes(new Float32Array([1, 2]), new Uint32Array([9 << 16]))[1]).toBe(0x4000);
   });
 

@@ -1,9 +1,9 @@
 import { PICK_CONSTANTS, PICK_PARAMS, pickOutWords } from "../data/Layouts";
-import { edgeConstants, edgeKey, lodKey, type Tunable, type Tune } from "../engine/Tune";
+import { edgeConstants, edgeKey, lodKey, type Tune } from "../engine/Tune";
 import type { ContractLayouts } from "../gpu/BindLayouts";
 import type { FrameContext } from "../gpu/FrameGraph";
 import type { GraphBuffers } from "../gpu/GraphBuffers";
-import { Variants } from "../gpu/Lazy";
+import { Tuned } from "../gpu/Lazy";
 import { createShaderModule } from "../gpu/ShaderModules";
 import type { EdgeCullPass } from "./EdgeCullPass";
 import type { TransformCullPass } from "./TransformCullPass";
@@ -56,14 +56,11 @@ const SLOTS = 3;
 const KEY_SIZE = 14;
 const READBACK_BYTES = 20;
 
-export const PICKED_NODES = 1;
-export const PICKED_EDGES = 2;
-
 function pickKey(t: Tune): string {
   return `${lodKey(t)}|${edgeKey(t)}`;
 }
 
-export class PickPass implements Tunable {
+export class PickPass {
   private readonly params: GPUBuffer;
   private readonly paramData = new ArrayBuffer(PICK_PARAMS.size);
   private readonly paramF32 = new Float32Array(this.paramData);
@@ -75,13 +72,12 @@ export class PickPass implements Tunable {
   private out: GPUBuffer | null = null;
   private groups: Groups | null = null;
   private pending: Slot | null = null;
-  private readonly pipelines = new Variants<Pipelines>();
   onResult: PickResult | null = null;
 
   private constructor(
     private readonly device: GPUDevice,
     private readonly layouts: Record<"nodeGraph" | "nodeState" | "edgeGraph" | "edgeSelectGraph" | "edgeState" | "select" | "test" | "resolve" | "empty", GPUBindGroupLayout>,
-    private readonly make: (t: Tune) => Promise<Pipelines>,
+    readonly pipelines: Tuned<Pipelines>,
   ) {
     this.params = device.createBuffer({ label: "pick/params", size: PICK_PARAMS.size, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.args = device.createBuffer({ label: "pick/args", size: 16, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.INDIRECT });
@@ -143,22 +139,10 @@ export class PickPass implements Tunable {
       ]);
       return { nodeSelect, nodeTest, nodeResolve, edgeSelect, edgeTest, edgeResolve };
     };
-    const pass = new PickPass(device, layouts, makeAll);
-    await pass.loadTune(tune);
-    pass.useTune(tune);
-    return pass;
-  }
-
-  loadTune(t: Tune): Promise<unknown> {
-    return this.pipelines.load(pickKey(t), () => this.make(t));
-  }
-
-  hasTune(t: Tune): boolean {
-    return this.pipelines.get(pickKey(t)) !== null;
-  }
-
-  useTune(t: Tune): void {
-    this.pipelines.use(pickKey(t));
+    const pipelines = new Tuned(pickKey, makeAll);
+    await pipelines.loadTune(tune);
+    pipelines.useTune(tune);
+    return new PickPass(device, layouts, pipelines);
   }
 
   get free(): boolean {
@@ -229,7 +213,7 @@ export class PickPass implements Tunable {
     }
     pass.end();
     encoder.copyBufferToBuffer(this.out, C.PICK_NODE_RESULT * 4, slot.buffer, 0, READBACK_BYTES);
-    const picked = (nodes ? PICKED_NODES : 0) | (edges ? PICKED_EDGES : 0);
+    const picked = (nodes ? C.PICK_FLAG_NODES : 0) | (edges ? C.PICK_FLAG_EDGES : 0);
     slot.busy = true;
     slot.token = req.token * 4 + picked;
     this.pending = slot;
@@ -240,7 +224,10 @@ export class PickPass implements Tunable {
     const slot = this.pending;
     if (!slot) return;
     this.pending = null;
-    slot.buffer.mapAsync(GPUMapMode.READ).then(slot.read, () => (slot.busy = false));
+    slot.buffer.mapAsync(GPUMapMode.READ).then(slot.read, () => {
+      slot.busy = false;
+      this.onResult?.(-1, -1, 1, slot.token);
+    });
   }
 
   private bind(graph: GraphBuffers, nodeState: GPUBuffer, edgeState: GPUBuffer | null, lines: GPUBuffer | null, out: GPUBuffer): Groups {
@@ -286,6 +273,7 @@ export class PickPass implements Tunable {
   }
 
   destroy(): void {
+    this.onResult = null;
     this.params.destroy();
     this.args.destroy();
     this.out?.destroy();
