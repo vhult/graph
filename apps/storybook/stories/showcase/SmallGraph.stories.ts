@@ -1,132 +1,128 @@
-/**
- * A small graph built by hand to look good up close: a hub, six groups around
- * it, each a head with its members fanned outward. Few enough nodes to see
- * every shape, border, gradient and arrowhead — the place to judge how things
- * LOOK. The other stories are where to judge speed.
- *
- * What to check:
- *   - Edges meet nodes cleanly; with `directed`, arrowheads touch the target's rim.
- *   - Node sizes, colours and edge gradients read well at every zoom.
- *   - Labels: every node named, relations along the edges where they fit.
- */
 import type { Meta, StoryObj } from "@storybook/html-vite";
-import { NO_ICON, NodeShape, packEdgeStyle, type Graph } from "@vhult/graph";
-import { PALETTE, rgbToWord, type GraphDataset } from "@vhult/graph-bench";
-import { GRAPH_ARGS, graphArgTypes, renderGraph, type GraphArgs, type GraphLabels } from "../../src/graphStory";
-import { DEMO_ICON_LIST, iconId, type DemoIcon } from "../../src/icons";
+import type { Graph, Hit } from "@vhult/graph";
+import { attachFocus, type Focus } from "../../src/focus";
 import { showReadout } from "../../src/readout";
+import { iconMarkup, SHOWCASE_ICON_LIST } from "../../src/showcase/icons";
+import { Legend, type LegendItem } from "../../src/showcase/legend";
+import { Scene } from "../../src/showcase/scene";
+import type { Scenario } from "../../src/showcase/scenario";
+import { SCENARIOS, type ScenarioName } from "../../src/showcase/scenarios";
+import { stage } from "../../src/stage";
+import { attachWheel, type Wheel, type WheelAction, type WheelMenu } from "../../src/wheel";
 
-interface Args extends GraphArgs {
-  directed: boolean;
-  icons: boolean;
+interface Args {
+  scenario: ScenarioName;
 }
 
-const GROUPS = 6;
-const MEMBERS = 5;
-const NODES = 1 + GROUPS * (1 + MEMBERS);
-/** World units: hub to heads, head to members. */
-const HEAD_RADIUS = 110;
-const MEMBER_RADIUS = 40;
-/** Angle a group's members fan across, radians. */
-const FAN = 2.2;
-const GROUP_NAMES = ["Design", "Research", "Engineering", "Sales", "Support", "Operations"];
-const GROUP_ICONS: readonly DemoIcon[] = ["pen", "flask", "gear", "chart", "chat", "bolt"];
-const PEOPLE = ["Ada", "Ben", "Cleo", "Dev", "Eli", "Fay", "Gus", "Hana", "Ivo", "June", "Kai", "Lena", "Milo", "Nina", "Otto"];
+const GREY = 0x9aa6bd;
+const hex = (rgb: number) => `#${rgb.toString(16).padStart(6, "0")}`;
 
-function smallGraph(): { graph: GraphDataset; labels: GraphLabels; icons: Uint16Array; iconColors: Uint32Array } {
-  const positions = new Float32Array(NODES * 2);
-  const colors = new Uint32Array(NODES);
-  const sizes = new Float32Array(NODES);
-  const shapes = new Uint8Array(NODES);
-  const icons = new Uint16Array(NODES);
-  const iconColors = new Uint32Array(NODES).fill(0xffffffff);
-  const put = (i: number, x: number, y: number, size: number, rgb: number, shape: NodeShape, icon: DemoIcon) => {
-    positions[i * 2] = x;
-    positions[i * 2 + 1] = y;
-    sizes[i] = size;
-    colors[i] = rgbToWord(rgb);
-    shapes[i] = shape;
-    icons[i] = iconId(icon);
-  };
-  const headOf = (g: number) => 1 + (g % GROUPS) * (1 + MEMBERS);
-
-  const pairs: number[] = [];
-  const nodeNames: string[] = ["Company"];
-  const edgeNames: string[] = [];
-  const link = (a: number, b: number, name: string) => {
-    pairs.push(a, b);
-    edgeNames.push(name);
-  };
-  put(0, 0, 0, 18, 0xf2f4f8, NodeShape.hexagon, "building");
-  iconColors[0] = rgbToWord(0x1b2230);
-  for (let g = 0; g < GROUPS; g++) {
-    const a = (g / GROUPS) * Math.PI * 2;
-    const head = headOf(g);
-    const hx = Math.cos(a) * HEAD_RADIUS;
-    const hy = Math.sin(a) * HEAD_RADIUS;
-    const rgb = PALETTE[g % PALETTE.length]!;
-    put(head, hx, hy, 10, rgb, NodeShape.square, GROUP_ICONS[g % GROUP_ICONS.length]!);
-    nodeNames[head] = GROUP_NAMES[g % GROUP_NAMES.length]!;
-    link(0, head, "runs");
-    link(head, headOf(g + 1), "works with"); // ring of heads
-    for (let m = 0; m < MEMBERS; m++) {
-      const b = a + (m / (MEMBERS - 1) - 0.5) * FAN;
-      const member = head + 1 + m;
-      put(member, hx + Math.cos(b) * MEMBER_RADIUS, hy + Math.sin(b) * MEMBER_RADIUS, 5 + (m % 3), rgb, NodeShape.circle, "person");
-      nodeNames[member] = `${PEOPLE[(g * MEMBERS + m) % PEOPLE.length]} ${String.fromCharCode(65 + g)}.`;
-      link(head, member, "has");
-      if (m > 0) link(member - 1, member, "pairs with"); // members of a group know each other
-    }
-    link(head + MEMBERS, headOf(g + 1) + 1, "helps"); // neighbouring groups touch at their edges
-  }
+function items(s: Scenario): { kinds: LegendItem[]; relations: LegendItem[] } {
   return {
-    graph: {
-      nodes: { count: NODES, positions, colors, sizes, shapes },
-      edges: { count: pairs.length / 2, indices: new Uint32Array(pairs) },
-    },
-    labels: { nodes: nodeNames, edges: edgeNames },
-    icons,
-    iconColors,
+    kinds: s.kinds.map((k) => ({ label: k.label, color: hex(k.color), icon: iconMarkup(k.icon) })),
+    relations: s.relations.map((r) => ({
+      label: r.label,
+      color: hex(r.color ?? GREY),
+      line: { pattern: r.pattern, tapered: r.tapered, directed: r.directed, width: r.width ?? 3, color: hex(r.color ?? GREY) },
+    })),
   };
 }
 
-const DEMO = smallGraph();
-const names = DEMO.labels.nodes ?? [];
-const relations = DEMO.labels.edges ?? [];
-const ends = DEMO.graph.edges.indices;
-const NO_ICONS = new Uint16Array(NODES).fill(NO_ICON);
-const defined = new WeakSet<Graph>();
+interface Showcase {
+  scene: Scene;
+  wheel: Wheel;
+  focus: Focus;
+  legend: Legend;
+}
 
-function showIcons(graph: Graph, on: boolean): void {
-  if (!defined.has(graph)) {
-    defined.add(graph);
-    graph.icons.define(DEMO_ICON_LIST).catch((e: unknown) => console.error(e));
+const showcases = new WeakMap<Graph, Showcase>();
+
+function menu(scene: Scene, focus: Focus, h: Hit): WheelMenu | null {
+  const s = scene.scenario;
+  if (!s) return null;
+  const { kinds, relations } = items(s);
+  if (h.node !== null) {
+    const from = h.node;
+    const link: WheelAction[] = relations.map((r, k) => ({
+      ...r,
+      run: () => ({ from, line: r.line!, prompt: `link as "${r.label}"`, done: (to: number) => scene.addEdge(k, from, to) }),
+    }));
+    const remove: WheelAction = {
+      label: "Delete node",
+      color: "",
+      danger: true,
+      run: () => {
+        focus.clear();
+        scene.removeNode(from);
+      },
+    };
+    return { title: scene.names[from] ?? "Node", items: [...link, remove] };
   }
-  graph.nodes.updateAll({ icons: on ? DEMO.icons : NO_ICONS, iconColors: DEMO.iconColors }, { copy: true });
+  if (h.edge !== null) {
+    const e = h.edge;
+    const current = scene.rels[e];
+    const change: WheelAction[] = relations.map((r, k) => ({ ...r, current: k === current, run: () => scene.restyleEdge(e, k) }));
+    const remove: WheelAction = { label: "Delete edge", color: "", danger: true, run: () => scene.removeEdge(e) };
+    const title = `${scene.relation(e)?.label ?? "Edge"}\n${scene.names[scene.ends[e * 2]!]} → ${scene.names[scene.ends[e * 2 + 1]!]}`;
+    return { title, items: [...change, remove] };
+  }
+  return { title: "Add node", items: kinds.map((k, i) => ({ ...k, run: () => scene.addNode(i, h.x, h.y) })) };
+}
+
+function create(graph: Graph, root: HTMLElement): Showcase {
+  const scene = new Scene(graph);
+  const focus = attachFocus(graph, { neighbors: (i) => scene.neighbors(i), busy: () => wheel.busy });
+  const wheel = attachWheel(graph, root, { menu: (h) => menu(scene, focus, h), position: (i) => scene.position(i) });
+  showReadout(graph, root, {
+    node: (i) => scene.names[i] ?? `#${i}`,
+    edge: (e) => `${scene.names[scene.ends[e * 2]!]} → ${scene.names[scene.ends[e * 2 + 1]!]} · ${scene.relation(e)?.label ?? ""}`,
+  });
+  const sc = { scene, wheel, focus, legend: new Legend(root) };
+  showcases.set(graph, sc);
+  return sc;
+}
+
+function show(sc: Showcase, graph: Graph, name: ScenarioName, note: (s: string) => void): void {
+  const s = SCENARIOS[name];
+  const it = items(s);
+  sc.focus.clear();
+  graph.style.set({ nodeScale: s.nodeScale });
+  sc.scene.load(s);
+  sc.legend.set(it.kinds, it.relations);
+  graph.camera.fit({ padding: 48 });
+  note(`${s.title} · ${s.nodes.length} nodes · ${s.edges.length} edges`);
 }
 
 const meta: Meta<Args> = {
   title: "Showcase/Small graph",
-  render: renderGraph<Args>({
-    describe: (a) => `Small graph · a hub and ${GROUPS} groups${a.directed ? ", directed" : ""}`,
-    load: () => ({ data: DEMO.graph, genMs: 0 }),
-    options: () => ({ input: { rotate: "auto" } }),
-    labels: () => DEMO.labels,
-    edgeStyle: (a) => (a.directed ? packEdgeStyle({ directed: true }) : undefined),
-    onLoad: (graph, _g, a, root) => {
-      showIcons(graph, a.icons);
-      showReadout(graph, root, {
-        node: (i) => `${names[i]} (#${i})`,
-        edge: (e) => `${names[ends[e * 2]!]} → ${names[ends[e * 2 + 1]!]} · ${relations[e]} (#${e})`,
-      });
+  render: (args, ctx) =>
+    stage(args, ctx, {
+      options: () => ({
+        input: { rotate: "auto", drag: "auto", selectShape: "lasso" },
+        style: {
+          edge: { width: 1.5, color: [0.6, 0.7, 0.9, 0.8] },
+          label: { size: 11 },
+          dimmed: { alpha: 0.12 },
+          focused: { outline: { color: [0.3, 0.8, 1, 1] } },
+        },
+      }),
+      setup: async (graph, a, hud, root) => {
+        await graph.icons.define(SHOWCASE_ICON_LIST);
+        show(create(graph, root), graph, a.scenario, (t) => hud.setNote(t));
+      },
+      update: (graph, a, prev, hud) => {
+        const sc = showcases.get(graph);
+        if (sc && a.scenario !== prev.scenario) show(sc, graph, a.scenario, (t) => hud.setNote(t));
+      },
+    }),
+  argTypes: {
+    scenario: {
+      control: "select",
+      options: Object.keys(SCENARIOS),
+      labels: Object.fromEntries(Object.entries(SCENARIOS).map(([k, s]) => [k, s.title])),
     },
-    onUpdate: (graph, a, prev) => {
-      if (a.icons !== prev.icons) showIcons(graph, a.icons);
-    },
-  }),
-  argTypes: graphArgTypes<Args>([NODES], { directed: { control: "boolean" }, icons: { control: "boolean" } }),
-  args: { nodes: NODES, directed: true, icons: true, ...GRAPH_ARGS, edgeColor: "nodes", edgeWidth: 1.5, edgeAlpha: 0.8, labels: true },
-  parameters: { controls: { include: ["directed", "icons"] } },
+  },
+  args: { scenario: "company" },
 };
 
 export default meta;

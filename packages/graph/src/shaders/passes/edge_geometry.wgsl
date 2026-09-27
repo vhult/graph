@@ -18,6 +18,7 @@
 override EDGE_ARROWS : bool = false;
 override EDGE_PER_EDGE_STYLE : bool = false;
 override EDGE_PER_EDGE_COLOR : bool = false;
+override EDGE_PATTERNS : bool = false;
 override NODE_SHAPES : bool = false;
 
 struct VOut {
@@ -30,6 +31,7 @@ struct VOut {
   @location(3) color : vec4<f32>,
   /** Arrowhead length in px; 0 when this edge has none. */
   @location(4) @interpolate(flat) arrowLen : f32,
+  @location(5) @interpolate(flat) line : vec4<f32>,
 }
 
 /** All four corners on one point outside clip space: zero area, no fragments. */
@@ -103,6 +105,9 @@ fn vs(@builtin(vertex_index) vi : u32, @builtin(instance_index) ii : u32) -> VOu
     o.color = vec4<f32>(debugColor(fade, keep / f32(n), chunk), 0.9 * fadeIn);
   }
   o.arrowLen = s.arrowLen;
+  if (EDGE_PATTERNS) {
+    o.line = edgeLine(style, s.halfLen, halfWidth, f32(n) / keep);
+  }
   return o;
 }
 
@@ -131,9 +136,14 @@ fn debugColor(fade : f32, kept : f32, chunk : u32) -> vec3<f32> {
 
 @fragment
 fn fs(in : VOut) -> @location(0) vec4<f32> {
-  let d = edgeDist(in.uv, in.halfLen, in.halfWidth, in.arrowLen);
-  // Analytic 1 px coverage ramp across the silhouette.
-  let a = in.color.a * clamp(0.5 - d, 0.0, 1.0);
+  var cover : f32;
+  if (EDGE_PATTERNS) {
+    cover = edgeCoverage(in.uv, in.halfLen, in.halfWidth, in.arrowLen, in.line);
+  } else {
+    // Analytic 1 px coverage ramp across the silhouette.
+    cover = clamp(0.5 - edgeDist(in.uv, in.halfLen, in.halfWidth, in.arrowLen), 0.0, 1.0);
+  }
+  let a = in.color.a * cover;
   if (a < 0.002) {
     discard;
   }

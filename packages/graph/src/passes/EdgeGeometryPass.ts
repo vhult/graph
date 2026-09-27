@@ -12,9 +12,9 @@ import { createShaderModule } from "../gpu/ShaderModules";
 import type { EdgeCullOutputs } from "./EdgeCullPass";
 import type { HoverPass } from "./HoverPass";
 
-/** Pipeline variant index: bit 0 = per-edge style, bit 1 = per-edge colour, bit 2 = node shapes. */
-const VARIANTS = 4;
-const SHAPE_VARIANTS = 8;
+/** Pipeline variant index: style level (0 none, 1 per-edge style, 2 with line patterns) + 3 × per-edge colour + 6 × node shapes. */
+const VARIANTS = 6;
+const SHAPE_VARIANTS = 12;
 
 export class EdgeGeometryPass implements RenderNode {
   readonly stage = Stage.EDGE_GEOMETRY;
@@ -22,6 +22,7 @@ export class EdgeGeometryPass implements RenderNode {
 
   /** Set by the engine from what the store holds. */
   perEdgeStyle = false;
+  linePatterns = false;
   perEdgeColor = false;
   shapes = false;
   hover: HoverPass | null = null;
@@ -42,11 +43,13 @@ export class EdgeGeometryPass implements RenderNode {
     const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [layouts.frame, layouts.graph, layout] });
     // Every variant is built up front: choosing one must never wait inside a frame.
     const make = (t: Tune, v: number) => {
+      const level = v % 3;
       const constants = {
         ...edgeConstants(t),
-        EDGE_PER_EDGE_STYLE: v & 1,
-        EDGE_PER_EDGE_COLOR: (v >> 1) & 1,
-        NODE_SHAPES: (v >> 2) & 1,
+        EDGE_PER_EDGE_STYLE: level > 0 ? 1 : 0,
+        EDGE_PATTERNS: level === 2 ? 1 : 0,
+        EDGE_PER_EDGE_COLOR: Math.floor(v / 3) % 2,
+        NODE_SHAPES: Math.floor(v / 6),
       };
       return device.createRenderPipelineAsync({
         label: `edges#${v}`,
@@ -79,7 +82,8 @@ export class EdgeGeometryPass implements RenderNode {
   encode(pass: GPURenderPassEncoder, ctx: FrameContext): void {
     if (ctx.edgeCount === 0 || ctx.nodeCount === 0 || !this.bindGroup || !this.bound) return;
     const pipes = this.pipelines.value!;
-    pass.setPipeline(pipes[(this.perEdgeStyle ? 1 : 0) | (this.perEdgeColor ? 2 : 0) | (this.shapes && pipes.length > VARIANTS ? 4 : 0)]!);
+    const level = this.perEdgeStyle ? (this.linePatterns ? 2 : 1) : 0;
+    pass.setPipeline(pipes[level + (this.perEdgeColor ? 3 : 0) + (this.shapes && pipes.length > VARIANTS ? 6 : 0)]!);
     pass.setBindGroup(0, ctx.frameBindGroup);
     pass.setBindGroup(1, ctx.graphBindGroup);
     pass.setBindGroup(2, this.bindGroup);

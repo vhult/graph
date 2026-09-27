@@ -6,6 +6,8 @@ import { stage } from "../../src/stage";
 interface Edge {
   width: number;
   directed?: boolean;
+  pattern?: "dashed" | "dotted" | "dashDot" | "double";
+  tapered?: boolean;
   from: number;
   to: number;
   label: string;
@@ -24,6 +26,15 @@ const ROWS: Edge[][] = [
   [1, 2, 4].map((w) => ({ width: w, directed: true, from: LINE, to: LINE, label: `arrow ${w} px` })),
   PALETTE.slice(0, 4).map((c) => ({ width: 3, from: c, to: c, label: hex(c) })),
   PALETTE.slice(0, 4).map((c, i) => ({ width: 3, from: c, to: PALETTE[i + 4]!, label: "gradient" })),
+  (["dashed", "dotted", "dashDot", "double"] as const).map((p) => ({ width: 2, pattern: p, from: LINE, to: LINE, label: p })),
+  (["dashed", "dotted", "dashDot", "double"] as const).map((p) => ({ width: 4, pattern: p, from: LINE, to: LINE, label: `${p} 4 px` })),
+  [
+    { width: 3, tapered: true, from: LINE, to: LINE, label: "tapered" },
+    { width: 6, tapered: true, from: LINE, to: LINE, label: "tapered 6 px" },
+    { width: 3, tapered: true, pattern: "dashed", from: LINE, to: LINE, label: "tapered dashed" },
+    { width: 2, directed: true, pattern: "dashed", from: LINE, to: LINE, label: "dashed arrow" },
+    { width: 3, pattern: "dotted", from: PALETTE[0]!, to: PALETTE[4]!, label: "dotted gradient" },
+  ],
 ];
 
 function build() {
@@ -64,7 +75,7 @@ const meta: Meta = {
         graph.nodes.set(g.nodes);
         graph.edges.set(g.edges);
         graph.camera.fit();
-        hud.setNote("Edge styles · width, arrowheads, per-edge colour, gradient, labels");
+        hud.setNote("Edge styles · width, arrowheads, per-edge colour, gradient, patterns, taper, labels");
       },
     }),
 };

@@ -601,6 +601,37 @@ describe("GraphStore directed count", () => {
   });
 });
 
+const DASHED = CONSTANTS.EDGE_PATTERN_DASHED << CONSTANTS.EDGE_PATTERN_SHIFT;
+const TAPERED = CONSTANTS.EDGE_FLAG_TAPERED;
+
+describe("GraphStore line pattern count", () => {
+  it("counts patterned and tapered edges, not width or direction", () => {
+    const s = new GraphStore();
+    s.setEdges(4, { indices: new Uint32Array(8), styles: new Uint32Array([DASHED | 12, TAPERED, D | 12, 0]) });
+    expect(s.lineEdges).toBe(2);
+    expect(s.hasLinePatterns).toBe(true);
+    s.setEdges(1, { indices: new Uint32Array(2) });
+    expect(s.hasLinePatterns).toBe(false);
+  });
+
+  it("follows hides, restyles, adds and compacts", () => {
+    const s = new GraphStore();
+    s.setEdges(3, { indices: new Uint32Array(6), styles: new Uint32Array([DASHED, DASHED, 0]) });
+    s.hideEdges(new Uint32Array([0, 0]));
+    expect(s.lineEdges).toBe(1);
+    s.updateEdgesAt(new Uint32Array([0, 2]), { styles: new Uint32Array([TAPERED, TAPERED]) });
+    expect(s.lineEdges).toBe(2);
+    s.updateEdgesAt(new Uint32Array([1, 2]), { styles: new Uint32Array([0, 0]) });
+    expect(s.lineEdges).toBe(0);
+    s.addEdges(new Uint32Array([3, 3]), 4, { indices: new Uint32Array(4), styles: new Uint32Array([DASHED, DASHED]) });
+    expect(s.lineEdges).toBe(1);
+    s.updateEdges({ styles: new Uint32Array([DASHED, DASHED, DASHED, 0]) });
+    expect(s.lineEdges).toBe(2);
+    s.compactEdges(new Uint32Array([0xffffffff, 0, 1, 2]));
+    expect(s.lineEdges).toBe(2);
+  });
+});
+
 describe("GraphStore edge reload", () => {
   it("edges.set at the same count reloads the edge buffer, with or without new ends", () => {
     const s = new GraphStore();

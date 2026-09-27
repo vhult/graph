@@ -140,8 +140,9 @@ docs:
           graph.edges.set({ count: 2, indices: new Uint32Array([0, 1, 0, 2]) });
       styles:
         description: >-
-          One style word per edge, made with `packEdgeStyle`. It holds the width in CSS px and whether the
-          edge is directed. Edges without a style use the width from `style.edge` and have no arrow.
+          One style word per edge, made with `packEdgeStyle`. It holds the width in CSS px, whether the
+          edge is directed, its line pattern and whether it is tapered. Edges without a style use the width
+          from `style.edge`, have no arrow and are solid.
         example: |
           import { packEdgeStyle } from "@vhult/graph";
 

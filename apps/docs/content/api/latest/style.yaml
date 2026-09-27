@@ -182,14 +182,23 @@ docs:
       graph.nodes.updateAll({ colors });
   packEdgeStyle:
     description: >-
-      Packs an edge width and a direction into one number for the edge `styles` channel. `width` is in CSS
-      px, in steps of 1/8 px, up to 31.875 px. A width of 0 or left out uses `style.edge.width`. `directed: true`
-      draws an arrow at the target end.
+      Packs an edge width, a direction, a line pattern and a taper into one number for the edge `styles`
+      channel. `width` is in CSS px, in steps of 1/8 px, up to 31.875 px. A width of 0 or left out uses
+      `style.edge.width`. `directed: true` draws an arrow at the target end. `pattern` is `"solid"` (the
+      default), `"dashed"`, `"dotted"`, `"dashDot"` or `"double"`. Dashes, dots and gaps grow with the width,
+      keep their size in CSS px at every zoom, start at the source and stop before the arrowhead.
+      `"double"` needs a width of 3 CSS px or more and is solid below that. Edges thinned in a crowded area
+      turn solid. `tapered: true` narrows the edge from its full width at the source to a quarter of it at
+      the target. Clicks and hover in the gaps still hit the edge.
     example: |
       import { packEdgeStyle } from "@vhult/graph";
 
       graph.edges.set({
-        count: 2,
-        indices: new Uint32Array([0, 1, 1, 2]),
-        styles: new Uint32Array([packEdgeStyle({ width: 2, directed: true }), packEdgeStyle({})]),
+        count: 3,
+        indices: new Uint32Array([0, 1, 1, 2, 2, 0]),
+        styles: new Uint32Array([
+          packEdgeStyle({ width: 2, directed: true }),
+          packEdgeStyle({ width: 2, pattern: "dashed" }),
+          packEdgeStyle({ width: 3, tapered: true }),
+        ]),
       });
