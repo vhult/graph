@@ -6,3 +6,4 @@ storybook-static/
 .DS_Store
 TODO.md
 CLAUDE.local.md
+apps/docs/examples.gen*/

@@ -1,0 +1,128 @@
+title: Canvas and stats
+intro: >-
+  The canvas the graph draws on. You reach it through `graph.canvas` to set its size, ask for a frame or take
+  an image, and you read the latest frame numbers with `graph.stats`.
+namespace: GraphCanvas
+types: [GraphStats]
+
+docs:
+  GraphCanvas:
+    description: >-
+      Everything about the canvas itself goes through `graph.canvas`: its size, drawing a frame and taking an
+      image of it. The engine draws only when something changed, and every API call that changes the graph
+      asks for a frame by itself.
+    example: |
+      graph.canvas.resize(800, 600);
+      const image = await graph.canvas.snapshot();
+      console.log(`${image.size} bytes`);
+    members:
+      resize:
+        description: >-
+          Sets the size of the canvas in CSS px. The engine multiplies it by the pixel ratio to size the drawing
+          buffer. By default the engine follows the canvas CSS size by itself, so you need this when you pass
+          `autoResize: false` to `Graph.create`.
+        example: |
+          import { Graph } from "@vhult/graph";
+
+          const fixed = await Graph.create(canvas, { autoResize: false });
+          fixed.canvas.resize(1280, 720);
+      render:
+        description: >-
+          Asks the engine to draw one frame, even when nothing changed. Changes you make through the API
+          already draw a new frame, so you rarely need it.
+        example: |
+          graph.canvas.render();
+      snapshot:
+        description: >-
+          Draws a frame and resolves with an image of it, as a `Blob`. The type is an image MIME type and
+          defaults to `"image/png"`. The image has the size of the drawing buffer, in device px.
+        example: |
+          const blob = await graph.canvas.snapshot("image/webp");
+          const link = document.createElement("a");
+          link.href = URL.createObjectURL(blob);
+          link.download = "graph.webp";
+          link.click();
+  GraphStats:
+    description: >-
+      The latest frame numbers, returned by `graph.stats`. Reading them is cheap, so you can call it every
+      frame. Pass the same object each time: the engine writes into it and does not allocate a new one.
+    example: |
+      import type { GraphStats } from "@vhult/graph";
+
+      const stats = {} as GraphStats;
+      function frame() {
+        graph.stats(stats);
+        console.log(`${stats.cpuMsAvg.toFixed(2)} ms, ${stats.visibleNodes} nodes drawn`);
+        requestAnimationFrame(frame);
+      }
+      requestAnimationFrame(frame);
+    members:
+      renderedFrames:
+        description: >-
+          How many frames the worker drew since start. It does not grow while the graph is idle.
+      frameIndex:
+        description: >-
+          The index of the last frame.
+      cpuMs:
+        description: >-
+          The time the worker spent on the CPU for the last frame it drew, in ms.
+      cpuMsAvg:
+        description: >-
+          The same worker CPU time as `cpuMs`, as a moving average, in ms. It moves less from frame to frame.
+      nodeCount:
+        description: >-
+          How many node slots the engine holds, the same number as `graph.nodes.slots`. Removed nodes still
+          count until `nodes.compact`.
+      edgeCount:
+        description: >-
+          How many edges are in the engine. Removed edges do not count.
+      viewportWidth:
+        description: >-
+          The width of the drawing buffer, in device px.
+      viewportHeight:
+        description: >-
+          The height of the drawing buffer, in device px.
+      uploadBytes:
+        description: >-
+          How many bytes the last frame sent to the GPU.
+      gpuBytes:
+        description: >-
+          How many bytes the engine holds in GPU buffers right now.
+      peakGpuBytes:
+        description: >-
+          The largest `gpuBytes` since start.
+      pixelRatio:
+        description: >-
+          How many device px make one CSS px on the canvas. It comes from the `pixelRatio` option of
+          `Graph.create`, and defaults to `devicePixelRatio`.
+      gpuMs:
+        description: >-
+          The GPU time of a frame, as a rolling mean, in ms. It is NaN when the GPU has no timestamp queries,
+          see `GraphCaps.timestampQuery`. It is also NaN while `graph.debug` is not open, recording or running
+          a benchmark, because only then does the engine time every GPU pass.
+      passMs:
+        description: >-
+          The GPU time of each pass, as a rolling mean, in ms. The keys are the names in
+          `GraphCaps.profilerSlots`. A pass that was not timed is NaN.
+      visibleNodes:
+        description: >-
+          How many nodes the last profiled frame drew.
+      visibleEdges:
+        description: >-
+          How many edges the last profiled frame sent to be drawn.
+      labelsShown:
+        description: >-
+          How many labels are on screen. Labels that are fading out do not count.
+      labelSolves:
+        description: >-
+          How many label placements the engine finished since start. The engine places labels again when the
+          camera, the nodes or the labels change.
+      labelsAdded:
+        description: >-
+          How many labels started to fade in since start.
+      labelsRemoved:
+        description: >-
+          How many labels started to fade out since start.
+      droppedSamples:
+        description: >-
+          How many GPU timing samples the profiler dropped since start.

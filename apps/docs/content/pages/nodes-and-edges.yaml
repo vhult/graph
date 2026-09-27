@@ -1,0 +1,79 @@
+title: Nodes and edges
+description: Load, add, change and remove nodes and edges with typed arrays.
+blocks:
+  - heading: Channels
+  - text: "A node is a slot index. Each field of `NodeData` is one channel, a typed array with one or more values per node. Leave a channel out to keep its default."
+  - table:
+      columns: [Channel, Type, Values per node]
+      rows:
+        - ["`positions`", "`Float32Array`", "2: x, y in world units"]
+        - ["`sizes`", "`Float32Array`", "1: diameter in world units"]
+        - ["`colors`", "`Uint32Array`", "1: packed RGBA, see `packRgba`"]
+        - ["`shapes`", "`Uint8Array`", "1: one of `NodeShape`"]
+        - ["`zIndex`", "`Uint8Array`", "1: layer from 0 to 15, higher on top"]
+        - ["`icons`", "`Uint16Array`", "1: icon id, or `NO_ICON`"]
+        - ["`iconColors`", "`Uint32Array`", "1: packed RGBA icon tint"]
+        - ["`labels`", "string array", "1: label text, or null"]
+  - text: "Edges work the same way with `EdgeData`: `indices` holds the source and target node of each edge, `colors` holds two packed colors per edge (at the source, then at the target), `styles` holds one word per edge from `packEdgeStyle`, and `labels` one text per edge."
+
+  - heading: Load everything
+  - text: "`nodes.set` and `edges.set` replace everything. They are the fastest way to load a graph. `nodes.set` also removes every edge, so call it first."
+  - code: |
+      import { NodeShape, packEdgeStyle, packRgba } from "@vhult/graph";
+
+      graph.nodes.set({
+        count: 4,
+        positions: new Float32Array([0, 0, 120, 0, 120, 120, 0, 120]),
+        sizes: new Float32Array([16, 10, 10, 10]),
+        colors: new Uint32Array([packRgba(0.3, 0.6, 1), packRgba(0.7, 0.5, 1), packRgba(0.2, 0.8, 0.6), packRgba(1, 0.4, 0.2)]),
+        shapes: new Uint8Array([NodeShape.hexagon, NodeShape.circle, NodeShape.square, NodeShape.circle]),
+        labels: ["hub", "a", "b", "c"],
+      });
+
+      graph.edges.set({
+        count: 3,
+        indices: new Uint32Array([0, 1, 0, 2, 0, 3]),
+        styles: new Uint32Array(3).fill(packEdgeStyle({ width: 2, directed: true })),
+      });
+    lang: ts
+  - note: "Arrays are transferred to the worker, so they are empty after the call. Pass `{ copy: true }` to keep them: `graph.nodes.set(data, { copy: true })`."
+
+  - heading: Add and remove
+  - text: "`nodes.add` and `edges.add` return the indices of the new slots. `nodes.remove` also removes the edges of those nodes and reports them in the `edgesRemoved` event."
+  - code: |
+      const [a, b] = graph.nodes.add({ count: 2, positions: new Float32Array([200, 0, 200, 80]) });
+      graph.edges.add({ count: 1, indices: new Uint32Array([a, b]) });
+
+      graph.nodes.remove([a]);
+    lang: ts
+  - text: "Removed slots are freed, not moved, so the other indices stay valid. `nodes.count` is the number of live nodes and `nodes.slots` the number of slots, live plus freed. `compact()` packs live nodes into the first slots and returns the table from old index to new index, with `NO_INDEX` for freed slots."
+
+  - heading: Change channels
+  - text: "`update` changes channels for a list of slots, `updateAll` for every slot. Only the channels you pass change."
+  - code: |
+      import { packRgba } from "@vhult/graph";
+
+      graph.nodes.update(new Uint32Array([1, 2]), { colors: new Uint32Array(2).fill(packRgba(1, 1, 1)) });
+      graph.nodes.updateAll({ labels: null });
+    lang: ts
+  - text: "When positions change every frame, as in a simulation, use `nodes.stream`. It returns arrays you write into, then `commit()` sends them."
+  - code: |
+      const stream = graph.nodes.stream({ positions: true });
+
+      function tick() {
+        simulate(stream.positions);
+        stream.commit();
+        requestAnimationFrame(tick);
+      }
+      tick();
+    lang: ts
+
+  - heading: Flags
+  - text: "Flags change how nodes and edges are drawn without touching their channels: `Flag.selected`, `Flag.focused`, `Flag.dimmed` and `Flag.hidden`. Their looks are set in the [style](/docs/styling)."
+  - code: |
+      import { Flag } from "@vhult/graph";
+
+      graph.nodes.flag("all", Flag.dimmed, true);
+      graph.nodes.flag(new Uint32Array([0]), Flag.dimmed, false);
+      graph.nodes.flag(new Uint32Array([0]), Flag.focused, true);
+    lang: ts

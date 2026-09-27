@@ -1,0 +1,195 @@
+title: Style
+intro: >-
+  The style is the look of the whole graph: background, default edge color and width, labels, icons and
+  the highlights for hover, selection and focus. You change it through `graph.style`, and you pack
+  per-node and per-edge colors with `packRgba`.
+namespace: GraphStyleApi
+types: [GraphStyle, HighlightLook, OutlineLook, RGBA]
+values: [packRgba, packEdgeStyle]
+
+docs:
+  GraphStyleApi:
+    description: >-
+      Everything about the global look goes through `graph.style`. You pass only the fields you want to
+      change, and the others keep their value. Per-node and per-edge values, like a node color, live in
+      the data channels instead.
+    example: |
+      graph.style.set({
+        background: [1, 1, 1, 1],
+        edge: { color: [0.5, 0.5, 0.55, 0.5] },
+        label: { color: [0.1, 0.1, 0.1, 1] },
+      });
+    members:
+      set:
+        description: >-
+          Changes part of the look. Fields you leave out keep their value, also inside nested fields like
+          `edge` or `hover`. `Graph.create` takes the same shape in its `style` option for the first look.
+        example: |
+          graph.style.set({ nodeScale: 1.5 });
+          graph.style.set({ label: { size: 14 } });
+  GraphStyle:
+    description: >-
+      The look you pass to `style.set` or to `Graph.create`. Every field is optional. Colors are `RGBA`
+      tuples. Widths and text sizes are in CSS px, so they stay the same on screen when you zoom.
+    example: |
+      import { Graph, type GraphStyle } from "@vhult/graph";
+
+      const style: GraphStyle = {
+        background: [0.02, 0.02, 0.04, 1],
+        edge: { color: [0.4, 0.45, 0.5, 0.4], width: 1 },
+        hover: { outline: { color: [1, 0.8, 0.2, 1] } },
+      };
+      const g = await Graph.create(canvas, { style });
+    members:
+      background:
+        description: >-
+          The color the canvas is cleared to before each frame. An alpha below 1 lets the page show through
+          the canvas. The default is a near black.
+        example: |
+          graph.style.set({ background: [0, 0, 0, 0] });
+      nodeScale:
+        description: >-
+          Multiplies the size of every node. The default is 1. Use it to grow or shrink all nodes without
+          sending new `sizes`.
+        example: |
+          graph.style.set({ nodeScale: 2 });
+      edge:
+        description: >-
+          The color and the width in CSS px of edges that have none of their own. An edge uses this width
+          when it has no style or a style width of 0, and this color when it has no colors or a color of 0.
+          The defaults are a dark gray at alpha 0.4 and 1 px.
+        example: |
+          graph.style.set({ edge: { color: [0.6, 0.6, 0.7, 0.3], width: 1.5 } });
+      label:
+        description: >-
+          The look of every label: `size` in CSS px (default 12), `font` as a CSS font family (default the
+          system font), `color`, and `padding` in CSS px (default 2) kept around each label.
+        example: |
+          graph.style.set({ label: { size: 14, font: "Inter, sans-serif", color: [1, 1, 1, 1], padding: 4 } });
+      icon:
+        description: >-
+          `scale` is the icon size as a fraction of the node, from 0.01 to 1 (default 0.6). `minPx` is the
+          node size in CSS px below which icons are not drawn (default 6).
+        example: |
+          graph.style.set({ icon: { scale: 0.7, minPx: 10 } });
+      hover:
+        description: >-
+          The look of the node or edge under the pointer, as a `HighlightLook`. Pass `false` to turn the
+          hover highlight off. The default is a white outline and white edges.
+        example: |
+          graph.style.set({ hover: { outline: { color: [1, 0.8, 0.2, 1] }, edgeColor: [1, 0.8, 0.2, 1] } });
+          graph.style.set({ hover: false });
+      selected:
+        description: >-
+          The look of nodes and edges that have `Flag.selected`, as a `HighlightLook`.
+        example: |
+          graph.style.set({ selected: { outline: { color: [0.3, 0.6, 1, 1] }, edgeColor: [0.3, 0.6, 1, 1] } });
+      focused:
+        description: >-
+          The look of nodes and edges that have `Flag.focused`, as a `HighlightLook`.
+        example: |
+          graph.style.set({ focused: { outline: { color: [1, 0.4, 0.2, 1], minWidth: 4 } } });
+      dimmed:
+        description: >-
+          The opacity of nodes and edges that have `Flag.dimmed`, from 0 to 1 (default 0.25). An edge also
+          fades when one of its nodes is dimmed.
+        example: |
+          graph.style.set({ dimmed: { alpha: 0.1 } });
+      selection:
+        description: >-
+          The fill and stroke colors of the box or lasso while the user draws it. The defaults are a light
+          blue fill and a blue stroke.
+        example: |
+          graph.style.set({ selection: { fill: [1, 1, 1, 0.1], stroke: [1, 1, 1, 0.8] } });
+  HighlightLook:
+    description: >-
+      How a highlighted node and its edges look, used by `hover`, `selected` and `focused` in `GraphStyle`.
+      Fields you leave out keep their value.
+    example: |
+      import type { HighlightLook } from "@vhult/graph";
+
+      const look: HighlightLook = {
+        outline: { color: [0.3, 0.6, 1, 1], scale: 0.1 },
+        edgeColor: [0.3, 0.6, 1, 1],
+        edgeWidth: 3,
+      };
+      graph.style.set({ selected: look });
+    members:
+      outline:
+        description: >-
+          The ring drawn around the highlighted node, as an `OutlineLook`.
+        example: |
+          graph.style.set({ hover: { outline: { color: [1, 1, 1, 1], maxWidth: 6 } } });
+      edgeColor:
+        description: >-
+          The color of the highlighted edges. The default is white.
+        example: |
+          graph.style.set({ selected: { edgeColor: [1, 0.6, 0.2, 1] } });
+      edgeWidth:
+        description: >-
+          How many times wider the highlighted edges are than their normal width. The default is 2.
+        example: |
+          graph.style.set({ focused: { edgeWidth: 3 } });
+  OutlineLook:
+    description: >-
+      The ring drawn around a highlighted node. Its width follows the node size on screen, and it is kept
+      between `minWidth` and `maxWidth`.
+    example: |
+      import type { OutlineLook } from "@vhult/graph";
+
+      const outline: OutlineLook = { color: [1, 0.8, 0.2, 1], scale: 0.1, minWidth: 2, maxWidth: 8 };
+      graph.style.set({ hover: { outline } });
+    members:
+      color:
+        description: >-
+          The ring color. The default is white.
+        example: |
+          graph.style.set({ selected: { outline: { color: [0.3, 0.6, 1, 1] } } });
+      scale:
+        description: >-
+          The ring width as a fraction of the node radius on screen. The default is 0.08.
+        example: |
+          graph.style.set({ hover: { outline: { scale: 0.15 } } });
+      minWidth:
+        description: >-
+          The smallest ring width, in CSS px. The default is 3.
+        example: |
+          graph.style.set({ hover: { outline: { minWidth: 2 } } });
+      maxWidth:
+        description: >-
+          The largest ring width, in CSS px. The default is 12.
+        example: |
+          graph.style.set({ hover: { outline: { maxWidth: 8 } } });
+  RGBA:
+    description: >-
+      A color as red, green, blue and alpha, each from 0 to 1. The style uses it for every color. All four
+      values are needed, so write `[1, 0, 0, 1]` for opaque red. For node and edge channels, pack a color
+      into one number with `packRgba` instead.
+    example: |
+      import type { RGBA } from "@vhult/graph";
+
+      const accent: RGBA = [0.3, 0.6, 1, 1];
+      graph.style.set({ selected: { edgeColor: accent, outline: { color: accent } } });
+  packRgba:
+    description: >-
+      Packs red, green, blue and alpha, each from 0 to 1, into one number for the `colors` and
+      `iconColors` channels. Alpha is optional and defaults to 1. Values outside 0 to 1 are clamped.
+    example: |
+      import { packRgba } from "@vhult/graph";
+
+      const colors = new Uint32Array(graph.nodes.slots).fill(packRgba(0.3, 0.6, 1));
+      colors[0] = packRgba(1, 0.4, 0.2, 0.8);
+      graph.nodes.updateAll({ colors });
+  packEdgeStyle:
+    description: >-
+      Packs an edge width and a direction into one number for the edge `styles` channel. `width` is in CSS
+      px, in steps of 1/8 px, up to 31.875 px. A width of 0 or left out uses `style.edge.width`. `directed: true`
+      draws an arrow at the target end.
+    example: |
+      import { packEdgeStyle } from "@vhult/graph";
+
+      graph.edges.set({
+        count: 2,
+        indices: new Uint32Array([0, 1, 1, 2]),
+        styles: new Uint32Array([packEdgeStyle({ width: 2, directed: true }), packEdgeStyle({})]),
+      });

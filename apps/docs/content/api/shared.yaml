@@ -1,0 +1,53 @@
+title: Shared by nodes and edges
+intro: >-
+  The pieces `graph.nodes` and `graph.edges` have in common: the flags that change how an item is drawn,
+  the option to copy the arrays you send, and the marker for a removed index.
+types: [CopyOption]
+values: [Flag, NO_INDEX]
+
+docs:
+  CopyOption:
+    description: >-
+      The last argument of `set`, `add`, `update` and `updateAll` on `graph.nodes` and `graph.edges`. By
+      default the engine does not copy your arrays: it moves them to the worker, and they are empty after
+      the call. Pass `{ copy: true }` when you want to keep using them.
+    example: |
+      import type { CopyOption } from "@vhult/graph";
+
+      const keep: CopyOption = { copy: true };
+      const sizes = new Float32Array(graph.nodes.slots).fill(6);
+      graph.nodes.updateAll({ sizes }, keep);
+      console.log(sizes.length);
+    members:
+      copy:
+        description: >-
+          Copies the arrays before sending them, so they stay usable after the call. The default is false,
+          which moves them with no copy. Moving empties the whole buffer behind an array, with every other
+          view on it. Sending an array that was already moved throws a `detached-array` error.
+        example: |
+          const positions = new Float32Array([0, 0, 50, 50]);
+          graph.nodes.set({ count: 2, positions }, { copy: true });
+          positions[0] = 10;
+          graph.nodes.updateAll({ positions }, { copy: true });
+  Flag:
+    description: >-
+      The flags for `nodes.flag` and `edges.flag`, which you combine with `|`: `Flag.selected`,
+      `Flag.focused`, `Flag.dimmed` and `Flag.hidden`. Selected and focused items take the looks set in
+      `GraphStyle`, dimmed ones fade to its `dimmed.alpha`, and hidden ones are not drawn. A hidden node
+      also hides its edges and is left out of `query.inside`. With `select` on `"auto"`, the engine sets
+      `Flag.selected` on the nodes you click or select.
+    example: |
+      import { Flag } from "@vhult/graph";
+
+      graph.nodes.flag(new Uint32Array([4, 5]), Flag.hidden, true);
+      graph.edges.flag("all", Flag.dimmed, true);
+      graph.edges.flag(new Uint32Array([0]), Flag.focused, true);
+  NO_INDEX:
+    description: >-
+      The value `0xffffffff`. In the table that `nodes.compact` and `edges.compact` return, it marks an old
+      index whose node or edge was removed, so it has no new index.
+    example: |
+      import { NO_INDEX } from "@vhult/graph";
+
+      const table = graph.edges.compact();
+      const kept = [3, 8, 12].filter((i) => table[i] !== NO_INDEX).map((i) => table[i]);

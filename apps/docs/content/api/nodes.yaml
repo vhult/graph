@@ -1,0 +1,261 @@
+title: Nodes
+intro: >-
+  Nodes are the dots of the graph. You reach them through `graph.nodes`, and you describe them with typed
+  arrays: one entry per node for each channel, like its position, size or color.
+namespace: GraphNodes
+types: [NodeData, NodeUpdate, NodeShape, NodeStream, NodeStreamChannels]
+
+docs:
+  GraphNodes:
+    description: >-
+      Everything you do with nodes goes through `graph.nodes`: load them, add more, change them, remove them
+      and mark them with flags. A node is known by its index, a whole number the engine gives it when you
+      add it. Edges point at nodes by these indices.
+    example: |
+      import { packRgba } from "@vhult/graph";
+
+      graph.nodes.set({
+        count: 3,
+        positions: new Float32Array([0, 0, 100, 0, 50, 80]),
+        colors: new Uint32Array(3).fill(packRgba(0.3, 0.6, 1)),
+      });
+
+      console.log(graph.nodes.count);
+    members:
+      count:
+        description: >-
+          How many nodes are in the graph right now. Removed nodes do not count.
+        example: |
+          console.log(`${graph.nodes.count} nodes`);
+      slots:
+        description: >-
+          How many node indices are in use, live nodes plus the ones freed by `remove`. Arrays you pass to
+          `updateAll` must have one entry per slot. `compact` brings `slots` back down to `count`.
+        example: |
+          const sizes = new Float32Array(graph.nodes.slots).fill(6);
+          graph.nodes.updateAll({ sizes });
+      set:
+        description: >-
+          Replaces every node with the ones you pass. It also removes every edge, so call it before
+          `edges.set`. This is the fastest way to load a whole graph. Channels you leave out get their
+          default: size 4, the engine blue, a circle, layer 0, no icon and no label.
+        example: |
+          graph.nodes.set({
+            count: 4,
+            positions: new Float32Array([0, 0, 100, 0, 100, 100, 0, 100]),
+            sizes: new Float32Array([12, 8, 8, 8]),
+          });
+          graph.edges.set({ count: 2, indices: new Uint32Array([0, 1, 0, 2]) });
+      add:
+        description: >-
+          Adds nodes and returns their indices. Freed indices are used again first, so the returned
+          indices are not always at the end. Keep them: you need them to connect edges or to change the
+          nodes later.
+        example: |
+          const [a, b] = graph.nodes.add({ count: 2, positions: new Float32Array([200, 0, 200, 80]) });
+          graph.edges.add({ count: 1, indices: new Uint32Array([a, b]) });
+      remove:
+        description: >-
+          Removes nodes by index, with every edge that touches them. The other nodes keep their indices.
+          The edges that went away are reported in the `edgesRemoved` event.
+        example: |
+          graph.on("edgesRemoved", (edges) => console.log(`${edges.length} edges went away`));
+          graph.nodes.remove([3, 4]);
+      update:
+        description: >-
+          Changes some channels of the listed nodes. Each array has one entry per listed index, in the
+          same order. Channels you leave out do not change.
+        example: |
+          import { packRgba } from "@vhult/graph";
+
+          const picked = new Uint32Array([2, 5]);
+          graph.nodes.update(picked, {
+            colors: new Uint32Array(2).fill(packRgba(1, 0.4, 0.2)),
+            sizes: new Float32Array([14, 14]),
+          });
+      updateAll:
+        description: >-
+          Changes some channels of every node at once. Each array must have one entry per slot, see
+          `slots`. It is faster than `update` when most nodes change, for example after a layout step.
+          Pass `labels: null` to clear every label.
+        example: |
+          const positions = new Float32Array(graph.nodes.slots * 2);
+          for (let i = 0; i < graph.nodes.slots; i++) {
+            positions[i * 2] = Math.cos(i) * 200;
+            positions[i * 2 + 1] = Math.sin(i) * 200;
+          }
+          graph.nodes.updateAll({ positions });
+      stream:
+        description: >-
+          Gives you arrays that you fill again every frame, then send with `commit`. Use it when nodes move
+          or change color all the time, as in a simulation or an animation. Taking a new stream is needed
+          after the number of slots changes.
+        example: |
+          const stream = graph.nodes.stream({ positions: true });
+
+          function frame(time: number) {
+            for (let i = 0; i < stream.positions.length / 2; i++) {
+              stream.positions[i * 2] = Math.cos(time / 1000 + i) * 100;
+              stream.positions[i * 2 + 1] = Math.sin(time / 1000 + i) * 100;
+            }
+            stream.commit();
+            requestAnimationFrame(frame);
+          }
+          requestAnimationFrame(frame);
+      flag:
+        description: >-
+          Turns flags on or off for the listed nodes, or for all of them with `"all"`. Flags change how a
+          node is drawn without touching its channels: selected, focused, dimmed or hidden. Combine
+          several with `|`.
+        example: |
+          import { Flag } from "@vhult/graph";
+
+          graph.nodes.flag("all", Flag.dimmed, true);
+          graph.nodes.flag(new Uint32Array([0, 1]), Flag.dimmed, false);
+          graph.nodes.flag(new Uint32Array([0]), Flag.focused | Flag.selected, true);
+      clear:
+        description: >-
+          Removes every node and every edge. The graph is empty after it.
+        example: |
+          graph.nodes.clear();
+      compact:
+        description: >-
+          Moves the live nodes into the first indices, so there are no freed slots left. It returns a table
+          from old index to new index, with `NO_INDEX` for nodes that were removed. Edges follow by
+          themselves; update any index you keep on your side with the table.
+        example: |
+          import { NO_INDEX } from "@vhult/graph";
+
+          let selected = 42;
+          const table = graph.nodes.compact();
+          if (table[selected] !== NO_INDEX) selected = table[selected];
+  NodeData:
+    description: >-
+      The nodes you pass to `nodes.set` and `nodes.add`. `count` says how many nodes there are, and every
+      other field is an optional channel: a typed array with one entry per node, or two for positions.
+    example: |
+      import { NodeShape, packRgba, type NodeData } from "@vhult/graph";
+
+      const data: NodeData = {
+        count: 2,
+        positions: new Float32Array([0, 0, 50, 0]),
+        sizes: new Float32Array([10, 6]),
+        colors: new Uint32Array([packRgba(1, 0.4, 0.2), packRgba(0.3, 0.6, 1)]),
+        shapes: new Uint8Array([NodeShape.hexagon, NodeShape.circle]),
+        labels: ["root", "leaf"],
+      };
+      graph.nodes.set(data);
+    members:
+      count:
+        description: >-
+          How many nodes the data holds. Every channel array must match it.
+      positions:
+        description: >-
+          Where each node sits, as x then y, in world units. World units are yours: the camera decides how
+          many screen pixels one unit takes.
+        example: |
+          graph.nodes.set({ count: 2, positions: new Float32Array([0, 0, 120, -40]) });
+      sizes:
+        description: >-
+          The diameter of each node in world units, so nodes grow and shrink as you zoom. The default is 4.
+        example: |
+          graph.nodes.set({ count: 2, sizes: new Float32Array([4, 16]) });
+      colors:
+        description: >-
+          One packed color per node, made with `packRgba`. A `Uint8Array` with four bytes per node (red,
+          green, blue, alpha) works too.
+        example: |
+          import { packRgba } from "@vhult/graph";
+
+          graph.nodes.set({ count: 2, colors: new Uint32Array([packRgba(1, 0, 0), packRgba(0, 0, 1, 0.5)]) });
+      shapes:
+        description: >-
+          The shape of each node: circle, square or hexagon, from `NodeShape`. The default is a circle.
+        example: |
+          import { NodeShape } from "@vhult/graph";
+
+          graph.nodes.set({ count: 2, shapes: new Uint8Array([NodeShape.square, NodeShape.hexagon]) });
+      zIndex:
+        description: >-
+          The layer of each node, from 0 to 15. Nodes on a higher layer are drawn on top of the others.
+          A value above 15 throws.
+        example: |
+          graph.nodes.set({ count: 2, zIndex: new Uint8Array([0, 15]) });
+      icons:
+        description: >-
+          The icon drawn inside each node, as an id from the icon set, or `NO_ICON` for none. See
+          `graph.icons` to load icons.
+        example: |
+          import { NO_ICON } from "@vhult/graph";
+
+          graph.nodes.set({ count: 2, icons: new Uint16Array([0, NO_ICON]) });
+      iconColors:
+        description: >-
+          The tint of each node's icon, as a packed color from `packRgba`.
+        example: |
+          import { packRgba } from "@vhult/graph";
+
+          graph.nodes.set({ count: 1, icons: new Uint16Array([0]), iconColors: new Uint32Array([packRgba(1, 1, 1)]) });
+      labels:
+        description: >-
+          The text shown next to each node. Use null or leave a hole for a node without a label. The engine
+          picks which labels fit on screen, so crowded labels hide until you zoom in.
+        example: |
+          graph.nodes.set({ count: 3, labels: ["Paris", null, "Berlin"] });
+  NodeUpdate:
+    description: >-
+      The channels you pass to `nodes.update` and `nodes.updateAll`. It has the same channels as `NodeData`
+      but no `count`, since the indices or the slots decide the length. `labels: null` in `updateAll` clears
+      every label.
+    example: |
+      import { packRgba, type NodeUpdate } from "@vhult/graph";
+
+      const change: NodeUpdate = { colors: new Uint32Array([packRgba(0.2, 0.8, 0.6)]) };
+      graph.nodes.update(new Uint32Array([7]), change);
+  NodeShape:
+    description: >-
+      The shapes a node can take. Use `NodeShape.circle`, `NodeShape.square` or `NodeShape.hexagon` in the
+      `shapes` channel. `NodeShape` is also the type of one of these values.
+    example: |
+      import { NodeShape } from "@vhult/graph";
+
+      const shapes = new Uint8Array(100).fill(NodeShape.circle);
+      shapes[0] = NodeShape.hexagon;
+      graph.nodes.updateAll({ shapes });
+  NodeStream:
+    description: >-
+      The arrays `nodes.stream` gives you. Write the new values in place, then call `commit` to send them.
+      Only the channels you asked for have a length; the others are empty.
+    example: |
+      const stream = graph.nodes.stream({ colors: true });
+      stream.colors.fill(0xff00ff00);
+      stream.commit();
+    members:
+      positions:
+        description: >-
+          x then y for every node slot, in world units.
+      colors:
+        description: >-
+          One packed color for every node slot.
+      zIndex:
+        description: >-
+          The layer for every node slot. Values above 15 are sent as 15.
+      commit:
+        description: >-
+          Sends what you wrote to the engine. Call it once per frame after writing.
+  NodeStreamChannels:
+    description: >-
+      Which channels a node stream carries. Ask only for what changes every frame: each channel adds data
+      to send.
+    example: |
+      const stream = graph.nodes.stream({ positions: true, colors: true });
+    members:
+      positions:
+        description: >-
+          Streams node positions.
+      colors:
+        description: >-
+          Streams node colors.
+      zIndex:
+        description: >-
+          Streams node layers.
