@@ -1,5 +1,10 @@
 html,
-body,
+body {
+  height: 100%;
+  margin: 0;
+  background: #0a0a0f;
+}
+
 #storybook-root {
   height: 100%;
   margin: 0;
