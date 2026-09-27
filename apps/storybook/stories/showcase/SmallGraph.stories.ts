@@ -110,6 +110,7 @@ const meta: Meta<Args> = {
   render: renderGraph<Args>({
     describe: (a) => `Small graph · a hub and ${GROUPS} groups${a.directed ? ", directed" : ""}`,
     load: () => ({ data: DEMO.graph, genMs: 0 }),
+    options: () => ({ input: { rotate: "auto" } }),
     labels: () => DEMO.labels,
     edgeStyle: (a) => (a.directed ? packEdgeStyle({ directed: true }) : undefined),
     onLoad: (graph, _g, a, root) => {

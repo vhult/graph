@@ -14,7 +14,7 @@ nav:
 
 landing:
   tagline: The WebGPU graph renderer built for speed.
-  lead: "Millions of nodes and edges, drawn from a worker. Rendering only: you bring the positions, it draws them."
+  lead: Millions of nodes and edges
   install: npm install @vhult/graph
   actions:
     - label: Get started
@@ -43,11 +43,11 @@ landing:
   blocks:
     - points:
         - title: Built for speed
-          text: Culling, sorting and drawing run on the GPU with WebGPU. It renders millions of nodes and edges.
+          text: Culling, sorting and drawing run on the GPU with WebGPU.
         - title: Off the main thread
           text: The canvas moves to a Web Worker as an `OffscreenCanvas`. Your page keeps its main thread.
         - title: Rendering only
-          text: No layout and no simulation. You give it positions as typed arrays, it draws them.
+          text: No layout and no simulation.
         - title: Zero runtime dependencies
           text: One package, nothing else to install.
     - text: The [getting started guide](/docs/getting-started) walks through a first graph, and the [Storybook](/storybook/) shows the engine with large graphs, every style and live experiments.
