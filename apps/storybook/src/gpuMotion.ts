@@ -45,19 +45,34 @@ fn main(@builtin(global_invocation_id) id : vec3<u32>) {
 const depthEntry = (colors: boolean) => `
 @group(0) @binding(3) var<storage, read_write> layers : array<u32>;
 ${colors ? "@group(0) @binding(4) var<storage, read_write> colorsOut : array<u32>;" : ""}
+var<workgroup> lanes : array<u32, ${WG}>;
 
 @compute @workgroup_size(${WG})
-fn main(@builtin(global_invocation_id) id : vec3<u32>) {
+fn main(@builtin(global_invocation_id) id : vec3<u32>, @builtin(local_invocation_index) lane : u32) {
   let i = id.x + id.y * motion.groupsX * ${WG}u;
-  if (i >= motion.count) {
-    return;
+  var layer = 0u;
+  if (i < motion.count) {
+    let p = nodePosition(i, motion.time);
+    out[i] = p.xy;
+    layer = u32(clamp(p.z, 0.0, 0.9999) * ${LAYERS}.0);
+    ${colors ? "colorsOut[i] = pack4x8unorm(nodeColor(i, motion.time, p));" : ""}
   }
-  let p = nodePosition(i, motion.time);
-  out[i] = p.xy;
-  layers[i] = u32(clamp(p.z, 0.0, 0.9999) * ${LAYERS}.0);
-  ${colors ? "colorsOut[i] = pack4x8unorm(nodeColor(i, motion.time, p));" : ""}
+  lanes[lane] = layer;
+  workgroupBarrier();
+  if (lane % 4u == 0u && i < motion.count) {
+    layers[i / 4u] = lanes[lane] | (lanes[lane + 1u] << 8u) | (lanes[lane + 2u] << 16u) | (lanes[lane + 3u] << 24u);
+  }
 }
 `;
+
+interface Readback {
+  buffer: GPUBuffer;
+  land: () => void;
+}
+
+const ignore = (): undefined => undefined;
+
+const layerBytes = (count: number): number => Math.ceil(count / 4) * 4;
 
 export class GpuMotion {
   speed = 1;
@@ -67,8 +82,13 @@ export class GpuMotion {
   private raf = 0;
   private stopped = false;
   private sentTime = -1;
-  private readonly free: GPUBuffer[] = [];
+  private readonly free: Readback[] = [];
   private readonly uniform = new ArrayBuffer(16 + PARAMS * 4);
+  private readonly timeWord = new Float32Array(this.uniform, 0, 1);
+  private readonly paramWords = new Float32Array(this.uniform, 16, PARAMS);
+  private readonly colorsAt: number;
+  private readonly layersAt: number;
+  private readonly layerBytes: number;
 
   private constructor(
     private readonly device: GPUDevice,
@@ -84,11 +104,18 @@ export class GpuMotion {
     private readonly groups: [number, number],
     values: readonly number[],
   ) {
-    this.free.push(...readbacks);
+    this.colorsAt = count * 8;
+    this.layersAt = this.colorsAt + (colorsOut ? count * 4 : 0);
+    this.layerBytes = layerBytes(count);
+    for (const buffer of readbacks) {
+      const r: Readback = { buffer, land: ignore };
+      r.land = () => this.land(r);
+      this.free.push(r);
+    }
     const u = new Uint32Array(this.uniform);
     u[1] = count;
     u[2] = groups[0];
-    new Float32Array(this.uniform, 16, PARAMS).set(values.slice(0, PARAMS));
+    this.paramWords.set(values.slice(0, PARAMS));
   }
 
   static async start(graph: Graph, spec: GpuMotionSpec): Promise<GpuMotion> {
@@ -110,9 +137,9 @@ export class GpuMotion {
     new Float32Array(data.getMappedRange()).set(spec.data);
     data.unmap();
     const out = device.createBuffer({ label: "motion/out", size: Math.max(16, bytes), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
-    const layers = depth ? device.createBuffer({ label: "motion/layers", size: Math.max(16, spec.count * 4), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC }) : null;
+    const layers = depth ? device.createBuffer({ label: "motion/layers", size: Math.max(16, layerBytes(spec.count)), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC }) : null;
     const colorsOut = colors ? device.createBuffer({ label: "motion/colors", size: Math.max(16, spec.count * 4), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC }) : null;
-    const readBytes = bytes + (depth ? spec.count * 4 : 0) + (colors ? spec.count * 4 : 0);
+    const readBytes = bytes + (colors ? spec.count * 4 : 0) + (depth ? layerBytes(spec.count) : 0);
     const readbacks = Array.from({ length: READBACKS }, (_, k) =>
       device.createBuffer({ label: `motion/readback${k}`, size: Math.max(16, readBytes), usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST }),
     );
@@ -134,8 +161,12 @@ export class GpuMotion {
     return motion;
   }
 
+  get elapsed(): number {
+    return this.time;
+  }
+
   setParam(index: number, value: number): void {
-    new Float32Array(this.uniform, 16, PARAMS)[index] = value;
+    this.paramWords[index] = value;
     this.sentTime = -1;
   }
 
@@ -151,14 +182,14 @@ export class GpuMotion {
     const dt = this.last === 0 ? 0 : Math.min(0.1, (now - this.last) / 1000);
     this.last = now;
     this.time += dt * this.speed;
-    const buf = this.free.pop();
-    if (buf && this.time !== this.sentTime) this.step(buf);
+    if (this.free.length > 0 && this.time !== this.sentTime) this.step(this.free.pop()!);
     this.raf = requestAnimationFrame(this.tick);
   };
 
-  private step(buf: GPUBuffer): void {
+  private step(r: Readback): void {
+    const buf = r.buffer;
     this.sentTime = this.time;
-    new Float32Array(this.uniform, 0, 1)[0] = this.time;
+    this.timeWord[0] = this.time;
     this.device.queue.writeBuffer(this.params, 0, this.uniform);
     const enc = this.device.createCommandEncoder();
     const pass = enc.beginComputePass();
@@ -167,23 +198,24 @@ export class GpuMotion {
     pass.dispatchWorkgroups(this.groups[0], this.groups[1]);
     pass.end();
     enc.copyBufferToBuffer(this.out, 0, buf, 0, this.count * 8);
-    if (this.layers) enc.copyBufferToBuffer(this.layers, 0, buf, this.count * 8, this.count * 4);
-    if (this.colorsOut) enc.copyBufferToBuffer(this.colorsOut, 0, buf, this.count * 12, this.count * 4);
+    if (this.colorsOut) enc.copyBufferToBuffer(this.colorsOut, 0, buf, this.colorsAt, this.count * 4);
+    if (this.layers) enc.copyBufferToBuffer(this.layers, 0, buf, this.layersAt, this.layerBytes);
     this.device.queue.submit([enc.finish()]);
-    buf.mapAsync(GPUMapMode.READ).then(
-      () => {
-        if (this.stopped) return;
-        this.stream.positions.set(new Float32Array(buf.getMappedRange(0, this.count * 8)));
-        if (this.layers) {
-          if (this.depthOn) this.stream.zIndex.set(new Uint32Array(buf.getMappedRange(this.count * 8, this.count * 4)));
-          else this.stream.zIndex.fill(0);
-        }
-        if (this.colorsOut) this.stream.colors.set(new Uint32Array(buf.getMappedRange(this.count * 12, this.count * 4)));
-        buf.unmap();
-        this.stream.commit();
-        this.free.push(buf);
-      },
-      () => undefined,
-    );
+    buf.mapAsync(GPUMapMode.READ).then(r.land, ignore);
+  }
+
+  private land(r: Readback): void {
+    if (this.stopped) return;
+    const bytes = r.buffer.getMappedRange();
+    const s = this.stream;
+    s.positions.set(new Float32Array(bytes, 0, this.count * 2));
+    if (this.colorsOut) s.colors.set(new Uint32Array(bytes, this.colorsAt, this.count));
+    if (this.layers) {
+      if (this.depthOn) s.zIndex.set(new Uint8Array(bytes, this.layersAt, this.count));
+      else s.zIndex.fill(0);
+    }
+    r.buffer.unmap();
+    s.commit();
+    this.free.push(r);
   }
 }

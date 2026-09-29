@@ -71,11 +71,9 @@ export class Water {
   workMs = 0;
   private height: Float32Array;
   private previous: Float32Array;
-  private readonly laplacian: Float32Array;
   private readonly slopeX: Float32Array;
   private readonly slopeY: Float32Array;
-  private readonly edgeX: Float32Array;
-  private readonly edgeY: Float32Array;
+  private readonly side: number;
   private readonly stream: NodeStream;
   private readonly pending: number[] = [];
   private readonly box: HTMLElement;
@@ -95,23 +93,9 @@ export class Water {
     const n = g.nodes.count;
     this.height = new Float32Array(n);
     this.previous = new Float32Array(n);
-    this.laplacian = new Float32Array(n);
     this.slopeX = new Float32Array(n);
     this.slopeY = new Float32Array(n);
-    const m = g.edges.count;
-    const idx = g.edges.indices;
-    const pos = g.nodes.positions;
-    this.edgeX = new Float32Array(m);
-    this.edgeY = new Float32Array(m);
-    for (let e = 0; e < m; e++) {
-      const a = idx[e * 2]!;
-      const b = idx[e * 2 + 1]!;
-      const dx = pos[b * 2]! - pos[a * 2]!;
-      const dy = pos[b * 2 + 1]! - pos[a * 2 + 1]!;
-      const l2 = dx * dx + dy * dy || 1;
-      this.edgeX[e] = dx / l2;
-      this.edgeY[e] = dy / l2;
-    }
+    this.side = Math.ceil(Math.sqrt(n));
     this.stream = graph.nodes.stream({ colors: true });
     this.box = document.createElement("div");
     this.box.className = "stage-note";
@@ -162,51 +146,69 @@ export class Water {
     const x = pos[i * 2]!;
     const y = pos[i * 2 + 1]!;
     const r2 = WATER.radius * WATER.radius;
+    const side = this.side;
+    const reach = Math.ceil(WATER.radius / SPACING);
+    const row = Math.floor(i / side);
+    const col = i % side;
+    const x0 = Math.max(0, col - reach);
+    const x1 = Math.min(side - 1, col + reach);
     this.still = false;
-    for (let j = 0; j < u.length; j++) {
-      const dx = pos[j * 2]! - x;
-      const dy = pos[j * 2 + 1]! - y;
-      const d2 = dx * dx + dy * dy;
-      if (d2 >= r2) continue;
-      const w = WATER.height * 0.5 * (1 + Math.cos((Math.PI * Math.sqrt(d2)) / WATER.radius));
-      u[j]! += w;
-      p[j]! += w;
+    for (let ry = Math.max(0, row - reach); ry <= row + reach; ry++) {
+      for (let rx = x0; rx <= x1; rx++) {
+        const j = ry * side + rx;
+        if (j >= u.length) return;
+        const dx = pos[j * 2]! - x;
+        const dy = pos[j * 2 + 1]! - y;
+        const d2 = dx * dx + dy * dy;
+        if (d2 >= r2) continue;
+        const w = WATER.height * 0.5 * (1 + Math.cos((Math.PI * Math.sqrt(d2)) / WATER.radius));
+        u[j]! += w;
+        p[j]! += w;
+      }
     }
   }
 
   private step(slope: boolean): void {
     const u = this.height;
     const p = this.previous;
-    const lap = this.laplacian;
     const gx = this.slopeX;
     const gy = this.slopeY;
-    const ex = this.edgeX;
-    const ey = this.edgeY;
-    const idx = this.g.edges.indices;
-    const m = this.g.edges.count;
-    lap.fill(0);
-    if (slope) {
-      gx.fill(0);
-      gy.fill(0);
-    }
-    for (let e = 0; e < m; e++) {
-      const a = idx[e * 2]!;
-      const b = idx[e * 2 + 1]!;
-      const d = u[b]! - u[a]!;
-      lap[a]! += d;
-      lap[b]! -= d;
-      if (slope) {
-        const sx = d * ex[e]!;
-        const sy = d * ey[e]!;
-        gx[a]! += sx;
-        gy[a]! += sy;
-        gx[b]! += sx;
-        gy[b]! += sy;
+    const n = u.length;
+    const side = this.side;
+    const inv = 1 / SPACING;
+    for (let i = 0; i < n; ) {
+      const end = Math.min(n, i + side);
+      for (let x = 0; i < end; x++, i++) {
+        const h = u[i]!;
+        let lap = 0;
+        let sx = 0;
+        let sy = 0;
+        if (i + 1 < end) {
+          const d = u[i + 1]! - h;
+          lap += d;
+          sx += d;
+        }
+        if (x > 0) {
+          const d = h - u[i - 1]!;
+          lap -= d;
+          sx += d;
+        }
+        if (i + side < n) {
+          const d = u[i + side]! - h;
+          lap += d;
+          sy += d;
+        }
+        if (i >= side) {
+          const d = h - u[i - side]!;
+          lap -= d;
+          sy += d;
+        }
+        p[i] = h + (h - p[i]!) * WATER.damping + WATER.pull * lap;
+        if (slope) {
+          gx[i] = sx * inv;
+          gy[i] = sy * inv;
+        }
       }
-    }
-    for (let i = 0; i < u.length; i++) {
-      const h = u[i]!;
-      p[i] = h + (h - p[i]!) * WATER.damping + WATER.pull * lap[i]!;
     }
     this.height = p;
     this.previous = u;
