@@ -206,7 +206,8 @@ fn edgeBoundsOf(c : u32, chunks : u32, lid : u32) {
       let pb = nodePos[ij.y];
       let m = (pa + pb) * 0.5;
       let style = select(0u, edgeStyle[e], e < styles);
-      box = vec4<f32>(min(box.xy, min(pa, pb)), max(box.zw, max(pa, pb)));
+      let bend = edgeCurveBend(style) * vec2<f32>(pa.y - pb.y, pb.x - pa.x);
+      box = vec4<f32>(min(box.xy, min(min(pa, pb), min(pa, pb) + bend)), max(box.zw, max(max(pa, pb), max(pa, pb) + bend)));
       mid = vec4<f32>(min(mid.xy, m), max(mid.zw, m));
       let d = distance(pa, pb);
       len = vec4<f32>(max(len.x, d), max(len.y, f32(style & EDGE_WIDTH_MASK) / f32(EDGE_WIDTH_SCALE)), len.z + d, 0.0);
@@ -273,7 +274,7 @@ fn edgeChunkDraw(c : u32, chunks : u32) -> u32 {
   let p1 = worldToScreen(vec2<f32>(r.hi.x, r.lo.y));
   let p2 = worldToScreen(vec2<f32>(r.lo.x, r.hi.y));
   let p3 = worldToScreen(r.hi);
-  let m = edgeReachPx(width, EDGE_ARROWS) + select(0.0, EDGE_CURVE_MAX * r.maxLen * frame.zoom, EDGE_CURVE);
+  let m = edgeReachPx(width, EDGE_ARROWS);
   let lo = min(min(p0, p1), min(p2, p3)) - m;
   let hi = max(max(p0, p1), max(p2, p3)) + m;
   if (hi.x < 0.0 || hi.y < 0.0 || lo.x > frame.viewportPx.x || lo.y > frame.viewportPx.y) {

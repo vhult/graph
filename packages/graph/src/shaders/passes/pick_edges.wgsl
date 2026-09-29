@@ -73,7 +73,7 @@ fn pick_edges_select(@builtin(local_invocation_index) lid : u32) {
     let c = edgeScratch[EDGE_SCRATCH_LIST + j];
     let n = edgeScratch[edgeOffsetsAt(chunks) + j + 1u] - edgeScratch[edgeOffsetsAt(chunks) + j];
     let r = loadEdgeChunk(c, chunks);
-    let m = edgeReachPx(chunkWidthPx(r.maxWidthPx), EDGE_ARROWS) + pick.edgeRadiusPx + select(0.0, EDGE_CURVE_MAX * r.maxLen * frame.zoom, EDGE_CURVE);
+    let m = edgeReachPx(chunkWidthPx(r.maxWidthPx), EDGE_ARROWS) + pick.edgeRadiusPx;
     if (pickPointerInBox(r.lo, r.hi, m)) {
       let k = atomicAdd(&wgPickCount, 1u);
       if (k < cap) {
