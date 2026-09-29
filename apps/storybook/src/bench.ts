@@ -36,6 +36,7 @@ export const SUITE: readonly BenchCase[] = [
   { name: "icon-zoom", dataset: "communities", count: 1_000_000, path: "iconZoom", nodeLabels: true, edgeLabels: true, targetP99Ms: 6.0, icons: 64 },
   { name: "large-curve", dataset: "communities", count: 1_000_000, path: "standard", nodeLabels: true, edgeLabels: true, targetP99Ms: 6.0, curve: 0.2 },
   { name: "large-zoom-curve", dataset: "communities", count: 1_000_000, path: "zoomSweep", nodeLabels: true, edgeLabels: true, targetP99Ms: 6.0, curve: 0.2 },
+  { name: "xlarge-zoom-curve", dataset: "communities", count: 10_000_000, path: "zoomSweep", nodeLabels: true, edgeLabels: true, targetP99Ms: 16.0, curve: 0.2 },
   { name: "large-dashed", dataset: "communities", count: 1_000_000, path: "standard", nodeLabels: true, edgeLabels: true, targetP99Ms: 6.0, pattern: "dashed" },
   { name: "large-curve-dashed", dataset: "communities", count: 1_000_000, path: "standard", nodeLabels: true, edgeLabels: true, targetP99Ms: 6.0, curve: 0.2, pattern: "dashed" },
   { name: "large-curve-mixed", dataset: "communities", count: 1_000_000, path: "standard", nodeLabels: true, edgeLabels: true, targetP99Ms: 6.0, curve: 0.2, curveEvery: 64 },
