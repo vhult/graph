@@ -8,7 +8,7 @@ export const HOLE3D = {
   step: 0.002,
   timeScale: 24,
   scale: 30,
-  extent: 17,
+  extent: 22,
   inclination: 84,
   exposure: 9,
   alpha: 0.85,
@@ -61,7 +61,7 @@ fn image(i : u32, t : f32) -> Image {
   let o = k * ${WORDS}u;
   let r = data[o];
   let omega = data[o + 3u];
-  let phi = data[o + 1u] + omega * t * param(8u);
+  let phi = data[o + 1u] + omega * t * param(8u) + param(13u);
   let pos = vec3<f32>(r * cos(phi), r * sin(phi), data[o + 2u]);
   let inc = param(7u);
   let view = vec3<f32>(0.0, -sin(inc), cos(inc));
@@ -262,6 +262,6 @@ export function blackHole3d(count: number, seed = 1): Hole3d {
       edges: { count: 0, indices: new Uint32Array(0) },
     },
     data,
-    params: [particles, particles * WORDS, H.radii, H.angles, H.rIn, H.rOut, PSI_TOP, (H.inclination * Math.PI) / 180, H.timeScale, H.scale, H.exposure, H.alpha, H.beaming],
+    params: [particles, particles * WORDS, H.radii, H.angles, H.rIn, H.rOut, PSI_TOP, (H.inclination * Math.PI) / 180, H.timeScale, H.scale, H.exposure, H.alpha, H.beaming, 0],
   };
 }
