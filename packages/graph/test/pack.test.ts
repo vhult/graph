@@ -84,6 +84,22 @@ describe("Pack", () => {
     expect(packEdgeStyle({ width: 100 })).toBe(255);
   });
 
+  it("packs the curve in 1/60 steps up to 0.25", () => {
+    const C = CONSTANTS.EDGE_CURVE_SHIFT;
+    const bend = (w: number) => ((w >>> C) & CONSTANTS.EDGE_CURVE_MASK) / CONSTANTS.EDGE_CURVE_SCALE;
+    expect(packEdgeStyle({ curve: 0 })).toBe(0);
+    expect(bend(packEdgeStyle({ curve: 0.2 }))).toBeCloseTo(0.2, 6);
+    expect(bend(packEdgeStyle({ curve: 1 }))).toBe(0.25);
+    expect(packEdgeStyle({ curve: -1 })).toBe(0);
+    expect(packEdgeStyle({ curve: Number.NaN })).toBe(0);
+    const w = packEdgeStyle({ width: 2, directed: true, pattern: "dashed", tapered: true, curve: 0.1 });
+    expect(bend(w)).toBeCloseTo(0.1, 6);
+    expect(w & CONSTANTS.EDGE_WIDTH_MASK).toBe(16);
+    expect((w >>> CONSTANTS.EDGE_PATTERN_SHIFT) & CONSTANTS.EDGE_PATTERN_MASK).toBe(CONSTANTS.EDGE_PATTERN_DASHED);
+    expect(w & CONSTANTS.EDGE_FLAG_TAPERED).toBe(CONSTANTS.EDGE_FLAG_TAPERED);
+    expect((w & CONSTANTS.EDGE_FLAG_DIRECTED) >>> 0).toBe(CONSTANTS.EDGE_FLAG_DIRECTED >>> 0);
+  });
+
   it("packs the line pattern and the tapered flag", () => {
     const P = CONSTANTS.EDGE_PATTERN_SHIFT;
     expect(packEdgeStyle({ pattern: "solid" })).toBe(0);

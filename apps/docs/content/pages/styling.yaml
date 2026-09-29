@@ -50,6 +50,17 @@ blocks:
         ]),
       });
     lang: ts
+  - subheading: Curved edges
+  - text: "`curve` in `packEdgeStyle` bends one edge. Its middle moves off the straight line by `curve` times its length, from 0 (straight, the default) to 0.25. Arrowheads, line patterns, hover, picking and edge labels follow the curve. Graphs where no edge is curved pay nothing for it."
+  - code: |
+      import { packEdgeStyle } from "@vhult/graph";
+
+      graph.edges.set({
+        count: 2,
+        indices: new Uint32Array([0, 1, 1, 2]),
+        styles: new Uint32Array([packEdgeStyle({ width: 2 }), packEdgeStyle({ width: 2, curve: 0.2, directed: true })]),
+      });
+    lang: ts
 
   - heading: Highlights
   - text: "The hovered node, the selected nodes and the focused nodes each have a `HighlightLook`: an outline around the node, and a color and width for its edges. Set `hover` to false to turn the hover highlight off."

@@ -188,6 +188,9 @@ export const CONSTANTS = {
   EDGE_PATTERN_DASH_DOT: 3,
   EDGE_PATTERN_DOUBLE: 4,
   EDGE_FLAG_TAPERED: 1 << 12,
+  EDGE_CURVE_SHIFT: 13,
+  EDGE_CURVE_MASK: 0xf,
+  EDGE_CURVE_SCALE: 60,
   EDGE_ZLAYER_SHIFT: 20,
   EDGE_CAP_SHIFT: 24,
   EDGE_FLAG_DIRECTED: 1 << 28,
@@ -271,8 +274,16 @@ export const EDGE_CONSTANTS = {
   EDGE_SCRATCH_DRAW_ARGS: 0,
   EDGE_SCRATCH_DISPATCH: 4,
   EDGE_SCRATCH_LIST_COUNT: 7,
-  EDGE_SCRATCH_LIST: 8,
+  EDGE_SCRATCH_CURVE_ARGS: 8,
+  EDGE_SCRATCH_LIST: 12,
+  EDGE_CURVE_PIECES: 8,
 } as const;
+
+export function edgeStripVertices(arrows: boolean, curved: boolean): number {
+  if (!curved) return arrows ? 10 : 4;
+  const strip = 2 * (EDGE_CONSTANTS.EDGE_CURVE_PIECES + 1);
+  return arrows ? strip + 6 : strip;
+}
 
 export const LABEL_PARAMS = defineStruct("LabelParams", [
   { name: "textH", type: "f32" },

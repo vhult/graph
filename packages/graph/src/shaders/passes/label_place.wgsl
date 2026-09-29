@@ -28,6 +28,7 @@
 @group(2) @binding(24) var<storage, read> edgeTreeBox : array<vec4<f32>>;
 @group(2) @binding(25) var<storage, read> edgeBits : array<u32>;
 @group(2) @binding(26) var<storage, read> edgeTreeLen : array<f32>;
+@group(2) @binding(27) var<storage, read> edgeStyles : array<u32>;
 
 const UNDECIDED : u32 = 0u;
 const SHOWN : u32 = 1u;
@@ -246,7 +247,9 @@ fn emitEdge(e : u32) {
   let rank = -1.0 / (len * select(1.0, label.bonus, labelled));
   let hw = (w * d.x + label.textH * d.y + label.padding) * 0.5;
   let hh = (w * d.y + label.textH * d.x + label.padding) * 0.5;
-  pushCandidate(LabelCandidate((a + b) * 0.5, hw, hh, rank, e | LABEL_EDGE_BIT, len));
+  let bend = edgeCurveBend(select(0u, edgeStyles[e], e < arrayLength(&edgeStyles)));
+  let peak = (a + b) * 0.5 + vec2<f32>(a.y - b.y, b.x - a.x) * bend;
+  pushCandidate(LabelCandidate(peak, hw, hh, rank, e | LABEL_EDGE_BIT, len));
 }
 
 @compute @workgroup_size(64)

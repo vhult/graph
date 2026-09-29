@@ -127,11 +127,12 @@ const EDGE_PATTERNS = {
 };
 
 /** Packs one edge style word from a width in CSS px, whether the edge is directed, its line pattern and whether it is tapered. */
-export function packEdgeStyle(style: { width?: number; directed?: boolean; pattern?: "solid" | "dashed" | "dotted" | "dashDot" | "double"; tapered?: boolean }): number {
+export function packEdgeStyle(style: { width?: number; directed?: boolean; pattern?: "solid" | "dashed" | "dotted" | "dashDot" | "double"; tapered?: boolean; curve?: number }): number {
   const c = CONSTANTS;
   const w = Math.min(255, Math.max(0, Math.round((style.width ?? 0) * c.EDGE_WIDTH_SCALE)));
   const pattern = EDGE_PATTERNS[style.pattern ?? "solid"] << c.EDGE_PATTERN_SHIFT;
-  return (w | pattern | (style.tapered ? c.EDGE_FLAG_TAPERED : 0) | (style.directed ? c.EDGE_FLAG_DIRECTED : 0)) >>> 0;
+  const curve = Math.min(c.EDGE_CURVE_MASK, Math.max(0, Math.round((style.curve ?? 0) * c.EDGE_CURVE_SCALE))) << c.EDGE_CURVE_SHIFT;
+  return (w | pattern | curve | (style.tapered ? c.EDGE_FLAG_TAPERED : 0) | (style.directed ? c.EDGE_FLAG_DIRECTED : 0)) >>> 0;
 }
 
 export function edgeStateBits(flags: number): number {

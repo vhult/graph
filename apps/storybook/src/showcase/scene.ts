@@ -13,7 +13,7 @@ function iconColor(rgb: number): number {
 }
 
 function edgeStyle(rel: Relation, width?: number): number {
-  return packEdgeStyle({ width: width ?? rel.width ?? 1.5, directed: rel.directed, pattern: rel.pattern, tapered: rel.tapered });
+  return packEdgeStyle({ width: width ?? rel.width ?? 1.5, directed: rel.directed, pattern: rel.pattern, tapered: rel.tapered, curve: rel.curve });
 }
 
 export class Scene {

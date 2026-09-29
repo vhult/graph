@@ -1,5 +1,5 @@
 import type { ResolvedLook } from "../api/style";
-import { CONSTANTS, HOVER_PARAMS, LOOK_PARAMS, PICK_CONSTANTS } from "../data/Layouts";
+import { CONSTANTS, edgeStripVertices, HOVER_PARAMS, LOOK_PARAMS, PICK_CONSTANTS } from "../data/Layouts";
 import type { LookList } from "../data/LookList";
 import { packRgba } from "../data/Pack";
 import type { Tune } from "../engine/Tune";
@@ -20,7 +20,7 @@ const EDGE_LOOK_MASKS = [
   CONSTANTS.EDGE_STATE_SELECTED | CONSTANTS.EDGE_STATE_FOCUSED | CONSTANTS.EDGE_STATE_HIDDEN,
   CONSTANTS.EDGE_STATE_FOCUSED | CONSTANTS.EDGE_STATE_HIDDEN,
 ] as const;
-const arrowKey = (t: Tune) => (t.arrows ? "1" : "0");
+const edgeKey = (t: Tune) => `${t.arrows ? 1 : 0}|${t.curved ? 1 : 0}`;
 
 interface EdgePipes {
   edge: GPURenderPipeline;
@@ -146,9 +146,11 @@ export class HoverPass {
         primitive: { topology: "triangle-strip" },
       });
     const makeIconPipe = () => make("node_vs_icons", "node_fs_icons", iconLayout);
-    const edgePipes = new Tuned(arrowKey, (t) =>
-      Promise.all([make("edge_vs", "edge_fs", layout, { EDGE_ARROWS: t.arrows ? 1 : 0 }), make("edge_look_vs", "edge_look_fs", edgeLookLayout, { EDGE_ARROWS: t.arrows ? 1 : 0 })]).then(([edge, look]) => ({ edge, look, vertices: t.arrows ? 10 : 4 })),
-    );
+    const edgePipes = new Tuned(edgeKey, (t) => {
+      const constants = { EDGE_ARROWS: t.arrows ? 1 : 0, EDGE_CURVE: t.curved ? 1 : 0 };
+      const c = t.curved ? "_curve" : "";
+      return Promise.all([make(`edge${c}_vs`, `edge${c}_fs`, layout, constants), make(`edge_look${c}_vs`, `edge_look${c}_fs`, edgeLookLayout, constants)]).then(([edge, look]) => ({ edge, look, vertices: edgeStripVertices(t.arrows, t.curved) }));
+    });
     const [nodePipe, lookPipe] = await Promise.all([make("node_vs", "node_fs"), make("look_vs", "look_fs", lookLayout)]);
     await edgePipes.loadTune(tune);
     edgePipes.useTune(tune);

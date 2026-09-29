@@ -1,4 +1,5 @@
 #include "common/edge_segment.wgsl"
+#include "common/edge_curve.wgsl"
 #include "common/icons.wgsl"
 
 @group(2) @binding(0) var<uniform> hover : HoverParams;
@@ -222,6 +223,70 @@ fn edge_look_vs(@builtin(vertex_index) vi : u32, @builtin(instance_index) ii : u
 @fragment
 fn edge_look_fs(in : EdgeLookOut) -> @location(0) vec4<f32> {
   let a = in.color.a * clamp(0.5 - edgeDist(in.uv, in.halfLen, in.halfWidth, in.arrowLen), 0.0, 1.0);
+  if (a < 0.002) {
+    discard;
+  }
+  return vec4<f32>(in.color.rgb * a, a);
+}
+
+@vertex
+fn edge_curve_vs(@builtin(vertex_index) vi : u32) -> CurveOut {
+  let ib = hoverRank[hover.edgeB];
+  let a = worldToScreen(nodePos[hoverRank[hover.edgeA]]);
+  let base = edgeWidthPx(hover.edgeStyle);
+  let w = base * hover.edgeWidth;
+  let halfWidth = max(w, EDGE_MIN_DRAW_WIDTH_PX) * 0.5;
+  let cv = curveOf(a, worldToScreen(nodePos[ib]), ib, w, max(base, EDGE_MIN_DRAW_WIDTH_PX) * 0.5, edgeCurveBend(hover.edgeStyle), EDGE_ARROWS && (hover.edgeStyle & EDGE_FLAG_DIRECTED) != 0u, (hover.flags & HOVER_FLAG_SHAPES) != 0u);
+  return curveOutOf(curveVertex(vi, cv, halfWidth, false), vec4<f32>(0.0));
+}
+
+@fragment
+fn edge_curve_fs(in : CurveOut) -> @location(0) vec4<f32> {
+  let a = curveCoverage(in.pos.xy, in.q, in.shape, in.geo, in.tip, in.arrow, in.line, in.part, false);
+  if (a < 0.002) {
+    discard;
+  }
+  return premultiplied(hover.edgeColor, a);
+}
+
+@vertex
+fn edge_look_curve_vs(@builtin(vertex_index) vi : u32, @builtin(instance_index) ii : u32) -> CurveOut {
+  var o : CurveOut;
+  o.pos = vec4<f32>(0.0, 0.0, 2.0, 1.0);
+  let u = lookEdges[ii];
+  if (u >= frame.edgeCount) {
+    return o;
+  }
+  let e = lookEdgeRank[u];
+  let raw = edgeIdx[e];
+  let bits = raw.x >> EDGE_STATE_SHIFT;
+  if ((bits & look.edgeMask) != look.edgeBit) {
+    return o;
+  }
+  let ij = edgeEnds(raw);
+  let ends = edgeEndState(ij);
+  if ((ends & STATE_HIDDEN) != 0u) {
+    return o;
+  }
+  var style = 0u;
+  if ((look.flags & HOVER_FLAG_EDGE_STYLES) != 0u) {
+    style = edgeStyle[e];
+  }
+  let base = edgeWidthPx(style);
+  let w = base * look.edgeWidth;
+  let wDraw = max(w, EDGE_MIN_DRAW_WIDTH_PX);
+  let cv = curveOf(worldToScreen(nodePos[ij.x]), worldToScreen(nodePos[ij.y]), ij.y, w, max(base, EDGE_MIN_DRAW_WIDTH_PX) * 0.5, edgeCurveBend(style), EDGE_ARROWS && (style & EDGE_FLAG_DIRECTED) != 0u, (look.flags & HOVER_FLAG_SHAPES) != 0u);
+  var c = unpack4x8unorm(look.edgeColor);
+  c.a *= min(1.0, w / wDraw);
+  if ((bits & EDGE_STATE_DIMMED) != 0u || (ends & STATE_DIMMED) != 0u) {
+    c.a *= frame.dimmedAlpha;
+  }
+  return curveOutOf(curveVertex(vi, cv, wDraw * 0.5, false), c);
+}
+
+@fragment
+fn edge_look_curve_fs(in : CurveOut) -> @location(0) vec4<f32> {
+  let a = in.color.a * curveCoverage(in.pos.xy, in.q, in.shape, in.geo, in.tip, in.arrow, in.line, in.part, false);
   if (a < 0.002) {
     discard;
   }

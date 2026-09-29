@@ -8,6 +8,36 @@ bandwidth), Edge 153, 1M nodes / 3M edges at fit unless stated.
 
 ---
 
+## 0077 — Curved edges: an SDF on a clipped 8-piece strip
+
+`packEdgeStyle({ curve })` bends one edge into a symmetric parabola whose peak
+sits curve × length off the straight line (0 to 0.25 in steps of 1/60, bits
+13 to 16 of the style word). This reverses the "curves dropped" part of 0075.
+A curved edge is one triangle strip of 8 pieces over its on-screen part; the
+fragment finds the exact distance in 3 Newton steps (under 0.01 px in float32
+up to 0.25), so width, round caps, patterns, taper, arrowheads, hover, looks,
+pick and labels all follow the same curve. The bend is limited per edge so the
+strip never folds. The arrowhead is its own box, and each pixel belongs to the
+strip or the box by one test on its position, so a translucent edge is never
+drawn twice. The store counts curved edges like directed ones: with none, the
+straight pipelines run as before. With one or more, the edge pass draws the
+same list twice from two indirect args: the straight pipeline drops curved
+edges and the curve pipeline drops straight ones, each right after reading the
+style word, so a straight edge costs its 4 vertices plus 18 near-empty ones.
+Curved edges draw over straight ones.
+
+Spike, AMD Radeon 890M, every edge bent 0.2, 6 runs, edge pass mean / p95 ms,
+`large` then `large-zoom`. Straight 2.19 / 3.62, 2.70 / 4.26. SDF strip
+3.85 / 7.30, 4.74 / 9.36. One quad around the curve 22.07 / 56.06,
+19.15 / 63.34. Loop-Blinn on the same strip 3.77 / 7.19, 4.65 / 9.14: a tie,
+with an approximate width and flat ends. A 16-piece polyline 4.60 / 9.13,
+5.99 / 11.49, with visible kinks. The spike used a closed-form Bézier distance
+and no clip; the final version is not measured yet, nor the cost for straight
+edges in a graph with some curves. The suite has `large-curve`,
+`large-zoom-curve`, `large-dashed` and `large-curve-dashed` for it.
+
+---
+
 ## 0076 — A long touch or pen press opens the context menu
 
 PointerInput sends the menu record itself when a single touch or pen

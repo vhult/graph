@@ -19,6 +19,7 @@ export interface Relation {
   directed?: boolean;
   width?: number;
   color?: number;
+  curve?: number;
 }
 
 export interface SceneNode {
