@@ -8,6 +8,23 @@ bandwidth), Edge 153, 1M nodes / 3M edges at fit unless stated.
 
 ---
 
+## 0079 — Curve strips have 4 pieces, not 8
+
+This replaces the 8 pieces of 0077. The strip is only the hull: each fragment
+finds its exact distance to the curve, so fewer pieces only make the hull
+looser. At 8 pieces each curved edge redid the full curve setup in each of
+its 18 vertices (24 with arrows), and the curve draw was bound by vertex work. A per-chunk
+choice of 4 or 8 pieces was not needed: 38 views at 1M (bend 0.2 and 0.25,
+1 and 6 px wide, arrows and patterns, fit to ×1000 rotated) differ from
+8 pieces by at most 2/255 on nearly all pixels, and by up to 6/255 on 9 pixels.
+
+AMD Radeon 890M, GPU mean / p95 ms, two runs each: `xlarge-zoom-curve`
+30.8–32.2 / 57.8–59.7 → 15.1–15.2 / 21.1–21.4, `large-zoom-curve`
+8.6–8.8 → 7.8, `large-curve-dashed` 6.4 → 5.8, `xlarge-zoom-curve-mixed`
+11.7–11.8 → 11.4–11.5.
+
+---
+
 ## 0078 — Straight and curved edges each draw only their own list
 
 This replaces the "same list twice" part of 0077. The bounds pass stores one

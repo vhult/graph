@@ -278,7 +278,7 @@ export const EDGE_CONSTANTS = {
   EDGE_SCRATCH_LIST_COUNT: 7,
   EDGE_SCRATCH_CURVE_ARGS: 8,
   EDGE_SCRATCH_LIST: 12,
-  EDGE_CURVE_PIECES: 8,
+  EDGE_CURVE_PIECES: 4,
 } as const;
 
 export function edgeStripVertices(arrows: boolean, curved: boolean): number {

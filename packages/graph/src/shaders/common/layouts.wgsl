@@ -144,7 +144,7 @@ const EDGE_SCRATCH_DISPATCH : u32 = 4u;
 const EDGE_SCRATCH_LIST_COUNT : u32 = 7u;
 const EDGE_SCRATCH_CURVE_ARGS : u32 = 8u;
 const EDGE_SCRATCH_LIST : u32 = 12u;
-const EDGE_CURVE_PIECES : u32 = 8u;
+const EDGE_CURVE_PIECES : u32 = 4u;
 
 // size 96, align 4
 struct LabelParams {
