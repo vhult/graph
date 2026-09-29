@@ -125,11 +125,13 @@ fn pickGroup(c : u32, levels : u32, edges : bool) -> Pick {
       break;
     }
   }
-  let m = label.maxHalfW + 2.0 * label.maxHalfH;
-  let box = p.box;
-  p.ok = p.ok && (c & ((1u << p.level) - 1u)) == 0u
-    && !(box.z < -m || box.w < -m || box.x > frame.viewportPx.x + m || box.y > frame.viewportPx.y + m);
+  p.ok = p.ok && (c & ((1u << p.level) - 1u)) == 0u;
   return p;
+}
+
+fn onScreen(box : vec4<f32>, reach : f32) -> bool {
+  let m = label.maxHalfW + 2.0 * label.maxHalfH + reach;
+  return !(box.z < -m || box.w < -m || box.x > frame.viewportPx.x + m || box.y > frame.viewportPx.y + m);
 }
 
 fn pushJob(counter : u32, base : u32, start : u32, count : u32) {
@@ -149,7 +151,7 @@ fn label_traverse(@builtin(global_invocation_id) gid : vec3<u32>, @builtin(num_w
     return;
   }
   let p = pickGroup(c, label.levels, false);
-  if (!p.ok) {
+  if (!p.ok || !onScreen(p.box, 0.0)) {
     return;
   }
   let k = wanted(p.slots, LABEL_SLACK);
@@ -168,7 +170,12 @@ fn label_traverse_edges(@builtin(global_invocation_id) gid : vec3<u32>, @builtin
     return;
   }
   let p = pickGroup(c, label.edgeLevels, true);
-  if (!p.ok || edgeTreeLen[edgeTreeOffset(p.level) + (c >> p.level)] * frame.zoom * LABEL_EDGE_FIT < label.minEdgeW) {
+  if (!p.ok) {
+    return;
+  }
+  let len = edgeTreeLen[edgeTreeOffset(p.level) + (c >> p.level)] * frame.zoom;
+  let bend = select(0.0, EDGE_CURVE_MAX * len, (frame.flags & FRAME_FLAG_CURVES) != 0u);
+  if (!onScreen(p.box, bend) || len * LABEL_EDGE_FIT < label.minEdgeW) {
     return;
   }
   let k = wanted(p.slots, LABEL_EDGE_SLACK);

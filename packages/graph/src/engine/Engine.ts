@@ -1188,7 +1188,10 @@ export class Engine {
     fi.pixelRatio = this.pixelRatio;
     fi.nodeCount = nodeCount;
     fi.edgeCount = edgeCount;
-    fi.flags = (this.store.hiddenCount > 0 ? CONSTANTS.FRAME_FLAG_HIDDEN : 0) | (this.store.dimmedCount > 0 ? CONSTANTS.FRAME_FLAG_DIMMED : 0);
+    fi.flags =
+      (this.store.hiddenCount > 0 ? CONSTANTS.FRAME_FLAG_HIDDEN : 0) |
+      (this.store.dimmedCount > 0 ? CONSTANTS.FRAME_FLAG_DIMMED : 0) |
+      (this.store.hasCurved ? CONSTANTS.FRAME_FLAG_CURVES : 0);
     const hover = this.hover.value;
     if (hover) {
       hover.syncLists(this.store.looks);

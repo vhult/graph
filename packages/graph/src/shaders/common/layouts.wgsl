@@ -52,6 +52,7 @@ const STATE_GROUP_SHIFT : u32 = 8u;
 const FRAME_FLAG_HIDDEN : u32 = 0x1u;
 const FRAME_FLAG_DIMMED : u32 = 0x2u;
 const FRAME_FLAG_EDGE_LOOKS : u32 = 0x4u;
+const FRAME_FLAG_CURVES : u32 = 0x8u;
 const STYLE_SHAPE_MASK : u32 = 0xFFu;
 const STYLE_ICON_SHIFT : u32 = 8u;
 const STYLE_ICON_MASK : u32 = 0xFFFFu;
