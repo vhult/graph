@@ -161,6 +161,10 @@ export class GpuMotion {
     return motion;
   }
 
+  get elapsed(): number {
+    return this.time;
+  }
+
   setParam(index: number, value: number): void {
     this.paramWords[index] = value;
     this.sentTime = -1;

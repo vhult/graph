@@ -9,11 +9,15 @@ export const LORENZ = {
   points: 150_000,
   flow: 60,
   spin: 0.12,
-  tilt: 0.35,
+  yaw: -0.15,
+  tilt: 0.2,
   scale: 20,
   depth: 64,
+  eye: 110,
+  farLight: 0.5,
+  farAlpha: 0.6,
   spread: 0.12,
-  alpha: 0.22,
+  alpha: 0.4,
   extent: 34,
 } as const;
 
@@ -48,12 +52,17 @@ fn nodePosition(i : u32, t : f32) -> vec3<f32> {
   pathStep = k;
   let k1 = select(k + 1u, 0u, k + 1u >= u32(len));
   let p = mix(tablePoint(base, k), tablePoint(base, k1), f - f32(k)) + vec3<f32>(data[o + 1u], data[o + 2u], data[o + 3u]);
-  let yaw = param(3u) * t;
-  let x = cos(yaw) * p.x - sin(yaw) * p.y;
-  let y = sin(yaw) * p.x + cos(yaw) * p.y;
-  let depth = cos(param(4u)) * y - sin(param(4u)) * p.z;
-  let up = sin(param(4u)) * y + cos(param(4u)) * p.z;
-  return vec3<f32>(x * param(5u), -up * param(5u), 0.5 - depth / param(6u));
+  let yaw = param(3u) * t + param(8u);
+  let c = cos(yaw);
+  let s = sin(yaw);
+  let x = c * p.x - s * p.y;
+  let y = s * p.x + c * p.y;
+  let ct = cos(param(4u));
+  let st = sin(param(4u));
+  let depth = ct * y - st * p.z;
+  let up = st * y + ct * p.z;
+  let grow = param(9u) / (param(9u) + depth) * param(5u);
+  return vec3<f32>(x * grow, -up * grow, 0.5 - depth / param(6u));
 }
 
 fn heat(v : f32) -> vec3<f32> {
@@ -72,8 +81,9 @@ fn heat(v : f32) -> vec3<f32> {
 
 fn nodeColor(i : u32, t : f32, p : vec3<f32>) -> vec4<f32> {
   let speed = data[u32(param(1u)) + pathStep * 4u + 3u];
-  let light = mix(0.3, 1.0, clamp(p.z, 0.0, 1.0));
-  return vec4<f32>(heat(clamp(speed, 0.0, 1.0)) * light, param(7u));
+  let near = clamp(p.z, 0.0, 1.0);
+  let light = mix(param(10u), 1.0, near);
+  return vec4<f32>(heat(clamp(speed, 0.0, 1.0)) * light, param(7u) * mix(param(11u), 1.0, near));
 }
 `;
 
@@ -138,6 +148,6 @@ export function lorenz(count: number, seed = 1): Lorenz {
   return {
     graph: { nodes: { count, positions, colors, sizes }, edges: { count: 0, indices: new Uint32Array(0) } },
     data,
-    params: [L.points, count * WORDS, L.flow, L.spin, L.tilt, L.scale, L.depth, alpha],
+    params: [L.points, count * WORDS, L.flow, L.spin, L.tilt, L.scale, L.depth, alpha, L.yaw, L.eye, L.farLight, L.farAlpha],
   };
 }
