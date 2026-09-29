@@ -1,157 +1,117 @@
 .vg-welcome {
+  --vg-panel: #121419;
+  --vg-line: #23262e;
+  --vg-line-2: #2e323b;
+  --vg-text: #e3e5e9;
+  --vg-muted: #8d939e;
+  --vg-faint: #5f6570;
   --vg-accent: #4c9aff;
-  --vg-text: #e6e9ef;
-  --vg-muted: #9aa3b2;
-  --vg-line: rgba(255, 255, 255, 0.1);
-  --vg-card: rgba(255, 255, 255, 0.04);
+  --vg-radius: 4px;
+  --vg-mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
   color: var(--vg-text);
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-  padding: 16px 0 48px;
+  font: 16px/1.7 "IBM Plex Sans", system-ui, sans-serif;
+  padding: 0 0 48px;
 }
 
-.vg-hero {
-  text-align: center;
-  padding: 24px 0 32px;
+.vg-intro {
+  padding: 0 0 32px;
 }
 
 .vg-title {
   margin: 0;
-  font-size: 48px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  background: linear-gradient(90deg, #4c9aff, #b57bff 50%, #36c98f);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-}
-
-.vg-tagline {
-  margin: 12px 0 0;
-  font-size: 22px;
+  font-size: clamp(34px, 5vw, 52px);
   font-weight: 600;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
 }
 
 .vg-lead {
-  margin: 8px auto 0;
-  max-width: 560px;
-  font-size: 15px;
-  line-height: 1.5;
+  max-width: 620px;
+  margin: 18px 0 0;
   color: var(--vg-muted);
+  font-size: 18px;
 }
 
 .vg-links {
   display: flex;
-  justify-content: center;
   flex-wrap: wrap;
-  gap: 12px;
-  margin-top: 24px;
+  gap: 10px;
+  margin-top: 32px;
 }
 
 .vg-button {
-  padding: 8px 18px;
-  border: 1px solid var(--vg-line);
-  border-radius: 999px;
+  padding: 8px 16px;
+  border: 1px solid var(--vg-line-2);
+  border-radius: var(--vg-radius);
   color: var(--vg-text);
-  font-size: 14px;
-  font-weight: 600;
+  font-size: 15px;
+  font-weight: 500;
   text-decoration: none;
-  transition: border-color 0.15s, background 0.15s;
 }
 
 .vg-button:hover {
-  border-color: var(--vg-accent);
+  border-color: var(--vg-faint);
 }
 
 .vg-primary {
-  background: var(--vg-accent);
   border-color: var(--vg-accent);
-  color: #0a0a0f;
+  background: var(--vg-accent);
+  color: #07111f;
 }
 
 .vg-primary:hover {
-  background: #6aaeff;
+  background: #6aabff;
 }
 
-.vg-install {
-  display: inline-block;
-  margin-top: 20px;
-  padding: 8px 14px;
-  border-radius: 6px;
-  background: rgba(0, 0, 0, 0.35);
-  color: var(--vg-text);
-  font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-}
-
-.vg-install::before {
-  content: "$ ";
-  color: var(--vg-muted);
-}
-
-.vg-points {
+.vg-graph {
   display: flex;
-  justify-content: center;
-  flex-wrap: wrap;
-  gap: 8px 28px;
-  margin: 24px 0 0;
-  padding: 0;
-  list-style: none;
-  color: var(--vg-muted);
-  font-size: 14px;
+  flex-direction: column;
+  margin: 0;
+  border: 1px solid var(--vg-line);
+  border-radius: var(--vg-radius);
+  background: var(--vg-panel);
+  overflow: hidden;
 }
 
-.vg-points li::before {
-  content: "●";
-  margin-right: 8px;
-  color: var(--vg-accent);
-  font-size: 10px;
-  vertical-align: 2px;
+.vg-graph figcaption {
+  display: flex;
+  justify-content: space-between;
+  padding: 5px 14px;
+  border-bottom: 1px solid var(--vg-line);
+  color: var(--vg-faint);
+  font: 12px/22px var(--vg-mono);
 }
 
 .vg-graph .stage-embed {
   height: 520px;
-  border: 1px solid var(--vg-line);
-  border-radius: 12px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+  border-radius: 0;
 }
 
-.vg-hint {
-  margin: 12px 0 0;
-  text-align: center;
-  color: var(--vg-muted);
-  font-size: 13px;
-}
-
-.vg-cards {
+.vg-points {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-  gap: 12px;
-  margin-top: 40px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 0 32px;
+  margin: 32px 0 0;
+  padding: 0;
+  list-style: none;
 }
 
-.vg-card {
+.vg-points li {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 16px;
-  border: 1px solid var(--vg-line);
-  border-radius: 10px;
-  background: var(--vg-card);
-  color: var(--vg-text);
-  text-decoration: none;
-  transition: border-color 0.15s, transform 0.15s;
-}
-
-.vg-card:hover {
-  border-color: var(--vg-accent);
-  transform: translateY(-2px);
-}
-
-.vg-card strong {
+  gap: 4px;
+  padding: 20px 0;
+  border-top: 1px solid var(--vg-line);
+  color: var(--vg-muted);
   font-size: 15px;
 }
 
-.vg-card span {
-  color: var(--vg-muted);
-  font-size: 13px;
-  line-height: 1.45;
+.vg-index {
+  color: var(--vg-accent);
+  font: 13px var(--vg-mono);
+}
+
+.sbdocs-wrapper:has(.vg-welcome) {
+  padding-top: 24px;
+  background: #0c0d10;
 }
