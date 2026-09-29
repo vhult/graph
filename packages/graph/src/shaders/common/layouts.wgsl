@@ -137,6 +137,7 @@ struct EdgeChunk {
 const EDGE_CHUNK_SIZE : u32 = 1024u;
 const EDGE_CHUNK_SHIFT : u32 = 10u;
 const EDGE_CHUNK_WORDS : u32 = 12u;
+const EDGE_CHUNK_MASK_WORDS : u32 = 32u;
 const EDGE_LEVEL_BITS : u32 = 4u;
 const EDGE_SCRATCH_DRAW_ARGS : u32 = 0u;
 const EDGE_SCRATCH_DISPATCH : u32 = 4u;

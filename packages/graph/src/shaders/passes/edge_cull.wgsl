@@ -76,6 +76,7 @@ struct RestyleParams {
 @group(2) @binding(5) var<uniform> restyle : RestyleParams;
 
 var<workgroup> wgTouch : atomic<u32>;
+var<workgroup> wgCurved : array<atomic<u32>, EDGE_CHUNK_MASK_WORDS>;
 var<workgroup> wgMove : u32;
 
 @compute @workgroup_size(WORKGROUP_SIZE)
@@ -190,6 +191,10 @@ fn listMoved(c : u32, chunks : u32) {
 
 fn edgeBoundsOf(c : u32, chunks : u32, lid : u32) {
   workgroupBarrier();
+  if (lid < EDGE_CHUNK_MASK_WORDS) {
+    atomicStore(&wgCurved[lid], 0u);
+  }
+  workgroupBarrier();
   // Without per-edge styles the style buffer is a 16-byte placeholder of
   // zeros (= global width), so reading inside its length is always right.
   let styles = arrayLength(&edgeStyle);
@@ -206,7 +211,12 @@ fn edgeBoundsOf(c : u32, chunks : u32, lid : u32) {
       let pb = nodePos[ij.y];
       let m = (pa + pb) * 0.5;
       let style = select(0u, edgeStyle[e], e < styles);
-      let bend = edgeCurveBend(style) * vec2<f32>(pa.y - pb.y, pb.x - pa.x);
+      let curve = edgeCurveBend(style);
+      if (curve > 0.0) {
+        let t = k * WORKGROUP_SIZE + lid;
+        atomicOr(&wgCurved[t >> 5u], 1u << (t & 31u));
+      }
+      let bend = curve * vec2<f32>(pa.y - pb.y, pb.x - pa.x);
       box = vec4<f32>(min(box.xy, min(min(pa, pb), min(pa, pb) + bend)), max(box.zw, max(max(pa, pb), max(pa, pb) + bend)));
       mid = vec4<f32>(min(mid.xy, m), max(mid.zw, m));
       let d = distance(pa, pb);
@@ -242,6 +252,15 @@ fn edgeBoundsOf(c : u32, chunks : u32, lid : u32) {
         edgeLines[e] = vec2<u32>(packed, bitcast<u32>(dot(unpack2x16snorm(packed), lineA[k] - center)));
       }
     }
+  }
+  if (lid < EDGE_CHUNK_MASK_WORDS) {
+    var before = 0u;
+    for (var w = 0u; w < lid; w++) {
+      before += countOneBits(atomicLoad(&wgCurved[w]));
+    }
+    let o = edgeCurveMaskAt(c, chunks);
+    edgeScratch[o + lid] = atomicLoad(&wgCurved[lid]);
+    edgeScratch[o + EDGE_CHUNK_MASK_WORDS + lid] = before;
   }
   if (lid == 0u) {
     // Density of the chunk's length level where it lies: its total length over
@@ -283,6 +302,14 @@ fn edgeChunkDraw(c : u32, chunks : u32) -> u32 {
   return u32(ceil(edgeKeep(edgeChunkLen(c), r.density, width)));
 }
 
+fn edgeChunkCurved(c : u32, chunks : u32, n : u32) -> u32 {
+  let o = edgeCurveMaskAt(c, chunks);
+  let w = (n - 1u) >> 5u;
+  let r = n - w * 32u;
+  let bits = edgeScratch[o + w] & select((1u << r) - 1u, 0xFFFFFFFFu, r == 32u);
+  return edgeScratch[o + EDGE_CHUNK_MASK_WORDS + w] + countOneBits(bits);
+}
+
 /**
  * Deliberately ONE workgroup: the work is a few thousand 32-byte records
  * (30M edges = 29,297 chunks, ~115 per lane), and one workgroup lists the
@@ -298,20 +325,33 @@ fn edge_cull(@builtin(local_invocation_index) lid : u32) {
 
   var listed = 0u;
   var drawn = 0u;
+  var curved = 0u;
   for (var c = c0; c < c1; c++) {
     let n = edgeChunkDraw(c, chunks);
     listed += select(0u, 1u, n > 0u);
     drawn += n;
+    if (EDGE_CURVE && n > 0u) {
+      curved += edgeChunkCurved(c, chunks, n);
+    }
   }
   let sl = wgScanU32(listed, lid);
   let sd = wgScanU32(drawn, lid);
+  var sc = ScanU32(0u, 0u);
+  if (EDGE_CURVE) {
+    sc = wgScanU32(curved, lid);
+  }
   var slot = sl.exclusive;
   var offset = sd.exclusive;
+  var curve = sc.exclusive;
   for (var c = c0; c < c1; c++) {
     let n = edgeChunkDraw(c, chunks);
     if (n > 0u) {
       edgeScratch[EDGE_SCRATCH_LIST + slot] = c;
       edgeScratch[edgeOffsetsAt(chunks) + slot] = offset;
+      if (EDGE_CURVE) {
+        edgeScratch[edgeCurveOffsetsAt(chunks) + slot] = curve;
+        curve += edgeChunkCurved(c, chunks, n);
+      }
       slot += 1u;
       offset += n;
     }
@@ -321,12 +361,12 @@ fn edge_cull(@builtin(local_invocation_index) lid : u32) {
     edgeScratch[edgeOffsetsAt(chunks) + sl.total] = sd.total; // end of the last listed chunk
     let a = EDGE_SCRATCH_DRAW_ARGS;
     edgeScratch[a] = edgeStripVertices(EDGE_ARROWS, false);
-    edgeScratch[a + 1u] = sd.total; // instanceCount: one per drawn edge
+    edgeScratch[a + 1u] = sd.total - sc.total; // instanceCount: one per drawn straight edge
     edgeScratch[a + 2u] = 0u; // firstVertex
     edgeScratch[a + 3u] = 0u; // firstInstance
     let ca = EDGE_SCRATCH_CURVE_ARGS;
     edgeScratch[ca] = edgeStripVertices(EDGE_ARROWS, true);
-    edgeScratch[ca + 1u] = select(0u, sd.total, EDGE_CURVE);
+    edgeScratch[ca + 1u] = sc.total;
     edgeScratch[ca + 2u] = 0u;
     edgeScratch[ca + 3u] = 0u;
     let d = EDGE_SCRATCH_DISPATCH;

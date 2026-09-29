@@ -45,9 +45,6 @@ fn culled() -> VOut {
 @vertex
 fn vs(@builtin(vertex_index) vi : u32, @builtin(instance_index) ii : u32) -> VOut {
   let e = edgeList[ii];
-  if (EDGE_CURVE && EDGE_PER_EDGE_STYLE && ((edgeStyle[e] >> EDGE_CURVE_SHIFT) & EDGE_CURVE_MASK) != 0u) {
-    return culled();
-  }
   let raw = edgeIdx[e];
   let bits = raw.x >> EDGE_STATE_SHIFT;
   let flagged = select(0u, EDGE_STATE_SELECTED | EDGE_STATE_FOCUSED, (frame.flags & FRAME_FLAG_EDGE_LOOKS) != 0u);
@@ -158,13 +155,10 @@ fn fs(in : VOut) -> @location(0) vec4<f32> {
 fn vs_curve(@builtin(vertex_index) vi : u32, @builtin(instance_index) ii : u32) -> CurveOut {
   var o : CurveOut;
   o.pos = vec4<f32>(0.0, 0.0, 2.0, 1.0);
-  let e = edgeList[ii];
+  let e = edgeList[edgeScratch[EDGE_SCRATCH_DRAW_ARGS + 1u] + ii];
   var style = 0u;
   if (EDGE_PER_EDGE_STYLE) {
     style = edgeStyle[e];
-  }
-  if (((style >> EDGE_CURVE_SHIFT) & EDGE_CURVE_MASK) == 0u) {
-    return o;
   }
   let raw = edgeIdx[e];
   let bits = raw.x >> EDGE_STATE_SHIFT;

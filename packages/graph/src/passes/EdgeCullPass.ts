@@ -64,8 +64,7 @@ export class EdgeCullPass implements ComputeNode {
     private readonly boundsListLines: GPUComputePipeline,
     private readonly touch: GPUComputePipeline,
     private readonly restylePipe: GPUComputePipeline,
-    readonly cull: Tuned<GPUComputePipeline>,
-    private readonly expand: GPUComputePipeline,
+    readonly pipes: Tuned<{ cull: GPUComputePipeline; expand: GPUComputePipeline }>,
     private readonly empty: GPUBindGroup,
   ) {
     this.dummy = device.createBuffer({ label: "edge/lines-dummy", size: 16, usage: GPUBufferUsage.STORAGE });
@@ -95,8 +94,12 @@ export class EdgeCullPass implements ComputeNode {
         compute: { module: m, entryPoint, constants },
       });
     const emptyLayout = device.createBindGroupLayout({ label: "empty", entries: [] });
-    const cull = new Tuned(edgeKey, (t) => make(module, "edge_cull", phase.state, edgeConstants(t)));
-    const [bounds, boundsLines, boundsList, boundsListLines, touch, restyle, expand] = await Promise.all([
+    const pipes = new Tuned(edgeKey, (t) =>
+      Promise.all([make(module, "edge_cull", phase.state, edgeConstants(t)), make(expandModule, "edge_expand", phase.expand, { EDGE_CURVE: t.curved ? 1 : 0 })]).then(
+        ([cull, expand]) => ({ cull, expand }),
+      ),
+    );
+    const [bounds, boundsLines, boundsList, boundsListLines, touch, restyle] = await Promise.all([
       make(module, "edge_bounds", phase.bounds, { EDGE_LINES: 0 }),
       make(module, "edge_bounds", phase.bounds, { EDGE_LINES: 1 }),
       make(module, "edge_bounds_list", phase.bounds, { EDGE_LINES: 0 }),
@@ -107,12 +110,11 @@ export class EdgeCullPass implements ComputeNode {
         layout: device.createPipelineLayout({ bindGroupLayouts: [layouts.frame, emptyLayout, phase.restyle] }),
         compute: { module, entryPoint: "edge_restyle" },
       }),
-      make(expandModule, "edge_expand", phase.expand),
     ]);
     const empty = device.createBindGroup({ layout: emptyLayout, entries: [] });
-    await cull.loadTune(tune);
-    cull.useTune(tune);
-    return new EdgeCullPass(device, phase, bounds, boundsLines, boundsList, boundsListLines, touch, restyle, cull, expand, empty);
+    await pipes.loadTune(tune);
+    pipes.useTune(tune);
+    return new EdgeCullPass(device, phase, bounds, boundsLines, boundsList, boundsListLines, touch, restyle, pipes, empty);
   }
 
   /** Ensure the buffers fit `edgeCount` edges. Old ones go to `retire`. */
@@ -251,12 +253,12 @@ export class EdgeCullPass implements ComputeNode {
         this.linesReady = this.lines !== null;
         return;
       case 1:
-        pass.setPipeline(this.cull.value!);
+        pass.setPipeline(this.pipes.value!.cull);
         pass.setBindGroup(2, g.state);
         pass.dispatchWorkgroups(1);
         return;
       case 2:
-        pass.setPipeline(this.expand);
+        pass.setPipeline(this.pipes.value!.expand);
         pass.setBindGroup(2, g.expand);
         pass.dispatchWorkgroupsIndirect(this.outputs!.scratch, EDGE_CONSTANTS.EDGE_SCRATCH_DISPATCH * 4);
         return;

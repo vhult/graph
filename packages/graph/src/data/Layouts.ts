@@ -270,6 +270,7 @@ export const EDGE_CONSTANTS = {
   EDGE_CHUNK_SIZE: 1024,
   EDGE_CHUNK_SHIFT: 10,
   EDGE_CHUNK_WORDS: 12,
+  EDGE_CHUNK_MASK_WORDS: 32,
   /** Sort-key bits for the length level: 16 octaves of length / graph extent. */
   EDGE_LEVEL_BITS: 4,
   EDGE_SCRATCH_DRAW_ARGS: 0,
@@ -422,7 +423,7 @@ export function edgeChunkCount(edgeCount: number): number {
 /** Words in the edge state buffer for `edgeCount` edges. */
 export function edgeScratchWords(edgeCount: number): number {
   const c = edgeChunkCount(edgeCount);
-  return edgeMoveWordOffset(edgeCount) + ENGINE_CONSTANTS.MOVE_LIST + c;
+  return edgeMoveWordOffset(edgeCount) + ENGINE_CONSTANTS.MOVE_LIST + c + (c + 1) + 2 * EDGE_CONSTANTS.EDGE_CHUNK_MASK_WORDS * c;
 }
 
 export function edgeMoveWordOffset(edgeCount: number): number {

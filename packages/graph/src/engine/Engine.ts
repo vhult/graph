@@ -614,7 +614,7 @@ export class Engine {
   }
 
   private tunables(): Tunable[] {
-    const list: Tunable[] = [this.passes.cull, this.passes.edgeCull.cull, this.passes.edges.pipelines];
+    const list: Tunable[] = [this.passes.cull, this.passes.edgeCull.pipes, this.passes.edges.pipelines];
     if (this.pick.value) list.push(this.pick.value.pipelines);
     if (this.hover.value) list.push(this.hover.value.edgePipes);
     return list;

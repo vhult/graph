@@ -8,6 +8,25 @@ bandwidth), Edge 153, 1M nodes / 3M edges at fit unless stated.
 
 ---
 
+## 0078 — Straight and curved edges each draw only their own list
+
+This replaces the "same list twice" part of 0077. The bounds pass stores one
+bit per edge for "curved" in each chunk, plus the count of curved bits before
+each word. The cull counts the curved edges in each drawn prefix with 2 loads,
+and `edge.expand` writes straight edges to the front of the draw list and
+curved ones after them, each in chunk order, so each draw gets exactly its own
+edges and the picture is unchanged (20 views byte-identical). A curve bit on
+the sort key was rejected: curved edges would get their own chunks and thinning
+density, and every curve toggle would need a re-sort.
+
+AMD Radeon 890M, GPU mean / p95 ms, 1 edge in 64 curved:
+`xlarge-zoom-curve-mixed` 15.34 / 18.99 → 11.69 / 14.95 (straight
+`xlarge-zoom` is 11.2 / 14.5), `large-zoom-curve-mixed` 7.24 / 9.47 →
+6.40 / 8.83. `edge.cull` at 10M goes 0.063 → 0.098 ms; straight-only graphs
+are unchanged.
+
+---
+
 ## 0077 — Curved edges: an SDF on a clipped 8-piece strip
 
 `packEdgeStyle({ curve })` bends one edge into a symmetric parabola whose peak

@@ -11,6 +11,8 @@
 @group(2) @binding(1) var<storage, read_write> edgeList : array<u32>;
 
 var<workgroup> wgListed : u32;
+var<workgroup> wgBits : array<u32, EDGE_CHUNK_MASK_WORDS>;
+var<workgroup> wgBefore : array<u32, EDGE_CHUNK_MASK_WORDS>;
 
 @compute @workgroup_size(WORKGROUP_SIZE)
 fn edge_expand(
@@ -26,10 +28,33 @@ fn edge_expand(
     return; // padding workgroup of a 2D indirect grid
   }
   let chunks = numEdgeChunks();
-  let first = edgeScratch[EDGE_SCRATCH_LIST + slot] * EDGE_CHUNK_SIZE;
+  let c = edgeScratch[EDGE_SCRATCH_LIST + slot];
+  let first = c * EDGE_CHUNK_SIZE;
   let at = edgeScratch[edgeOffsetsAt(chunks) + slot];
   let n = edgeScratch[edgeOffsetsAt(chunks) + slot + 1u] - at;
+  if (!EDGE_CURVE) {
+    for (var t = lid; t < n; t += WORKGROUP_SIZE) {
+      edgeList[at + t] = first + t;
+    }
+    return;
+  }
+  if (lid < EDGE_CHUNK_MASK_WORDS) {
+    let o = edgeCurveMaskAt(c, chunks);
+    wgBits[lid] = edgeScratch[o + lid];
+    wgBefore[lid] = edgeScratch[o + EDGE_CHUNK_MASK_WORDS + lid];
+  }
+  workgroupBarrier();
+  let curved = edgeScratch[edgeCurveOffsetsAt(chunks) + slot];
+  let straight = at - curved;
+  let curveBase = edgeScratch[EDGE_SCRATCH_DRAW_ARGS + 1u];
   for (var t = lid; t < n; t += WORKGROUP_SIZE) {
-    edgeList[at + t] = first + t;
+    let w = t >> 5u;
+    let bit = 1u << (t & 31u);
+    let before = wgBefore[w] + countOneBits(wgBits[w] & (bit - 1u));
+    if ((wgBits[w] & bit) != 0u) {
+      edgeList[curveBase + curved + before] = first + t;
+    } else {
+      edgeList[straight + t - before] = first + t;
+    }
   }
 }

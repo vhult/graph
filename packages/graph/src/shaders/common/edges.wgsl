@@ -172,3 +172,11 @@ fn edgeChunkAt(c : u32, chunks : u32) -> u32 {
 fn edgeMoveAt(chunks : u32) -> u32 {
   return EDGE_SCRATCH_LIST + 2u * chunks + 1u + chunks * EDGE_CHUNK_WORDS;
 }
+
+fn edgeCurveOffsetsAt(chunks : u32) -> u32 {
+  return edgeMoveAt(chunks) + MOVE_LIST + chunks;
+}
+
+fn edgeCurveMaskAt(c : u32, chunks : u32) -> u32 {
+  return edgeCurveOffsetsAt(chunks) + chunks + 1u + c * 2u * EDGE_CHUNK_MASK_WORDS;
+}
