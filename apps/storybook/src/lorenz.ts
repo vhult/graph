@@ -37,12 +37,15 @@ fn pathPlace(i : u32, t : f32) -> f32 {
   return s - floor(s / len) * len;
 }
 
+var<private> pathStep : u32;
+
 fn nodePosition(i : u32, t : f32) -> vec3<f32> {
   let o = i * ${WORDS}u;
   let len = param(0u);
   let base = u32(param(1u));
   let f = pathPlace(i, t);
   let k = min(u32(f), u32(len) - 1u);
+  pathStep = k;
   let k1 = select(k + 1u, 0u, k + 1u >= u32(len));
   let p = mix(tablePoint(base, k), tablePoint(base, k1), f - f32(k)) + vec3<f32>(data[o + 1u], data[o + 2u], data[o + 3u]);
   let yaw = param(3u) * t;
@@ -68,9 +71,7 @@ fn heat(v : f32) -> vec3<f32> {
 }
 
 fn nodeColor(i : u32, t : f32, p : vec3<f32>) -> vec4<f32> {
-  let base = u32(param(1u));
-  let k = min(u32(pathPlace(i, t)), u32(param(0u)) - 1u);
-  let speed = data[base + k * 4u + 3u];
+  let speed = data[u32(param(1u)) + pathStep * 4u + 3u];
   let light = mix(0.3, 1.0, clamp(p.z, 0.0, 1.0));
   return vec4<f32>(heat(clamp(speed, 0.0, 1.0)) * light, param(7u));
 }

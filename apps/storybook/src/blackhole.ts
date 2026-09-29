@@ -9,6 +9,7 @@ export const HOLE = {
   tilt: 89,
   rows: 240,
   samples: 512,
+  angles: 2048,
   scale: 30,
   orbit: 12,
   ringShare: 0.1,
@@ -21,6 +22,8 @@ export const HOLE = {
 
 const CRITICAL = 3 * Math.sqrt(3);
 const TAU = Math.PI * 2;
+const PSI_TOP = 3 * Math.PI;
+const WORDS = 4;
 
 const HOT: [number, number, number] = [255, 255, 255];
 const WARM: [number, number, number] = [255, 232, 226];
@@ -72,53 +75,38 @@ function row(r: number, out: Float32Array, at: number): void {
 
 export function lensTable(): Float32Array {
   const h = HOLE;
-  const t = new Float32Array(h.rows * h.samples * 2);
-  for (let k = 0; k < h.rows; k++) row(h.inner * Math.pow(h.outer / h.inner, k / (h.rows - 1)), t, k * h.samples * 2);
+  const raw = new Float32Array(h.rows * h.samples * 2);
+  for (let k = 0; k < h.rows; k++) row(h.inner * Math.pow(h.outer / h.inner, k / (h.rows - 1)), raw, k * h.samples * 2);
+  const t = new Float32Array(h.rows * h.angles);
+  for (let k = 0; k < h.rows; k++) {
+    for (let j = 0; j < h.angles; j++) t[k * h.angles + j] = searchB(raw, k, (j / (h.angles - 1)) * PSI_TOP);
+  }
   return t;
 }
 
 export const HOLE_WGSL = `
 const TAU : f32 = 6.28318531;
+const PSI_TOP : f32 = 9.42477796;
 
 fn rowB(r : u32, psi : f32) -> f32 {
   let n = u32(param(3u));
-  let base = u32(param(2u)) + r * n * 2u;
-  if (psi <= data[base]) {
-    return data[base + 1u];
-  }
-  var lo = 0u;
-  var hi = n - 1u;
-  if (psi >= data[base + hi * 2u]) {
-    return data[base + hi * 2u + 1u];
-  }
-  loop {
-    if (hi - lo <= 1u) {
-      break;
-    }
-    let mid = (lo + hi) / 2u;
-    if (data[base + mid * 2u] <= psi) {
-      lo = mid;
-    } else {
-      hi = mid;
-    }
-  }
-  let p0 = data[base + lo * 2u];
-  let p1 = data[base + hi * 2u];
-  let f = clamp((psi - p0) / max(p1 - p0, 1e-9), 0.0, 1.0);
-  return mix(data[base + lo * 2u + 1u], data[base + hi * 2u + 1u], f);
+  let base = u32(param(2u)) + r * n;
+  let f = clamp(psi / PSI_TOP, 0.0, 1.0) * f32(n - 1u);
+  let j = min(u32(f), n - 2u);
+  return mix(data[base + j], data[base + j + 1u], f - f32(j));
 }
 
 fn nodePosition(i : u32, t : f32) -> vec2<f32> {
-  let a = data[i * 3u];
-  let phi = data[i * 3u + 1u] + t * param(1u) * pow(a, -1.5);
-  let k = u32(data[i * 3u + 2u]);
+  let o = i * ${WORDS}u;
+  let rowF = data[o];
+  let phi = data[o + 1u] + t * param(1u) * data[o + 3u];
+  let k = u32(data[o + 2u]);
   let tilt = param(0u);
-  let o = vec3<f32>(sin(tilt), 0.0, cos(tilt));
+  let view = vec3<f32>(sin(tilt), 0.0, cos(tilt));
   let e2 = vec3<f32>(-cos(tilt), 0.0, sin(tilt));
   let p = vec3<f32>(cos(phi), sin(phi), 0.0);
   let rows = u32(param(4u));
-  let rowF = log(a / param(5u)) / log(param(6u) / param(5u)) * f32(rows - 1u);
-  let gamma = acos(clamp(dot(o, p), -1.0, 1.0));
+  let gamma = acos(clamp(dot(view, p), -1.0, 1.0));
   var d = vec2<f32>(p.y, dot(p, e2));
   let dl = length(d);
   d = select(vec2<f32>(1.0, 0.0), d / dl, dl > 1e-6);
@@ -132,11 +120,11 @@ fn nodePosition(i : u32, t : f32) -> vec2<f32> {
   let r0 = u32(clamp(floor(rowF), 0.0, f32(rows - 1u)));
   let r1 = min(r0 + 1u, rows - 1u);
   let b = mix(rowB(r0, psi), rowB(r1, psi), fract(rowF));
-  return d * b * param(7u);
+  return d * b * param(5u);
 }
 `;
 
-function rowB(table: Float32Array, r: number, psi: number): number {
+function searchB(table: Float32Array, r: number, psi: number): number {
   const n = HOLE.samples;
   const base = r * n * 2;
   if (psi <= table[base]!) return table[base + 1]!;
@@ -154,7 +142,15 @@ function rowB(table: Float32Array, r: number, psi: number): number {
   return table[base + lo * 2 + 1]! + (table[base + hi * 2 + 1]! - table[base + lo * 2 + 1]!) * f;
 }
 
-export function place(table: Float32Array, a: number, phi: number, k: number, tilt: number): [number, number] {
+function rowB(table: Float32Array, r: number, psi: number): number {
+  const n = HOLE.angles;
+  const f = Math.min(1, Math.max(0, psi / PSI_TOP)) * (n - 1);
+  const j = Math.min(Math.floor(f), n - 2);
+  const lo = table[r * n + j]!;
+  return lo + (table[r * n + j + 1]! - lo) * (f - j);
+}
+
+export function place(table: Float32Array, rowF: number, phi: number, k: number, tilt: number): [number, number] {
   const h = HOLE;
   const px = Math.cos(phi);
   const py = Math.sin(phi);
@@ -175,7 +171,6 @@ export function place(table: Float32Array, a: number, phi: number, k: number, ti
     dx = -dx;
     dy = -dy;
   } else if (k === 2) psi = TAU + gamma;
-  const rowF = (Math.log(a / h.inner) / Math.log(h.outer / h.inner)) * (h.rows - 1);
   const r0 = Math.max(0, Math.min(h.rows - 1, Math.floor(rowF)));
   const r1 = Math.min(r0 + 1, h.rows - 1);
   const w = rowF - Math.floor(rowF);
@@ -185,7 +180,7 @@ export function place(table: Float32Array, a: number, phi: number, k: number, ti
 
 export function holeParams(tiltDeg: number, tableOffset: number): number[] {
   const h = HOLE;
-  return [(tiltDeg * Math.PI) / 180, h.orbit, tableOffset, h.samples, h.rows, h.inner, h.outer, h.scale];
+  return [(tiltDeg * Math.PI) / 180, h.orbit, tableOffset, h.angles, h.rows, h.scale];
 }
 
 function mix(a: [number, number, number], b: [number, number, number], f: number): [number, number, number] {
@@ -208,7 +203,7 @@ export function blackHole(total: number, tiltDeg: number, seed = 1): BlackHole {
   const rings = Math.floor(disk * h.ringShare);
   const count = disk * 2 + rings;
   const table = lensTable();
-  const tableOffset = count * 3;
+  const tableOffset = count * WORDS;
   const data = new Float32Array(tableOffset + table.length);
   data.set(table, tableOffset);
   const positions = new Float32Array(count * 2);
@@ -218,10 +213,12 @@ export function blackHole(total: number, tiltDeg: number, seed = 1): BlackHole {
   const span = h.outer - h.inner;
   let n = 0;
   const add = (a: number, phi: number, k: number, color: number, size: number) => {
-    data[n * 3] = a;
-    data[n * 3 + 1] = phi;
-    data[n * 3 + 2] = k;
-    const [x, y] = place(table, a, phi, k, tilt);
+    const rowF = (Math.log(a / h.inner) / Math.log(h.outer / h.inner)) * (h.rows - 1);
+    data[n * WORDS] = rowF;
+    data[n * WORDS + 1] = phi;
+    data[n * WORDS + 2] = k;
+    data[n * WORDS + 3] = Math.pow(a, -1.5);
+    const [x, y] = place(table, rowF, phi, k, tilt);
     positions[n * 2] = x;
     positions[n * 2 + 1] = y;
     colors[n] = color;
