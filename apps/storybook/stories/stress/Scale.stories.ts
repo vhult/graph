@@ -7,7 +7,7 @@
  * reports it separately from the engine's load time.
  */
 import type { Meta, StoryObj } from "@storybook/html-vite";
-import type { Graph } from "@vhult/graph";
+import { packEdgeStyle, type Graph } from "@vhult/graph";
 import { communities } from "@vhult/graph-bench";
 import { setBenchIcons } from "../../src/bench";
 import { DangerZone, type DangerArgs } from "../../src/danger";
@@ -18,7 +18,17 @@ type Args = DangerArgs;
 
 const SIZES = [5_000_000, 10_000_000, 25_000_000] as const;
 
+const CURVE_EVERY = 8;
+const CURVED = packEdgeStyle({ curve: 0.2 });
+
 const danger = new DangerZone();
+
+function curveSome(graph: Graph, count: number): void {
+  if (count === 0) return;
+  const styles = new Uint32Array(count);
+  for (let e = 0; e < count; e += CURVE_EVERY) styles[e] = CURVED;
+  graph.edges.updateAll({ styles });
+}
 const iconCounts = new WeakMap<Graph, number>();
 
 function showIcons(graph: Graph, count: number): void {
@@ -30,12 +40,13 @@ function showIcons(graph: Graph, count: number): void {
 const meta: Meta<Args> = {
   title: "Stress/Scale",
   render: renderGraph<Args>({
-    describe: (a) => `Scale · communities, ${a.neighbours} nearest neighbours${a.dangerZone ? " · danger zone" : ""}`,
+    describe: (a) => `Scale · communities, ${a.neighbours} nearest neighbours, 1 edge in ${CURVE_EVERY} curved${a.dangerZone ? " · danger zone" : ""}`,
     load: (a) => cached(`communities:${a.nodes}:${a.neighbours}:${a.seed}`, () => communities(a.nodes, a.neighbours, a.seed)),
     dataArgs: ["neighbours", "dangerZone", "vramGB"],
     options: () => ({ input: { pick: { edges: false } } }),
     gate: (graph, a, root) => danger.gate(graph, a, root),
     onLoad: (graph, g, a) => {
+      if (a.edges) curveSome(graph, g.edges.count);
       showIcons(graph, g.nodes.count);
       danger.loaded(graph, g, a);
     },

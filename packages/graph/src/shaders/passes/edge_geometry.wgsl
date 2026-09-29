@@ -7,6 +7,7 @@
 // prefix, so thinning neither dims an area nor pops while zooming. Edges too
 // short to see collapse to a point and rasterize nothing.
 #include "common/edge_segment.wgsl"
+#include "common/edge_curve.wgsl"
 
 @group(2) @binding(0) var<storage, read> edgeScratch : array<u32>;
 @group(2) @binding(1) var<storage, read> edgeList : array<u32>;
@@ -148,4 +149,79 @@ fn fs(in : VOut) -> @location(0) vec4<f32> {
     discard;
   }
   return vec4<f32>(in.color.rgb * a, a); // premultiplied
+}
+
+@vertex
+fn vs_curve(@builtin(vertex_index) vi : u32, @builtin(instance_index) ii : u32) -> CurveOut {
+  var o : CurveOut;
+  o.pos = vec4<f32>(0.0, 0.0, 2.0, 1.0);
+  let e = edgeList[edgeScratch[EDGE_SCRATCH_DRAW_ARGS + 1u] + ii];
+  var style = 0u;
+  if (EDGE_PER_EDGE_STYLE) {
+    style = edgeStyle[e];
+  }
+  let raw = edgeIdx[e];
+  let bits = raw.x >> EDGE_STATE_SHIFT;
+  let flagged = select(0u, EDGE_STATE_SELECTED | EDGE_STATE_FOCUSED, (frame.flags & FRAME_FLAG_EDGE_LOOKS) != 0u);
+  if ((bits & (EDGE_STATE_HIDDEN | flagged)) != 0u) {
+    return o;
+  }
+  let ij = edgeEnds(raw);
+  let ends = edgeEndState(ij);
+  if ((ends & STATE_HIDDEN) != 0u) {
+    return o;
+  }
+  let a = worldToScreen(nodePos[ij.x]);
+  let b = worldToScreen(nodePos[ij.y]);
+  let fade = edgeLengthFade(length(b - a));
+  if (fade <= 0.0 && EDGE_DEBUG != 1u) {
+    return o;
+  }
+
+  let w = edgeWidthPx(style);
+  let wDraw = max(w, EDGE_MIN_DRAW_WIDTH_PX);
+  let coverage = min(1.0, w / wDraw);
+  let halfWidth = wDraw * 0.5;
+
+  let cv = curveOf(a, b, ij.y, w, halfWidth, edgeCurveBend(style), EDGE_ARROWS && (style & EDGE_FLAG_DIRECTED) != 0u, NODE_SHAPES);
+  let v = curveVertex(vi, cv, halfWidth, EDGE_PATTERNS);
+  if (v.pos.z > 1.0) {
+    return o;
+  }
+
+  var c = unpack4x8unorm(frame.globalEdgeColor);
+  if (EDGE_PER_EDGE_COLOR) {
+    let wa = edgeColor[e * 2u];
+    let wb = edgeColor[e * 2u + 1u];
+    c = mix(unpack4x8unorm(select(wa, frame.globalEdgeColor, wa == 0u)), unpack4x8unorm(select(wb, frame.globalEdgeColor, wb == 0u)), v.t);
+  }
+  if ((bits & EDGE_STATE_DIMMED) != 0u || (ends & STATE_DIMMED) != 0u) {
+    c.a *= frame.dimmedAlpha;
+  }
+
+  let chunk = e >> EDGE_CHUNK_SHIFT;
+  let rec = edgeChunkAt(chunk, numEdgeChunks());
+  let n = edgeChunkLen(chunk);
+  let width = chunkWidthPx(bitcast<f32>(edgeScratch[rec + 5u]));
+  let keep = edgeKeep(n, bitcast<f32>(edgeScratch[rec + 6u]), width);
+  let fadeIn = clamp(keep - f32(e & (EDGE_CHUNK_SIZE - 1u)), 0.0, 1.0);
+
+  var color = vec4<f32>(c.rgb, edgeStandInAlpha(c.a * coverage * fade, f32(n) / keep) * fadeIn);
+  if (EDGE_DEBUG != 0u) {
+    color = vec4<f32>(debugColor(fade, keep / f32(n), chunk), 0.9 * fadeIn);
+  }
+  o = curveOutOf(v, color);
+  if (EDGE_PATTERNS) {
+    o.line = edgeLine(style, v.geo.w * 0.5, halfWidth, f32(n) / keep);
+  }
+  return o;
+}
+
+@fragment
+fn fs_curve(in : CurveOut) -> @location(0) vec4<f32> {
+  let a = in.color.a * curveCoverage(in.pos.xy, in.q, in.shape, in.geo, in.tip, in.arrow, in.line, in.part, EDGE_PATTERNS);
+  if (a < 0.002) {
+    discard;
+  }
+  return vec4<f32>(in.color.rgb * a, a);
 }

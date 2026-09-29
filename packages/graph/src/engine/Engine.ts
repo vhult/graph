@@ -197,6 +197,7 @@ export class Engine {
   private readonly wanted: Tune = { ...DEFAULT_TUNE };
   private active: Tune = { ...DEFAULT_TUNE };
   private pipesLoading = false;
+  private pendingBench: { id: number; opts: BenchmarkOptions } | null = null;
   private dataGen = 0;
   private frameGen = -1;
   private readonly pickRequest: PickRequest = { x: 0, y: 0, radiusPx: 0, edgeRadiusPx: 0, nodes: false, edges: false, shapes: false, layers: false, edgeColors: false, token: 0 };
@@ -551,7 +552,8 @@ export class Engine {
     this.syncPipes();
     const text = labels !== undefined && this.labels.textAt("edges", indices, labels);
     if (text && !this.graph.keepEdgeOrder) this.syncEdgeOrder();
-    this.markDirty(edgeUpdateDirty(arrays, false) | (text ? Dirty.LABEL_QUERY | Dirty.LABELS : 0));
+    const moved = text || (arrays.styles !== undefined && this.labels.hasEdgeText);
+    this.markDirty(edgeUpdateDirty(arrays, false) | (moved ? Dirty.LABEL_QUERY | Dirty.LABELS : 0));
   }
 
   updateEdges(arrays: EdgeArrays, labels?: string[] | null): void {
@@ -559,6 +561,7 @@ export class Engine {
     this.store.updateEdges(arrays);
     this.syncPipes();
     let dirty = edgeUpdateDirty(arrays, true);
+    if (arrays.styles !== undefined && this.labels.hasEdgeText) dirty |= Dirty.LABEL_QUERY | Dirty.LABELS;
     if (labels !== undefined) {
       if (this.labels.setEdgeText(labels ?? [])) dirty |= Dirty.LABEL_QUERY | Dirty.LABELS;
       this.syncEdgeOrder();
@@ -611,7 +614,7 @@ export class Engine {
   }
 
   private tunables(): Tunable[] {
-    const list: Tunable[] = [this.passes.cull, this.passes.edgeCull.cull, this.passes.edges.pipelines];
+    const list: Tunable[] = [this.passes.cull, this.passes.edgeCull.pipes, this.passes.edges.pipelines];
     if (this.pick.value) list.push(this.pick.value.pipelines);
     if (this.hover.value) list.push(this.hover.value.edgePipes);
     return list;
@@ -619,6 +622,7 @@ export class Engine {
 
   private syncPipes(): void {
     this.wanted.arrows = this.store.hasDirected;
+    this.wanted.curved = this.store.hasCurved;
     if (this.pipesLoading || sameTune(this.wanted, this.active)) return;
     const t = { ...this.wanted };
     this.pipesLoading = true;
@@ -633,12 +637,21 @@ export class Engine {
           this.markDirty(Dirty.STYLE);
         }
         this.syncPipes();
+        this.startPendingBench();
       },
       (e: unknown) => {
         this.pipesLoading = false;
         this.init.onError(toGraphError(e), false);
+        this.startPendingBench();
       },
     );
+  }
+
+  private startPendingBench(): void {
+    const p = this.pendingBench;
+    if (!p || this.pipesLoading) return;
+    this.pendingBench = null;
+    this.benchmark(p.id, p.opts);
   }
 
   private adopt<P>(pass: P, tuned: Tunable): Promise<P> {
@@ -1032,7 +1045,11 @@ export class Engine {
 
   /** Play `opts.path` one step per rendered frame and record per-frame timings. */
   benchmark(id: number, opts: BenchmarkOptions): void {
-    if (this.bench) return this.init.onReply(id, undefined, new GraphError("invalid-argument", "A benchmark is already running"));
+    if (this.bench || this.pendingBench) return this.init.onReply(id, undefined, new GraphError("invalid-argument", "A benchmark is already running"));
+    if (this.pipesLoading) {
+      this.pendingBench = { id, opts };
+      return;
+    }
     const c = this.camera;
     const fitZoom = Camera2D.fitZoomIn(this.store.bounds, FIT_PADDING_CSS_PX * this.pixelRatio, c.viewportW, c.viewportH);
     const path = new CameraPath(opts.path, opts.frames, this.store.bounds, fitZoom);
@@ -1171,7 +1188,10 @@ export class Engine {
     fi.pixelRatio = this.pixelRatio;
     fi.nodeCount = nodeCount;
     fi.edgeCount = edgeCount;
-    fi.flags = (this.store.hiddenCount > 0 ? CONSTANTS.FRAME_FLAG_HIDDEN : 0) | (this.store.dimmedCount > 0 ? CONSTANTS.FRAME_FLAG_DIMMED : 0);
+    fi.flags =
+      (this.store.hiddenCount > 0 ? CONSTANTS.FRAME_FLAG_HIDDEN : 0) |
+      (this.store.dimmedCount > 0 ? CONSTANTS.FRAME_FLAG_DIMMED : 0) |
+      (this.store.hasCurved ? CONSTANTS.FRAME_FLAG_CURVES : 0);
     const hover = this.hover.value;
     if (hover) {
       hover.syncLists(this.store.looks);

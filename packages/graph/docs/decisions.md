@@ -8,6 +8,72 @@ bandwidth), Edge 153, 1M nodes / 3M edges at fit unless stated.
 
 ---
 
+## 0079 — Curve strips have 4 pieces, not 8
+
+This replaces the 8 pieces of 0077. The strip is only the hull: each fragment
+finds its exact distance to the curve, so fewer pieces only make the hull
+looser. At 8 pieces each curved edge redid the full curve setup in each of
+its 18 vertices (24 with arrows), and the curve draw was bound by vertex work. A per-chunk
+choice of 4 or 8 pieces was not needed: 38 views at 1M (bend 0.2 and 0.25,
+1 and 6 px wide, arrows and patterns, fit to ×1000 rotated) differ from
+8 pieces by at most 2/255 on nearly all pixels, and by up to 6/255 on 9 pixels.
+
+AMD Radeon 890M, GPU mean / p95 ms, two runs each: `xlarge-zoom-curve`
+30.8–32.2 / 57.8–59.7 → 15.1–15.2 / 21.1–21.4, `large-zoom-curve`
+8.6–8.8 → 7.8, `large-curve-dashed` 6.4 → 5.8, `xlarge-zoom-curve-mixed`
+11.7–11.8 → 11.4–11.5.
+
+---
+
+## 0078 — Straight and curved edges each draw only their own list
+
+This replaces the "same list twice" part of 0077. The bounds pass stores one
+bit per edge for "curved" in each chunk, plus the count of curved bits before
+each word. The cull counts the curved edges in each drawn prefix with 2 loads,
+and `edge.expand` writes straight edges to the front of the draw list and
+curved ones after them, each in chunk order, so each draw gets exactly its own
+edges and the picture is unchanged (20 views byte-identical). A curve bit on
+the sort key was rejected: curved edges would get their own chunks and thinning
+density, and every curve toggle would need a re-sort.
+
+AMD Radeon 890M, GPU mean / p95 ms, 1 edge in 64 curved:
+`xlarge-zoom-curve-mixed` 15.34 / 18.99 → 11.69 / 14.95 (straight
+`xlarge-zoom` is 11.2 / 14.5), `large-zoom-curve-mixed` 7.24 / 9.47 →
+6.40 / 8.83. `edge.cull` at 10M goes 0.063 → 0.098 ms; straight-only graphs
+are unchanged.
+
+---
+
+## 0077 — Curved edges: an SDF on a clipped 8-piece strip
+
+`packEdgeStyle({ curve })` bends one edge into a symmetric parabola whose peak
+sits curve × length off the straight line (0 to 0.25 in steps of 1/60, bits
+13 to 16 of the style word). This reverses the "curves dropped" part of 0075.
+A curved edge is one triangle strip of 8 pieces over its on-screen part; the
+fragment finds the exact distance in 3 Newton steps (under 0.01 px in float32
+up to 0.25), so width, round caps, patterns, taper, arrowheads, hover, looks,
+pick and labels all follow the same curve. The bend is limited per edge so the
+strip never folds. The arrowhead is its own box, and each pixel belongs to the
+strip or the box by one test on its position, so a translucent edge is never
+drawn twice. The store counts curved edges like directed ones: with none, the
+straight pipelines run as before. With one or more, the edge pass draws the
+same list twice from two indirect args: the straight pipeline drops curved
+edges and the curve pipeline drops straight ones, each right after reading the
+style word, so a straight edge costs its 4 vertices plus 18 near-empty ones.
+Curved edges draw over straight ones.
+
+Spike, AMD Radeon 890M, every edge bent 0.2, 6 runs, edge pass mean / p95 ms,
+`large` then `large-zoom`. Straight 2.19 / 3.62, 2.70 / 4.26. SDF strip
+3.85 / 7.30, 4.74 / 9.36. One quad around the curve 22.07 / 56.06,
+19.15 / 63.34. Loop-Blinn on the same strip 3.77 / 7.19, 4.65 / 9.14: a tie,
+with an approximate width and flat ends. A 16-piece polyline 4.60 / 9.13,
+5.99 / 11.49, with visible kinks. The spike used a closed-form Bézier distance
+and no clip; the final version is not measured yet, nor the cost for straight
+edges in a graph with some curves. The suite has `large-curve`,
+`large-zoom-curve`, `large-dashed` and `large-curve-dashed` for it.
+
+---
+
 ## 0076 — A long touch or pen press opens the context menu
 
 PointerInput sends the menu record itself when a single touch or pen

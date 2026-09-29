@@ -23,7 +23,7 @@ function items(s: Scenario): { kinds: LegendItem[]; relations: LegendItem[] } {
     relations: s.relations.map((r) => ({
       label: r.label,
       color: hex(r.color ?? GREY),
-      line: { pattern: r.pattern, tapered: r.tapered, directed: r.directed, width: r.width ?? 3, color: hex(r.color ?? GREY) },
+      line: { pattern: r.pattern, tapered: r.tapered, directed: r.directed, curve: r.curve, width: r.width ?? 3, color: hex(r.color ?? GREY) },
     })),
   };
 }

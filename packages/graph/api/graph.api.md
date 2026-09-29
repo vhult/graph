@@ -533,6 +533,7 @@ export function packEdgeStyle(style: {
     directed?: boolean;
     pattern?: "solid" | "dashed" | "dotted" | "dashDot" | "double";
     tapered?: boolean;
+    curve?: number;
 }): number;
 
 // @public

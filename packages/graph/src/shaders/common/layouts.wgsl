@@ -52,6 +52,7 @@ const STATE_GROUP_SHIFT : u32 = 8u;
 const FRAME_FLAG_HIDDEN : u32 = 0x1u;
 const FRAME_FLAG_DIMMED : u32 = 0x2u;
 const FRAME_FLAG_EDGE_LOOKS : u32 = 0x4u;
+const FRAME_FLAG_CURVES : u32 = 0x8u;
 const STYLE_SHAPE_MASK : u32 = 0xFFu;
 const STYLE_ICON_SHIFT : u32 = 8u;
 const STYLE_ICON_MASK : u32 = 0xFFFFu;
@@ -79,6 +80,9 @@ const EDGE_PATTERN_DOTTED : u32 = 2u;
 const EDGE_PATTERN_DASH_DOT : u32 = 3u;
 const EDGE_PATTERN_DOUBLE : u32 = 4u;
 const EDGE_FLAG_TAPERED : u32 = 0x1000u;
+const EDGE_CURVE_SHIFT : u32 = 13u;
+const EDGE_CURVE_MASK : u32 = 0xFu;
+const EDGE_CURVE_SCALE : u32 = 60u;
 const EDGE_ZLAYER_SHIFT : u32 = 20u;
 const EDGE_CAP_SHIFT : u32 = 24u;
 const EDGE_FLAG_DIRECTED : u32 = 0x10000000u;
@@ -133,11 +137,14 @@ struct EdgeChunk {
 const EDGE_CHUNK_SIZE : u32 = 1024u;
 const EDGE_CHUNK_SHIFT : u32 = 10u;
 const EDGE_CHUNK_WORDS : u32 = 12u;
+const EDGE_CHUNK_MASK_WORDS : u32 = 32u;
 const EDGE_LEVEL_BITS : u32 = 4u;
 const EDGE_SCRATCH_DRAW_ARGS : u32 = 0u;
 const EDGE_SCRATCH_DISPATCH : u32 = 4u;
 const EDGE_SCRATCH_LIST_COUNT : u32 = 7u;
-const EDGE_SCRATCH_LIST : u32 = 8u;
+const EDGE_SCRATCH_CURVE_ARGS : u32 = 8u;
+const EDGE_SCRATCH_LIST : u32 = 12u;
+const EDGE_CURVE_PIECES : u32 = 4u;
 
 // size 96, align 4
 struct LabelParams {

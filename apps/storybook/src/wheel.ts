@@ -4,6 +4,7 @@ export interface WheelLine {
   pattern?: "solid" | "dashed" | "dotted" | "dashDot" | "double";
   tapered?: boolean;
   directed?: boolean;
+  curve?: number;
   width: number;
   color: string;
 }
@@ -66,6 +67,9 @@ export function lineShape(x1: number, y1: number, x2: number, y2: number, line: 
   const ny = (x2 - x1) / len;
   const u = Math.max(w, 2);
   const c = line.color;
+  const bend = line.tapered || line.pattern === "double" ? 0 : (line.curve ?? 0) * len * 2;
+  const qx = (x1 + x2) / 2 + nx * bend;
+  const qy = (y1 + y2) / 2 + ny * bend;
   let body: string;
   if (line.tapered) {
     const a = w / 2;
@@ -78,13 +82,16 @@ export function lineShape(x1: number, y1: number, x2: number, y2: number, line: 
   } else {
     const dash = DASH[line.pattern ?? "solid"]?.(u);
     const cap = line.pattern === "dotted" || line.pattern === "dashDot" ? "round" : "butt";
-    body = `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${c}" stroke-width="${w}" stroke-linecap="${cap}"${dash ? ` stroke-dasharray="${dash}"` : ""}/>`;
+    body = `<path d="M${x1} ${y1}Q${qx} ${qy} ${x2} ${y2}" fill="none" stroke="${c}" stroke-width="${w}" stroke-linecap="${cap}"${dash ? ` stroke-dasharray="${dash}"` : ""}/>`;
   }
   if (!line.directed) return body;
   const h = Math.max(w * 2.5, 7);
-  const bx = x2 - ((x2 - x1) / len) * h;
-  const by = y2 - ((y2 - y1) / len) * h;
-  return body + `<polygon fill="${c}" points="${x2},${y2} ${bx + nx * h * 0.5},${by + ny * h * 0.5} ${bx - nx * h * 0.5},${by - ny * h * 0.5}"/>`;
+  const tl = Math.hypot(x2 - qx, y2 - qy) || 1;
+  const tx = (x2 - qx) / tl;
+  const ty = (y2 - qy) / tl;
+  const bx = x2 - tx * h;
+  const by = y2 - ty * h;
+  return body + `<polygon fill="${c}" points="${x2},${y2} ${bx - ty * h * 0.5},${by + tx * h * 0.5} ${bx + ty * h * 0.5},${by - tx * h * 0.5}"/>`;
 }
 
 export function lineSample(line: WheelLine, width = 36, height = 14): string {

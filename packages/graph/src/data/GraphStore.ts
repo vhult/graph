@@ -63,6 +63,10 @@ function lineBit(style: number): number {
   return (style & LINE_BITS) !== 0 ? 1 : 0;
 }
 
+function curveBit(style: number): number {
+  return ((style >>> CONSTANTS.EDGE_CURVE_SHIFT) & CONSTANTS.EDGE_CURVE_MASK) !== 0 ? 1 : 0;
+}
+
 function counted(state: number, bit: number): number {
   return (state & (bit | CONSTANTS.STATE_REMOVED)) === bit ? 1 : 0;
 }
@@ -81,6 +85,7 @@ export class GraphStore {
   hasEdgeColors = false;
   directedEdges = 0;
   lineEdges = 0;
+  curvedEdges = 0;
   hasNodeShapes = false;
   hasZLayers = false;
   hasIcons = false;
@@ -130,6 +135,10 @@ export class GraphStore {
 
   get hasLinePatterns(): boolean {
     return this.lineEdges > 0;
+  }
+
+  get hasCurved(): boolean {
+    return this.curvedEdges > 0;
   }
 
   get dirty(): boolean {
@@ -512,6 +521,7 @@ export class GraphStore {
     let removed = this.removedEdges;
     let directed = this.directedEdges;
     let line = this.lineEdges;
+    let curved = this.curvedEdges;
     for (let j = 0; j < indices.length; j++) {
       const i = indices[j]!;
       idx[i * 2] = ends ? ends[j * 2]! : 0;
@@ -523,6 +533,7 @@ export class GraphStore {
         const w = styles ? styles[j]! : 0;
         directed += directedBit(w) - (gone ? 0 : directedBit(st[i]!));
         line += lineBit(w) - (gone ? 0 : lineBit(st[i]!));
+        curved += curveBit(w) - (gone ? 0 : curveBit(st[i]!));
         st[i] = w;
       }
       if (co) {
@@ -542,6 +553,7 @@ export class GraphStore {
     this.removedEdges = removed;
     this.directedEdges = directed;
     this.lineEdges = line;
+    this.curvedEdges = curved;
     this.edgeCount = slots;
     this.reloadEdges();
   }
@@ -554,6 +566,7 @@ export class GraphStore {
     let removed = this.removedEdges;
     let directed = this.directedEdges;
     let line = this.lineEdges;
+    let curved = this.curvedEdges;
     for (let j = 0; j < indices.length; j++) {
       const i = indices[j]!;
       if ((st[i]! & CONSTANTS.EDGE_STATE_REMOVED) === 0) {
@@ -561,6 +574,7 @@ export class GraphStore {
         if (sw) {
           directed -= directedBit(sw[i]!);
           line -= lineBit(sw[i]!);
+          curved -= curveBit(sw[i]!);
         }
       }
       this.setEdgeState(st, i, (st[i]! | hide) >>> 0);
@@ -568,6 +582,7 @@ export class GraphStore {
     this.removedEdges = removed;
     this.directedEdges = directed;
     this.lineEdges = line;
+    this.curvedEdges = curved;
     this.stageEdgeState(st, indices);
   }
 
@@ -682,17 +697,20 @@ export class GraphStore {
     const es = this.edgeState;
     let directed = this.directedEdges;
     let line = this.lineEdges;
+    let curved = this.curvedEdges;
     for (let j = 0; j < indices.length; j++) {
       const i = indices[j]!;
       const w = styles[j]!;
       if (es === null || (es[i]! & CONSTANTS.EDGE_STATE_REMOVED) === 0) {
         directed += directedBit(w) - directedBit(st[i]!);
         line += lineBit(w) - lineBit(st[i]!);
+        curved += curveBit(w) - curveBit(st[i]!);
       }
       st[i] = w;
     }
     this.directedEdges = directed;
     this.lineEdges = line;
+    this.curvedEdges = curved;
   }
 
   private countStyles(): void {
@@ -701,13 +719,16 @@ export class GraphStore {
     const n = this.hasEdgeStyles ? Math.min(this.edgeCount, st.length) : 0;
     let directed = 0;
     let line = 0;
+    let curved = 0;
     for (let i = 0; i < n; i++) {
       if (es !== null && (es[i]! & CONSTANTS.EDGE_STATE_REMOVED) !== 0) continue;
       directed += directedBit(st[i]!);
       line += lineBit(st[i]!);
+      curved += curveBit(st[i]!);
     }
     this.directedEdges = directed;
     this.lineEdges = line;
+    this.curvedEdges = curved;
   }
 
   private ensureEdgeState(): Uint32Array {

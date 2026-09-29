@@ -159,6 +159,7 @@ export const CONSTANTS = {
   FRAME_FLAG_HIDDEN: 1,
   FRAME_FLAG_DIMMED: 2,
   FRAME_FLAG_EDGE_LOOKS: 4,
+  FRAME_FLAG_CURVES: 8,
   // nodeStyle fields
   STYLE_SHAPE_MASK: 0xff,
   STYLE_ICON_SHIFT: 8,
@@ -188,6 +189,9 @@ export const CONSTANTS = {
   EDGE_PATTERN_DASH_DOT: 3,
   EDGE_PATTERN_DOUBLE: 4,
   EDGE_FLAG_TAPERED: 1 << 12,
+  EDGE_CURVE_SHIFT: 13,
+  EDGE_CURVE_MASK: 0xf,
+  EDGE_CURVE_SCALE: 60,
   EDGE_ZLAYER_SHIFT: 20,
   EDGE_CAP_SHIFT: 24,
   EDGE_FLAG_DIRECTED: 1 << 28,
@@ -266,13 +270,22 @@ export const EDGE_CONSTANTS = {
   EDGE_CHUNK_SIZE: 1024,
   EDGE_CHUNK_SHIFT: 10,
   EDGE_CHUNK_WORDS: 12,
+  EDGE_CHUNK_MASK_WORDS: 32,
   /** Sort-key bits for the length level: 16 octaves of length / graph extent. */
   EDGE_LEVEL_BITS: 4,
   EDGE_SCRATCH_DRAW_ARGS: 0,
   EDGE_SCRATCH_DISPATCH: 4,
   EDGE_SCRATCH_LIST_COUNT: 7,
-  EDGE_SCRATCH_LIST: 8,
+  EDGE_SCRATCH_CURVE_ARGS: 8,
+  EDGE_SCRATCH_LIST: 12,
+  EDGE_CURVE_PIECES: 4,
 } as const;
+
+export function edgeStripVertices(arrows: boolean, curved: boolean): number {
+  if (!curved) return arrows ? 10 : 4;
+  const strip = 2 * (EDGE_CONSTANTS.EDGE_CURVE_PIECES + 1);
+  return arrows ? strip + 6 : strip;
+}
 
 export const LABEL_PARAMS = defineStruct("LabelParams", [
   { name: "textH", type: "f32" },
@@ -410,7 +423,7 @@ export function edgeChunkCount(edgeCount: number): number {
 /** Words in the edge state buffer for `edgeCount` edges. */
 export function edgeScratchWords(edgeCount: number): number {
   const c = edgeChunkCount(edgeCount);
-  return edgeMoveWordOffset(edgeCount) + ENGINE_CONSTANTS.MOVE_LIST + c;
+  return edgeMoveWordOffset(edgeCount) + ENGINE_CONSTANTS.MOVE_LIST + c + (c + 1) + 2 * EDGE_CONSTANTS.EDGE_CHUNK_MASK_WORDS * c;
 }
 
 export function edgeMoveWordOffset(edgeCount: number): number {

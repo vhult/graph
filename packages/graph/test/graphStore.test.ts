@@ -632,6 +632,36 @@ describe("GraphStore line pattern count", () => {
   });
 });
 
+const CURVED = 12 << CONSTANTS.EDGE_CURVE_SHIFT;
+
+describe("GraphStore curved edge count", () => {
+  it("counts curved edges, not width, pattern or direction", () => {
+    const s = new GraphStore();
+    s.setEdges(4, { indices: new Uint32Array(8), styles: new Uint32Array([CURVED | 12, DASHED, D | CURVED, 0]) });
+    expect(s.curvedEdges).toBe(2);
+    expect(s.hasCurved).toBe(true);
+    s.setEdges(1, { indices: new Uint32Array(2) });
+    expect(s.hasCurved).toBe(false);
+  });
+
+  it("follows hides, restyles, adds and compacts", () => {
+    const s = new GraphStore();
+    s.setEdges(3, { indices: new Uint32Array(6), styles: new Uint32Array([CURVED, CURVED, 0]) });
+    s.hideEdges(new Uint32Array([0, 0]));
+    expect(s.curvedEdges).toBe(1);
+    s.updateEdgesAt(new Uint32Array([0, 2]), { styles: new Uint32Array([CURVED, CURVED]) });
+    expect(s.curvedEdges).toBe(2);
+    s.updateEdgesAt(new Uint32Array([1, 2]), { styles: new Uint32Array([0, 0]) });
+    expect(s.curvedEdges).toBe(0);
+    s.addEdges(new Uint32Array([3, 3]), 4, { indices: new Uint32Array(4), styles: new Uint32Array([CURVED, CURVED]) });
+    expect(s.curvedEdges).toBe(1);
+    s.updateEdges({ styles: new Uint32Array([CURVED, CURVED, CURVED, 0]) });
+    expect(s.curvedEdges).toBe(2);
+    s.compactEdges(new Uint32Array([0xffffffff, 0, 1, 2]));
+    expect(s.curvedEdges).toBe(2);
+  });
+});
+
 describe("GraphStore edge reload", () => {
   it("edges.set at the same count reloads the edge buffer, with or without new ends", () => {
     const s = new GraphStore();
