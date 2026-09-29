@@ -156,14 +156,16 @@ fn curveVertex(vi : u32, cv : Curve, halfWidth : f32, withLength : bool) -> Curv
   }
   v.pos = vec4<f32>(screenToClip(origin + cv.dir * q.x + n * q.y), 0.0, 1.0);
   v.q = q;
+  var arcL = 0.0;
   var len = 0.0;
   if (withLength) {
-    len = curveArc(cv.k, cv.xEnd) + curveArc(cv.k, cv.L);
+    arcL = curveArc(cv.k, cv.L);
+    len = curveArc(cv.k, cv.xEnd) + arcL;
   }
   v.shape = vec4<f32>(cv.k, s0, -cv.L - xv, cv.xEnd - xv);
   v.geo = vec4<f32>(halfWidth, xv, cv.L, len);
   v.tip = vec4<f32>(cv.tip, cv.tan);
-  v.arrow = vec4<f32>(select(0.0, cv.arrowLen, arrow), boxY, curveCut(cv, halfWidth), 0.0);
+  v.arrow = vec4<f32>(select(0.0, cv.arrowLen, arrow), boxY, curveCut(cv, halfWidth), arcL);
   return v;
 }
 
@@ -216,8 +218,8 @@ fn curveCoverage(pos : vec2<f32>, q : vec2<f32>, shape : vec4<f32>, geo : vec4<f
   let dq = q - vec2<f32>(u, s0 * u - k * u * u);
   let dc = length(dq);
   var d = dc - geo.x;
-  if (patterns) {
-    let s = curveArc(k, geo.y + u) + curveArc(k, geo.z) + dot(dq, curveTangent(s0 - 2.0 * k * u));
+  if (patterns && (u32(line.x) != EDGE_PATTERN_SOLID || line.w != 0.0)) {
+    let s = curveArc(k, geo.y + u) + arrow.w + dot(dq, curveTangent(s0 - 2.0 * k * u));
     let hw = geo.x - line.w * clamp(s, 0.0, geo.w);
     d = dc - hw;
     let pattern = u32(line.x);
