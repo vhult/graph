@@ -6,18 +6,12 @@
 #include "common/layouts.wgsl"
 
 var<workgroup> scanU32 : array<u32, WORKGROUP_SIZE>;
-var<workgroup> scanVec2 : array<vec2<u32>, WORKGROUP_SIZE>;
 var<workgroup> scanVec4 : array<vec4<u32>, WORKGROUP_SIZE>;
 var<workgroup> scanVec4Last : vec4<u32>;
 
 struct ScanU32 {
   exclusive : u32,
   total : u32,
-}
-
-struct ScanVec2 {
-  exclusive : vec2<u32>,
-  total : vec2<u32>,
 }
 
 struct ScanVec4 {
@@ -42,24 +36,6 @@ fn wgScanU32(v : u32, lid : u32) -> ScanU32 {
   }
   let r = ScanU32(scanU32[lid] - v, scanU32[WORKGROUP_SIZE - 1u]);
   workgroupBarrier(); // scanU32 may be reused right after
-  return r;
-}
-
-// Packed 16-bit fields: each field's total must stay ≤ 65535.
-fn wgScanVec2(v : vec2<u32>, lid : u32) -> ScanVec2 {
-  scanVec2[lid] = v;
-  workgroupBarrier();
-  for (var o = 1u; o < WORKGROUP_SIZE; o = o << 1u) {
-    var a = vec2<u32>(0u);
-    if (lid >= o) {
-      a = scanVec2[lid - o];
-    }
-    workgroupBarrier();
-    scanVec2[lid] += a;
-    workgroupBarrier();
-  }
-  let r = ScanVec2(scanVec2[lid] - v, scanVec2[WORKGROUP_SIZE - 1u]);
-  workgroupBarrier();
   return r;
 }
 
@@ -100,13 +76,4 @@ fn oneHot8(bin : u32) -> vec4<u32> {
   let bit = 1u << ((bin & 3u) << 3u);
   let q = bin >> 2u;
   return vec4<u32>(select(0u, bit, q == 0u), select(0u, bit, q == 1u), select(0u, bit, q == 2u), select(0u, bit, q == 3u));
-}
-
-fn field16(v : vec2<u32>, bin : u32) -> u32 {
-  return (select(v.x, v.y, bin >= 2u) >> ((bin & 1u) << 4u)) & 0xFFFFu;
-}
-
-fn oneHot16(bin : u32) -> vec2<u32> {
-  let bit = 1u << ((bin & 1u) << 4u);
-  return select(vec2<u32>(bit, 0u), vec2<u32>(0u, bit), bin >= 2u);
 }
