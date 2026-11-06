@@ -8,6 +8,24 @@ bandwidth), Edge 153, 1M nodes / 3M edges at fit unless stated.
 
 ---
 
+## 0080 — The node scatter ranks with a bitmask, not a scan
+
+`cull_scatter` sets one bit per drawn node in two 32-word workgroup masks
+(normal and foreground), waits on one barrier, and takes each node's slot from
+`countOneBits` of the bits before it. The four packed 16-bit Hillis–Steele
+scans, about 80 barriers per chunk, are gone, and so are `wgScanVec2`,
+`field16` and `oneHot16`. Slots are the same, so 24 views at 1M and 10M
+(fit to ×512, rotated, with 51k selected nodes) are byte-identical.
+
+AMD Radeon 890M, median of 3 runs: `cull.scatter` on `xlarge-zoom` 0.575 →
+0.514 ms, on `xlarge-zoom-curve-mixed` 0.568 → 0.500 ms; `xlarge`, `large`,
+`large-zoom` and `deep-zoom` unchanged. GPU mean / p95 on `xlarge-zoom`
+9.08 / 14.94 → 8.90 / 14.37 ms, within the 0.2–0.4 ms run-to-run noise. The
+review's 1.0–2.5 ms estimate came from Intel runs; here the pass was never
+bound by its barriers.
+
+---
+
 ## 0079 — Curve strips have 4 pieces, not 8
 
 This replaces the 8 pieces of 0077. The strip is only the hull: each fragment

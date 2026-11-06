@@ -28,10 +28,14 @@ override NODE_SHAPES : bool = false;
 override NODE_LAYERS : bool = false;
 override NODE_ICONS : bool = false;
 
+const MASK_WORDS : u32 = CHUNK_SIZE / 32u;
+const_assert 32u % DRAW_SEGMENT == 0u;
+
 var<workgroup> wgFlag : u32;
 var<workgroup> wgCells : array<atomic<u32>, CELLS_PER_CHUNK>;
 var<workgroup> wgTotal : atomic<u32>;
-var<workgroup> wgRun : array<u32, NUM_BUCKETS>;
+var<workgroup> wgNormal : array<atomic<u32>, MASK_WORDS>;
+var<workgroup> wgForeground : array<atomic<u32>, MASK_WORDS>;
 var<workgroup> wgLevel : u32;
 var<workgroup> wgBig : u32;
 
@@ -365,16 +369,16 @@ fn cull_scatter(
     wgLevel = bitcast<u32>(lodCount(cb));
     wgBig = select(0u, 1u, lodChunkHasBig(cb));
   }
+  if (lid < MASK_WORDS) {
+    atomicStore(&wgNormal[lid], 0u);
+    atomicStore(&wgForeground[lid], 0u);
+  }
   let count = bitcast<f32>(workgroupUniformLoad(&wgLevel));
   let hasBig = workgroupUniformLoad(&wgBig) != 0u;
   let items = u32(ceil(count));
-  // First lane of this lane's NORMAL segment within the row (segments never span rows).
-  let segLane = lid - lid % DRAW_SEGMENT;
-  if (lid < NUM_BUCKETS) {
-    wgRun[lid] = 0u;
-  }
-  workgroupBarrier();
 
+  var buckets : array<u32, ITEMS_PER_THREAD>;
+  var picks : array<vec2<f32>, ITEMS_PER_THREAD>;
   for (var k = 0u; k < ITEMS_PER_THREAD; k++) {
     let t = k * WORKGROUP_SIZE + lid;
     let i = nodeIndex(c, k, lid);
@@ -387,16 +391,35 @@ fn cull_scatter(
         b = classify(i, p.x);
       }
     }
-    let one = select(vec2<u32>(0u), oneHot16(b), b != BUCKET_CULLED);
-    let s = wgScanVec2(one, lid);
-    // Row-inclusive sum just before the segment start: rank in segment = exclusive − that.
-    let segBase = select(vec2<u32>(0u), scanVec2[max(segLane, 1u) - 1u], segLane > 0u);
+    if (b == BUCKET_NORMAL) {
+      atomicOr(&wgNormal[t >> 5u], 1u << (t & 31u));
+    } else if (b == BUCKET_FOREGROUND) {
+      atomicOr(&wgForeground[t >> 5u], 1u << (t & 31u));
+    }
+    buckets[k] = b;
+    picks[k] = p;
+  }
+  workgroupBarrier();
+
+  for (var k = 0u; k < ITEMS_PER_THREAD; k++) {
+    let b = buckets[k];
     if (b != BUCKET_CULLED) {
+      let t = k * WORKGROUP_SIZE + lid;
+      let i = nodeIndex(c, k, lid);
+      let p = picks[k];
+      let bit = t & 31u;
+      let below = (1u << bit) - 1u;
       var slot : u32;
       if (b == BUCKET_NORMAL) {
-        slot = scratch[offsetsAt(chunks) + drawIndex(t / DRAW_SEGMENT, c, chunks)] + field16(s.exclusive - segBase, b);
+        let segStart = bit - bit % DRAW_SEGMENT;
+        let rank = countOneBits(atomicLoad(&wgNormal[t >> 5u]) & below & ~((1u << segStart) - 1u));
+        slot = scratch[offsetsAt(chunks) + drawIndex(t / DRAW_SEGMENT, c, chunks)] + rank;
       } else {
-        slot = scratch[offsetsAt(chunks) + chunkCell(b, c, chunks)] + wgRun[b] + field16(s.exclusive, b);
+        var rank = countOneBits(atomicLoad(&wgForeground[t >> 5u]) & below);
+        for (var w = 0u; w < (t >> 5u); w++) {
+          rank += countOneBits(atomicLoad(&wgForeground[w]));
+        }
+        slot = scratch[offsetsAt(chunks) + chunkCell(BUCKET_FOREGROUND, c, chunks)] + rank;
       }
       var r = nodeRadiusPx(i) * p.x;
       if (NODE_SHAPES) {
@@ -419,10 +442,5 @@ fn cull_scatter(
         instances[scratch[SCRATCH_ICON_BASE] * 4u + slot] = nodeIconWord(i, scratch[SCRATCH_ICON_COUNT]);
       }
     }
-    workgroupBarrier(); // every lane has read wgRun and scanVec2
-    if (lid < NUM_BUCKETS) {
-      wgRun[lid] += field16(s.total, lid);
-    }
-    workgroupBarrier();
   }
 }
