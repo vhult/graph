@@ -1,5 +1,26 @@
 # Changelog
 
+## v1.0.0 - 2026-11-06
+
+### Features
+- add curved edges (ba8e65a)
+- api: open the context menu on a long touch or pen press (5db0af9)
+- add dashed, dotted, dash-dot, double and tapered edge styles (4b5bd8a)
+- api: add the DragEndEvent type (77cc3ad)
+
+### Performance
+- shaders: rank the node scatter with a bitmask instead of a scan, frame 9.08 -> 8.90 ms, p95 14.94 -> 14.37 ms (84003f5)
+- passes: cut curve strips from 8 to 4 pieces, frame 31.5 -> 15.2 ms, p95 58.8 -> 21.2 ms (e725c60)
+- passes: draw straight and curved edges from their own lists, frame 15.34 -> 11.69 ms, p95 18.99 -> 14.95 ms (9b95348)
+- passes: bound curved edge chunks by their bend, frame 7.11 -> 6.81 ms, p95 15.95 -> 15.62 ms (2f68116)
+
+### Fixes
+- passes: cull curved edge labels by their peak (e7b8413)
+
+### Other
+- shaders: compute the curve arc length once per edge (e0cad5b)
+- build: strip comments and indentation from bundled wgsl (eee9634)
+
 ## v0.3.0 - 2026-09-27
 
 ### Breaking
