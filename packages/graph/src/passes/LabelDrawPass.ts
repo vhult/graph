@@ -36,6 +36,7 @@ export class LabelDrawPass implements RenderNode {
         { binding: 4, visibility: V, buffer: { type: "read-only-storage" } },
         { binding: 5, visibility: V | GPUShaderStage.FRAGMENT, texture: { sampleType: "float" } },
         { binding: 6, visibility: V, buffer: { type: "read-only-storage" } },
+        { binding: 7, visibility: V, buffer: { type: "read-only-storage" } },
       ],
     });
     const emptyLayout = device.createBindGroupLayout({ label: "empty", entries: [] });
@@ -75,6 +76,7 @@ export class LabelDrawPass implements RenderNode {
           { binding: 4, resource: { buffer: l.textBuffer } },
           { binding: 5, resource: l.atlas.view },
           { binding: 6, resource: { buffer: this.graph.buffers.edgeIdx } },
+          { binding: 7, resource: { buffer: this.graph.buffers.edgeStyle } },
         ],
       });
     }

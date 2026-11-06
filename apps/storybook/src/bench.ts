@@ -3,7 +3,7 @@
  * the render worker (`graph.benchmark`); this module only loads data, starts
  * runs, summarizes the per-frame series and renders/downloads the report.
  */
-import { NO_ICON, type BenchmarkResult, type Graph } from "@vhult/graph";
+import { NO_ICON, packEdgeStyle, type BenchmarkResult, type Graph } from "@vhult/graph";
 import { benchIcons, hslToWord, PATHS, summarize, type PathName, type Summary } from "@vhult/graph-bench";
 import { setGraph, type GraphName } from "./data";
 
@@ -16,6 +16,9 @@ export interface BenchCase {
   edgeLabels: boolean;
   targetP99Ms?: number;
   icons?: number;
+  curve?: number;
+  curveEvery?: number;
+  pattern?: "dashed";
 }
 
 export const SUITE: readonly BenchCase[] = [
@@ -31,6 +34,15 @@ export const SUITE: readonly BenchCase[] = [
   { name: "large-icons", dataset: "communities", count: 1_000_000, path: "standard", nodeLabels: true, edgeLabels: true, targetP99Ms: 6.0, icons: 64 },
   { name: "large-zoom-icons", dataset: "communities", count: 1_000_000, path: "zoomSweep", nodeLabels: true, edgeLabels: true, targetP99Ms: 6.0, icons: 64 },
   { name: "icon-zoom", dataset: "communities", count: 1_000_000, path: "iconZoom", nodeLabels: true, edgeLabels: true, targetP99Ms: 6.0, icons: 64 },
+  { name: "large-curve", dataset: "communities", count: 1_000_000, path: "standard", nodeLabels: true, edgeLabels: true, targetP99Ms: 6.0, curve: 0.2 },
+  { name: "large-zoom-curve", dataset: "communities", count: 1_000_000, path: "zoomSweep", nodeLabels: true, edgeLabels: true, targetP99Ms: 6.0, curve: 0.2 },
+  { name: "xlarge-zoom-curve", dataset: "communities", count: 10_000_000, path: "zoomSweep", nodeLabels: true, edgeLabels: true, targetP99Ms: 16.0, curve: 0.2 },
+  { name: "large-dashed", dataset: "communities", count: 1_000_000, path: "standard", nodeLabels: true, edgeLabels: true, targetP99Ms: 6.0, pattern: "dashed" },
+  { name: "large-curve-dashed", dataset: "communities", count: 1_000_000, path: "standard", nodeLabels: true, edgeLabels: true, targetP99Ms: 6.0, curve: 0.2, pattern: "dashed" },
+  { name: "large-curve-mixed", dataset: "communities", count: 1_000_000, path: "standard", nodeLabels: true, edgeLabels: true, targetP99Ms: 6.0, curve: 0.2, curveEvery: 64 },
+  { name: "large-zoom-curve-mixed", dataset: "communities", count: 1_000_000, path: "zoomSweep", nodeLabels: true, edgeLabels: true, targetP99Ms: 6.0, curve: 0.2, curveEvery: 64 },
+  { name: "xlarge-zoom-curve-mixed", dataset: "communities", count: 10_000_000, path: "zoomSweep", nodeLabels: true, edgeLabels: true, targetP99Ms: 16.0, curve: 0.2, curveEvery: 64 },
+  { name: "deep-zoom-curve-mixed", dataset: "communities", count: 10_000_000, path: "deepZoom", nodeLabels: true, edgeLabels: true, targetP99Ms: 8.0, curve: 0.2, curveEvery: 64 },
 ];
 
 export async function setBenchIcons(graph: Graph, count: number, icons: number): Promise<void> {
@@ -54,8 +66,14 @@ export interface CaseRun {
 }
 
 export async function runCase(graph: Graph, c: BenchCase): Promise<CaseRun> {
-  setGraph(graph, c.dataset, c.count, { nodes: c.nodeLabels, edges: c.edgeLabels });
+  const { data } = setGraph(graph, c.dataset, c.count, { nodes: c.nodeLabels, edges: c.edgeLabels });
   await setBenchIcons(graph, c.count, c.icons ?? 0);
+  if (c.pattern || c.curve) {
+    const styles = new Uint32Array(data.edges.count).fill(packEdgeStyle({ pattern: c.pattern }));
+    const curved = packEdgeStyle({ pattern: c.pattern, curve: c.curve });
+    for (let i = 0; i < styles.length; i += c.curveEvery ?? 1) styles[i] = curved;
+    graph.edges.updateAll({ styles });
+  }
   graph.camera.fit();
   const path = PATHS[c.path];
   const result = await graph.debug.benchmark({ path: path.keys, frames: path.frames });

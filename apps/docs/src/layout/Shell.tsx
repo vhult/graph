@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { Inline } from "../render/Inline";
 import { Link } from "../router";
 import { Sidebar, type Area } from "./Sidebar";
+import { ArchiveNote } from "./Versions";
 
 export interface TocItem {
   id: string;
@@ -12,7 +13,10 @@ export function Shell({ area, path, toc = [], children }: { area: Area; path: st
   return (
     <div className="shell">
       <Sidebar area={area} path={path} />
-      <article className="doc">{children}</article>
+      <article className="doc">
+        {area === "api" && <ArchiveNote path={path} />}
+        {children}
+      </article>
       <nav className="toc">
         {toc.length > 0 && (
           <>

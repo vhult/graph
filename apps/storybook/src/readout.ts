@@ -14,7 +14,7 @@ export function showReadout(graph: Graph, root: HTMLElement, text: ReadoutText =
   const retext = readouts.get(graph);
   if (retext) return retext(text);
   const box = document.createElement("div");
-  box.className = "stage-note";
+  box.className = "stage-note stage-readout";
   box.style.cssText = "top: 8px; right: 8px; left: auto; bottom: auto";
   root.append(box);
   let node = text.node ?? numbered;

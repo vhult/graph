@@ -1,5 +1,6 @@
 #include "passes/edge_cull.wgsl"
 #include "common/edge_segment.wgsl"
+#include "common/edge_curve.wgsl"
 #include "common/pick.wgsl"
 
 fn pickRel(center : vec2<f32>) -> vec2<f32> {
@@ -25,15 +26,27 @@ fn pickEdge(e : u32, keep : f32, n : u32) -> bool {
   let w = edgeWidthPx(style);
   let wDraw = max(w, EDGE_MIN_DRAW_WIDTH_PX);
   let halfWidth = wDraw * 0.5;
-  let s = edgeSegment(a, b, ij.y, w, EDGE_ARROWS && (style & EDGE_FLAG_DIRECTED) != 0u, (pick.flags & PICK_FLAG_SHAPES) != 0u);
-  let extX = s.halfLen + max(halfWidth, s.arrowLen) + EDGE_AA_PAD_PX;
-  let rel = pickPoint() - s.mid;
-  let uv = vec2<f32>(dot(rel, s.dir), dot(rel, vec2<f32>(-s.dir.y, s.dir.x)));
-  let dist = edgeDist(uv, s.halfLen, halfWidth, s.arrowLen);
+  let directed = EDGE_ARROWS && (style & EDGE_FLAG_DIRECTED) != 0u;
+  let shapes = (pick.flags & PICK_FLAG_SHAPES) != 0u;
+  var dist : f32;
+  var t : f32;
+  let bend = edgeCurveBend(style);
+  if (EDGE_CURVE && bend > 0.0) {
+    let cv = curveOf(a, b, ij.y, w, halfWidth, bend, directed, shapes);
+    let hit = curvePick(pickPoint(), cv, halfWidth);
+    dist = hit.x;
+    t = clamp(hit.y / max(cv.L, 1e-4) * 0.5 + 0.5, 0.0, 1.0);
+  } else {
+    let s = edgeSegment(a, b, ij.y, w, directed, shapes);
+    let extX = s.halfLen + max(halfWidth, s.arrowLen) + EDGE_AA_PAD_PX;
+    let rel = pickPoint() - s.mid;
+    let uv = vec2<f32>(dot(rel, s.dir), dot(rel, vec2<f32>(-s.dir.y, s.dir.x)));
+    dist = edgeDist(uv, s.halfLen, halfWidth, s.arrowLen);
+    t = clamp(uv.x / extX * 0.5 + 0.5, 0.0, 1.0);
+  }
   let tint = frame.globalEdgeColor;
   var ca = unpack4x8unorm(tint).a;
   if ((pick.flags & PICK_FLAG_EDGE_COLORS) != 0u) {
-    let t = clamp(uv.x / extX * 0.5 + 0.5, 0.0, 1.0);
     let c0 = edgeColor[e * 2u];
     let c1 = edgeColor[e * 2u + 1u];
     ca = mix(unpack4x8unorm(select(c0, tint, c0 == 0u)).a, unpack4x8unorm(select(c1, tint, c1 == 0u)).a, t);
@@ -98,7 +111,7 @@ fn pick_edges_test(
   let width = chunkWidthPx(r.maxWidthPx);
   let keep = edgeKeep(edgeChunkLen(c), r.density, width);
   let rel = pickRel((r.midLo + r.midHi) * 0.5);
-  let margin = (edgeReachPx(width, EDGE_ARROWS) + pick.edgeRadiusPx + 1.0) / frame.zoom * 1.0001 + r.maxLen * 3e-5 + length(rel) * 2e-6;
+  let margin = (edgeReachPx(width, EDGE_ARROWS) + pick.edgeRadiusPx + 1.0) / frame.zoom * 1.0001 + r.maxLen * 3e-5 + length(rel) * 2e-6 + select(0.0, EDGE_CURVE_MAX * r.maxLen, EDGE_CURVE);
   let first = c * EDGE_CHUNK_SIZE;
   let len = edgeChunkLen(c);
   var best = 0u;

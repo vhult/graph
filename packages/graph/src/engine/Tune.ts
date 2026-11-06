@@ -8,6 +8,7 @@ export interface Tune {
   minLengthPx: number;
   debug: number;
   arrows: boolean;
+  curved: boolean;
 }
 
 export interface Tunable {
@@ -16,7 +17,7 @@ export interface Tunable {
   useTune(t: Tune): void;
 }
 
-export const DEFAULT_TUNE: Readonly<Tune> = { lodTargetPx: 2.5, maxOverdraw: 1.5, minLengthPx: 6, debug: 0, arrows: false };
+export const DEFAULT_TUNE: Readonly<Tune> = { lodTargetPx: 2.5, maxOverdraw: 1.5, minLengthPx: 6, debug: 0, arrows: false, curved: false };
 
 export function applyTune(t: Tune, d: DebugTune): void {
   if (d.lodTargetPx !== undefined) t.lodTargetPx = d.lodTargetPx;
@@ -26,7 +27,7 @@ export function applyTune(t: Tune, d: DebugTune): void {
 }
 
 export function sameTune(a: Tune, b: Tune): boolean {
-  return a.lodTargetPx === b.lodTargetPx && a.maxOverdraw === b.maxOverdraw && a.minLengthPx === b.minLengthPx && a.debug === b.debug && a.arrows === b.arrows;
+  return a.lodTargetPx === b.lodTargetPx && a.maxOverdraw === b.maxOverdraw && a.minLengthPx === b.minLengthPx && a.debug === b.debug && a.arrows === b.arrows && a.curved === b.curved;
 }
 
 export function lodKey(t: Tune): string {
@@ -34,9 +35,9 @@ export function lodKey(t: Tune): string {
 }
 
 export function edgeKey(t: Tune): string {
-  return `${t.arrows ? 1 : 0}|${t.maxOverdraw}|${t.minLengthPx}|${t.debug}`;
+  return `${t.arrows ? 1 : 0}|${t.curved ? 1 : 0}|${t.maxOverdraw}|${t.minLengthPx}|${t.debug}`;
 }
 
 export function edgeConstants(t: Tune): Record<string, number> {
-  return { EDGE_ARROWS: t.arrows ? 1 : 0, EDGE_MAX_OVERDRAW: t.maxOverdraw, EDGE_MIN_LEN_PX: t.minLengthPx, EDGE_DEBUG: t.debug };
+  return { EDGE_ARROWS: t.arrows ? 1 : 0, EDGE_MAX_OVERDRAW: t.maxOverdraw, EDGE_MIN_LEN_PX: t.minLengthPx, EDGE_DEBUG: t.debug, EDGE_CURVE: t.curved ? 1 : 0 };
 }

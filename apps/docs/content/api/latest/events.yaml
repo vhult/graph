@@ -3,7 +3,7 @@ intro: >-
   Events tell you what the user did and what changed in the engine. Listen with `graph.on`, and stop with
   the function it returns.
 namespace: GraphEvents
-types: [Hit, SelectEvent, DragStartEvent, DragMoveEvent, PanEvent, ZoomEvent, RotateEvent, GesturePhase]
+types: [Hit, SelectEvent, DragStartEvent, DragMoveEvent, DragEndEvent, PanEvent, ZoomEvent, RotateEvent, GesturePhase]
 
 docs:
   GraphEvents:
@@ -78,7 +78,7 @@ docs:
       dragEnd:
         description: >-
           Fires when a drag ends: on release, or when a right click, a pinch or `drag: false` stops it. The
-          payload is a `DragMoveEvent` with the last offset.
+          payload is a `DragEndEvent` with the last offset.
         example: |
           graph.on("dragEnd", (e) => console.log(`node ${e.index} moved by ${e.dx}, ${e.dy}`));
       select:
@@ -245,6 +245,14 @@ docs:
       dy:
         description: >-
           The vertical offset since the start of the drag, in world units.
+  DragEndEvent:
+    description: >-
+      The payload of the `dragEnd` event. It has the same fields as `DragMoveEvent`: the grabbed node and
+      how far it moved from the start of the drag to the end.
+    example: |
+      import type { DragEndEvent } from "@vhult/graph";
+
+      graph.on("dragEnd", (e: DragEndEvent) => console.log(`node ${e.index} moved by ${e.dx}, ${e.dy}`));
   PanEvent:
     description: >-
       The payload of the `pan` event. It holds the move since the last event, in CSS px, and where the

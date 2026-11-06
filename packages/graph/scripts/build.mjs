@@ -55,6 +55,21 @@ const layoutsPlugin = {
   },
 };
 
+const stripWgsl = (src) =>
+  src
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .split("\n")
+    .map((line) => line.replace(/\/\/.*$/, "").trim())
+    .filter(Boolean)
+    .join("\n");
+
+const stripWgslPlugin = {
+  name: "strip-wgsl",
+  setup(build) {
+    build.onLoad({ filter: /\.wgsl$/ }, async (args) => ({ contents: stripWgsl(await readFile(args.path, "utf8")), loader: "text" }));
+  },
+};
+
 /** @type {import("esbuild").BuildOptions} */
 const options = {
   entryPoints: { index: "src/index.ts", worker: "src/bridge/worker.ts" },
@@ -69,7 +84,7 @@ const options = {
   loader: { ".wgsl": "text" },
   legalComments: "none",
   logLevel: "info",
-  plugins: [layoutsPlugin],
+  plugins: watch ? [layoutsPlugin] : [layoutsPlugin, stripWgslPlugin],
 };
 
 if (args.has("--gen-only")) {

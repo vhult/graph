@@ -8,7 +8,7 @@ export const HOLE3D = {
   step: 0.002,
   timeScale: 24,
   scale: 30,
-  extent: 17,
+  extent: 22,
   inclination: 84,
   exposure: 9,
   alpha: 0.85,
@@ -18,7 +18,7 @@ export const HOLE3D = {
   wispShare: 0.12,
 } as const;
 
-const WORDS = 4;
+const WORDS = 9;
 const PSI_TOP = 3 * Math.PI;
 const CAPTURE = 3 * Math.sqrt(3);
 
@@ -31,12 +31,10 @@ export interface Hole3d {
 export const HOLE3D_WGSL = `
 const TAU : f32 = 6.283185307;
 
-fn tableB(r : f32, psi : f32) -> f32 {
-  let nr = param(2u);
+fn tableB(fr : f32, psi : f32) -> f32 {
   let na = param(3u);
-  let fr = clamp(log(r / param(4u)) / log(param(5u) / param(4u)), 0.0, 1.0) * (nr - 1.0);
   let fa = clamp(psi / param(6u), 0.0, 1.0) * (na - 1.0);
-  let r0 = min(u32(fr), u32(nr) - 2u);
+  let r0 = min(u32(fr), u32(param(2u)) - 2u);
   let a0 = min(u32(fa), u32(na) - 2u);
   let tr = fr - f32(r0);
   let ta = fa - f32(a0);
@@ -51,25 +49,26 @@ struct Image {
   sky : vec2<f32>,
   depth : f32,
   g : f32,
-  r : f32,
-  heat : f32,
-  order : u32,
+  k : u32,
 }
+
+var<private> im : Image;
 
 fn image(i : u32, t : f32) -> Image {
   let n = u32(param(0u));
   let order = i / n;
   let k = i - order * n;
-  let r = data[k * ${WORDS}u];
-  let phi = data[k * ${WORDS}u + 1u] + sqrt(1.0 / (r * r * r)) * t * param(8u);
-  let pos = vec3<f32>(r * cos(phi), r * sin(phi), data[k * ${WORDS}u + 2u]);
+  let o = k * ${WORDS}u;
+  let r = data[o];
+  let omega = data[o + 3u];
+  let phi = data[o + 1u] + omega * t * param(8u) + param(13u);
+  let pos = vec3<f32>(r * cos(phi), r * sin(phi), data[o + 2u]);
   let inc = param(7u);
-  let o = vec3<f32>(0.0, -sin(inc), cos(inc));
+  let view = vec3<f32>(0.0, -sin(inc), cos(inc));
   let up = vec3<f32>(0.0, cos(inc), sin(inc));
   let right = vec3<f32>(1.0, 0.0, 0.0);
-  let rr = length(pos);
-  let nrm = pos / rr;
-  let psi = acos(clamp(dot(nrm, o), -1.0, 1.0));
+  let nrm = normalize(pos);
+  let psi = acos(clamp(dot(nrm, view), -1.0, 1.0));
   var d = vec2<f32>(dot(nrm, right), dot(nrm, up));
   let dl = length(d);
   d = select(vec2<f32>(1.0, 0.0), d / dl, dl > 1e-6);
@@ -81,18 +80,18 @@ fn image(i : u32, t : f32) -> Image {
   if (order == 2u) {
     angle = TAU + psi;
   }
-  let sky = d * tableB(rr, angle);
-  let lz = cross(right * sky.x + up * sky.y, o).z;
-  let g = sqrt(max(1.0 - 3.0 / r, 1e-4)) / max(1.0 - sqrt(1.0 / (r * r * r)) * lz, 1e-3);
+  let sky = d * tableB(data[o + 4u], angle);
+  let lz = cross(right * sky.x + up * sky.y, view).z;
+  let g = data[o + 5u] / max(1.0 - omega * lz, 1e-3);
   var depth = select(0.0, 0.5, order == 2u);
   if (order == 0u) {
-    depth = (1.0 + 14.99 * (0.5 + 0.5 * tanh(dot(pos, o) / 8.0))) / 16.0;
+    depth = (1.0 + 14.99 * (0.5 + 0.5 * tanh(dot(pos, view) / 8.0))) / 16.0;
   }
-  return Image(sky, depth, g, r, data[k * ${WORDS}u + 3u], order);
+  return Image(sky, depth, g, k);
 }
 
 fn nodePosition(i : u32, t : f32) -> vec3<f32> {
-  let im = image(i, t);
+  im = image(i, t);
   return vec3<f32>(im.sky.x * param(9u), -im.sky.y * param(9u), im.depth);
 }
 
@@ -115,19 +114,20 @@ fn blackbody(t : f32) -> vec3<f32> {
 }
 
 fn nodeColor(i : u32, t : f32, p : vec3<f32>) -> vec4<f32> {
-  let im = image(i, t);
-  let rin = param(4u);
-  let temp = pow(im.r / rin, -0.75) * pow(max(1.0 - sqrt(rin / im.r), 0.0), 0.25) / 0.4886;
+  let o = im.k * ${WORDS}u;
   let g = mix(1.0, im.g, param(12u));
-  let seen = g * temp;
-  let orderFade = 1.0;
-  let light = pow(g, 3.0) * (0.03 + pow(temp, 3.0)) * im.heat * orderFade * param(10u);
-  let edge = 1.0 - smoothstep(0.55 * param(5u), param(5u), im.r);
-  let rgb = vec3<f32>(1.0) - exp(-blackbody(seen) * light * edge);
+  let seen = g * data[o + 6u];
+  let light = g * g * g * data[o + 7u] * param(10u);
+  let rgb = vec3<f32>(1.0) - exp(-blackbody(seen) * light);
   let glow = clamp(max(rgb.r, max(rgb.g, rgb.b)) * 1.3, 0.0, 1.0);
-  return vec4<f32>(rgb, param(11u) * edge * glow);
+  return vec4<f32>(rgb, param(11u) * data[o + 8u] * glow);
 }
 `;
+
+function smoothstep(lo: number, hi: number, x: number): number {
+  const t = Math.min(1, Math.max(0, (x - lo) / (hi - lo)));
+  return t * t * (3 - 2 * t);
+}
 
 export function photonTable(): Float32Array {
   const { rIn, rOut, radii, angles, step } = HOLE3D;
@@ -238,10 +238,18 @@ export function blackHole3d(count: number, seed = 1): Hole3d {
       heat = 0.9 + 0.15 * r();
     }
     radius = Math.min(H.rOut, Math.max(H.rIn + 0.05, radius));
+    const z = normal() * 0.006 * radius;
+    const temp = (Math.pow(radius / H.rIn, -0.75) * Math.pow(Math.max(1 - Math.sqrt(H.rIn / radius), 0), 0.25)) / 0.4886;
+    const edge = 1 - smoothstep(0.55 * H.rOut, H.rOut, radius);
     data[o] = radius;
     data[o + 1] = phi;
-    data[o + 2] = normal() * 0.006 * radius;
-    data[o + 3] = heat;
+    data[o + 2] = z;
+    data[o + 3] = Math.sqrt(1 / (radius * radius * radius));
+    data[o + 4] = Math.min(1, Math.max(0, Math.log(Math.hypot(radius, z) / H.rIn) / Math.log(H.rOut / H.rIn))) * (H.radii - 1);
+    data[o + 5] = Math.sqrt(Math.max(1 - 3 / radius, 1e-4));
+    data[o + 6] = temp;
+    data[o + 7] = (0.03 + temp * temp * temp) * heat * edge;
+    data[o + 8] = edge;
   }
   const sizes = new Float32Array(nodes);
   for (let i = 0; i < nodes; i++) {
@@ -254,6 +262,6 @@ export function blackHole3d(count: number, seed = 1): Hole3d {
       edges: { count: 0, indices: new Uint32Array(0) },
     },
     data,
-    params: [particles, particles * WORDS, H.radii, H.angles, H.rIn, H.rOut, PSI_TOP, (H.inclination * Math.PI) / 180, H.timeScale, H.scale, H.exposure, H.alpha, H.beaming],
+    params: [particles, particles * WORDS, H.radii, H.angles, H.rIn, H.rOut, PSI_TOP, (H.inclination * Math.PI) / 180, H.timeScale, H.scale, H.exposure, H.alpha, H.beaming, 0],
   };
 }

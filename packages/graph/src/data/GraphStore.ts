@@ -57,6 +57,16 @@ function directedBit(style: number): number {
   return (style & CONSTANTS.EDGE_FLAG_DIRECTED) !== 0 ? 1 : 0;
 }
 
+const LINE_BITS = (CONSTANTS.EDGE_PATTERN_MASK << CONSTANTS.EDGE_PATTERN_SHIFT) | CONSTANTS.EDGE_FLAG_TAPERED;
+
+function lineBit(style: number): number {
+  return (style & LINE_BITS) !== 0 ? 1 : 0;
+}
+
+function curveBit(style: number): number {
+  return ((style >>> CONSTANTS.EDGE_CURVE_SHIFT) & CONSTANTS.EDGE_CURVE_MASK) !== 0 ? 1 : 0;
+}
+
 function counted(state: number, bit: number): number {
   return (state & (bit | CONSTANTS.STATE_REMOVED)) === bit ? 1 : 0;
 }
@@ -74,6 +84,8 @@ export class GraphStore {
   /** Per-edge colours were supplied; otherwise every edge uses the global tint. */
   hasEdgeColors = false;
   directedEdges = 0;
+  lineEdges = 0;
+  curvedEdges = 0;
   hasNodeShapes = false;
   hasZLayers = false;
   hasIcons = false;
@@ -119,6 +131,14 @@ export class GraphStore {
 
   get hasDirected(): boolean {
     return this.directedEdges > 0;
+  }
+
+  get hasLinePatterns(): boolean {
+    return this.lineEdges > 0;
+  }
+
+  get hasCurved(): boolean {
+    return this.curvedEdges > 0;
   }
 
   get dirty(): boolean {
@@ -488,7 +508,7 @@ export class GraphStore {
     this.looks.edges[1].reset();
     this.removedEdges = 0;
     this.edgeRankWanted = false;
-    this.countDirected();
+    this.countStyles();
   }
 
   addEdges(indices: Uint32Array, slots: number, arrays: EdgeArrays): void {
@@ -500,6 +520,8 @@ export class GraphStore {
     const es = this.edgeState ? sized(this.edgeState, slots, 0) : null;
     let removed = this.removedEdges;
     let directed = this.directedEdges;
+    let line = this.lineEdges;
+    let curved = this.curvedEdges;
     for (let j = 0; j < indices.length; j++) {
       const i = indices[j]!;
       idx[i * 2] = ends ? ends[j * 2]! : 0;
@@ -510,6 +532,8 @@ export class GraphStore {
       if (st) {
         const w = styles ? styles[j]! : 0;
         directed += directedBit(w) - (gone ? 0 : directedBit(st[i]!));
+        line += lineBit(w) - (gone ? 0 : lineBit(st[i]!));
+        curved += curveBit(w) - (gone ? 0 : curveBit(st[i]!));
         st[i] = w;
       }
       if (co) {
@@ -528,6 +552,8 @@ export class GraphStore {
     }
     this.removedEdges = removed;
     this.directedEdges = directed;
+    this.lineEdges = line;
+    this.curvedEdges = curved;
     this.edgeCount = slots;
     this.reloadEdges();
   }
@@ -539,16 +565,24 @@ export class GraphStore {
     const hide = CONSTANTS.EDGE_STATE_REMOVED | CONSTANTS.EDGE_STATE_HIDDEN;
     let removed = this.removedEdges;
     let directed = this.directedEdges;
+    let line = this.lineEdges;
+    let curved = this.curvedEdges;
     for (let j = 0; j < indices.length; j++) {
       const i = indices[j]!;
       if ((st[i]! & CONSTANTS.EDGE_STATE_REMOVED) === 0) {
         removed++;
-        if (sw) directed -= directedBit(sw[i]!);
+        if (sw) {
+          directed -= directedBit(sw[i]!);
+          line -= lineBit(sw[i]!);
+          curved -= curveBit(sw[i]!);
+        }
       }
       this.setEdgeState(st, i, (st[i]! | hide) >>> 0);
     }
     this.removedEdges = removed;
     this.directedEdges = directed;
+    this.lineEdges = line;
+    this.curvedEdges = curved;
     this.stageEdgeState(st, indices);
   }
 
@@ -612,7 +646,7 @@ export class GraphStore {
       this.hasEdgeColors ||= arrays.colors !== undefined;
       this.reloadEdges();
     }
-    if (arrays.styles) this.countDirected();
+    if (arrays.styles) this.countStyles();
   }
 
   compactEdges(remap: Uint32Array): void {
@@ -633,7 +667,7 @@ export class GraphStore {
     }
     this.removedEdges = removed;
     this.edgeCount = n;
-    this.countDirected();
+    this.countStyles();
     for (const c of [ch.edgeIdx, ch.edgeStyle, ch.edgeColor, this.edgeStateChannel]) c.scattered.reset(n);
     this.reloadEdges();
   }
@@ -662,22 +696,39 @@ export class GraphStore {
     const st = ch.data as Uint32Array;
     const es = this.edgeState;
     let directed = this.directedEdges;
+    let line = this.lineEdges;
+    let curved = this.curvedEdges;
     for (let j = 0; j < indices.length; j++) {
       const i = indices[j]!;
       const w = styles[j]!;
-      if (es === null || (es[i]! & CONSTANTS.EDGE_STATE_REMOVED) === 0) directed += directedBit(w) - directedBit(st[i]!);
+      if (es === null || (es[i]! & CONSTANTS.EDGE_STATE_REMOVED) === 0) {
+        directed += directedBit(w) - directedBit(st[i]!);
+        line += lineBit(w) - lineBit(st[i]!);
+        curved += curveBit(w) - curveBit(st[i]!);
+      }
       st[i] = w;
     }
     this.directedEdges = directed;
+    this.lineEdges = line;
+    this.curvedEdges = curved;
   }
 
-  private countDirected(): void {
+  private countStyles(): void {
     const st = this.channels.edgeStyle.data as Uint32Array;
     const es = this.edgeState;
     const n = this.hasEdgeStyles ? Math.min(this.edgeCount, st.length) : 0;
     let directed = 0;
-    for (let i = 0; i < n; i++) if (es === null || (es[i]! & CONSTANTS.EDGE_STATE_REMOVED) === 0) directed += directedBit(st[i]!);
+    let line = 0;
+    let curved = 0;
+    for (let i = 0; i < n; i++) {
+      if (es !== null && (es[i]! & CONSTANTS.EDGE_STATE_REMOVED) !== 0) continue;
+      directed += directedBit(st[i]!);
+      line += lineBit(st[i]!);
+      curved += curveBit(st[i]!);
+    }
     this.directedEdges = directed;
+    this.lineEdges = line;
+    this.curvedEdges = curved;
   }
 
   private ensureEdgeState(): Uint32Array {

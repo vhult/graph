@@ -7,3 +7,4 @@ storybook-static/
 TODO.md
 CLAUDE.local.md
 apps/docs/examples.gen*/
+packages/bench/results/

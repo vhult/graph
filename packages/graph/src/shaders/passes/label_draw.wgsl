@@ -7,6 +7,7 @@
 @group(2) @binding(4) var<storage, read> text : array<u32>;
 @group(2) @binding(5) var atlas : texture_2d<f32>;
 @group(2) @binding(6) var<storage, read> ends : array<vec2<u32>>;
+@group(2) @binding(7) var<storage, read> edgeStyles : array<u32>;
 
 override HALO : bool = true;
 
@@ -42,13 +43,16 @@ fn vs(@builtin(vertex_index) vi : u32, @builtin(instance_index) ii : u32) -> VOu
   let local = vec2<f32>(f32(word >> 16u), 0.0) + corner * size;
   var sp : vec2<f32>;
   if ((e.index & LABEL_EDGE_BIT) != 0u) {
-    let ij = ends[e.index & ~LABEL_EDGE_BIT] & vec2<u32>(EDGE_END_MASK, 0xFFFFFFFFu);
+    let edge = e.index & ~LABEL_EDGE_BIT;
+    let ij = ends[edge] & vec2<u32>(EDGE_END_MASK, 0xFFFFFFFFu);
+    let style = select(0u, edgeStyles[edge], edge < arrayLength(&edgeStyles));
+    let bend = f32((style >> EDGE_CURVE_SHIFT) & EDGE_CURVE_MASK) / f32(EDGE_CURVE_SCALE);
     let a = worldToScreen(positions[ij.x]);
     let b = worldToScreen(positions[ij.y]);
     var dir = normalize(b - a + vec2<f32>(1e-6, 0.0));
     dir = select(dir, -dir, dir.x < 0.0);
     let q = local - vec2<f32>(width, label.textH) * 0.5;
-    sp = (a + b) * 0.5 + dir * q.x + vec2<f32>(-dir.y, dir.x) * q.y;
+    sp = (a + b) * 0.5 + vec2<f32>(a.y - b.y, b.x - a.x) * bend + dir * q.x + vec2<f32>(-dir.y, dir.x) * q.y;
     o.edge = 1u;
   } else {
     let p = worldToScreen(positions[e.index]);

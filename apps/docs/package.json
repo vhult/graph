@@ -11,6 +11,7 @@
   "dependencies": {
     "@fontsource/ibm-plex-mono": "^5.3.0",
     "@fontsource/ibm-plex-sans": "^5.3.0",
+    "@headlessui/react": "^2.2.10",
     "@vhult/graph": "*",
     "github-buttons": "^2.33.1",
     "react": "^19.3.0",

@@ -9,6 +9,8 @@ import { INPUT, MOD } from "../bridge/InputRing";
 export type InputSink = (type: number, t: number, x: number, y: number, dx: number, dy: number, buttons: number, mods: number, button: number) => void;
 
 const LINE_PX = 16;
+const HOLD_MS = 500;
+const HOLD_SLOP_CSS_PX = 3;
 
 function mods(e: MouseEvent): number {
   const touch = (e as PointerEvent).pointerType === "touch" ? MOD.TOUCH : 0;
@@ -24,6 +26,11 @@ export class PointerInput {
   private readonly touchId = [-1, -1];
   private readonly touchX = [0, 0];
   private readonly touchY = [0, 0];
+  private holdTimer: ReturnType<typeof setTimeout> | undefined;
+  private holdId = -1;
+  private holdX = 0;
+  private holdY = 0;
+  private holdMods = 0;
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -33,6 +40,9 @@ export class PointerInput {
     const opts = { signal: this.controller.signal };
     const passive = { signal: this.controller.signal, passive: true };
     canvas.style.touchAction = "none";
+    canvas.style.setProperty("-webkit-touch-callout", "none");
+    canvas.style.setProperty("-webkit-user-select", "none");
+    canvas.style.userSelect = "none";
     canvas.addEventListener("pointerenter", this.refreshRect, passive);
     canvas.addEventListener("pointerdown", this.onDown, opts);
     canvas.addEventListener("pointermove", this.onMove, passive);
@@ -54,6 +64,7 @@ export class PointerInput {
 
   dispose(): void {
     this.controller.abort();
+    this.stopHold();
   }
 
   private emit(type: number, e: MouseEvent, x: number, y: number, dx: number, dy: number, buttons: number, button: number): void {
@@ -94,14 +105,21 @@ export class PointerInput {
       this.touchX[slot] = e.clientX;
       this.touchY[slot] = e.clientY;
       if (this.pinching) {
+        this.stopHold();
         this.pushPinch(e);
         return;
       }
     }
+    if (this.menu && e.pointerType !== "mouse") this.startHold(e);
     this.push(INPUT.POINTER_DOWN, e);
   };
 
   private readonly onMove = (e: PointerEvent): void => {
+    if (e.pointerId === this.holdId && this.holdTimer !== undefined) {
+      const dx = e.clientX - this.holdX;
+      const dy = e.clientY - this.holdY;
+      if (dx * dx + dy * dy > HOLD_SLOP_CSS_PX * HOLD_SLOP_CSS_PX) this.stopHold();
+    }
     if (e.pointerType === "touch") {
       const slot = this.slotOf(e.pointerId);
       if (slot === -1) return;
@@ -116,6 +134,7 @@ export class PointerInput {
   };
 
   private readonly onUp = (e: PointerEvent): void => {
+    if (e.pointerId === this.holdId) this.stopHold();
     if (e.pointerType === "touch") {
       const slot = this.slotOf(e.pointerId);
       if (slot === -1) return;
@@ -142,7 +161,30 @@ export class PointerInput {
   private readonly onMenu = (e: MouseEvent): void => {
     if (!this.menu) return;
     e.preventDefault();
+    const type = (e as PointerEvent).pointerType;
+    if (this.holdId !== -1 || type === "touch" || type === "pen") return;
     this.push(INPUT.MENU, e);
+  };
+
+  private startHold(e: PointerEvent): void {
+    this.stopHold();
+    this.holdId = e.pointerId;
+    this.holdX = e.clientX;
+    this.holdY = e.clientY;
+    this.holdMods = mods(e);
+    this.holdTimer = setTimeout(this.onHold, HOLD_MS);
+  }
+
+  private stopHold(): void {
+    clearTimeout(this.holdTimer);
+    this.holdTimer = undefined;
+    this.holdId = -1;
+  }
+
+  private readonly onHold = (): void => {
+    this.holdTimer = undefined;
+    const k = this.pixelRatio();
+    this.sink(INPUT.MENU, performance.now(), (this.holdX - this.left) * k, (this.holdY - this.top) * k, 0, 0, 1, this.holdMods, 0);
   };
 
   private readonly onWheel = (e: WheelEvent): void => {

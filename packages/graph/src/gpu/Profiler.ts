@@ -6,7 +6,7 @@
  * The same readback also carries the per-bucket draw counts, so visible-node
  * counts are available even without `timestamp-query`.
  */
-import { ENGINE_CONSTANTS } from "../data/Layouts";
+import { EDGE_CONSTANTS, ENGINE_CONSTANTS } from "../data/Layouts";
 
 // 32: nodes take 12 and edges 7, leaving room for labels and halos (M8).
 // Kept at 32 so `ranMask` stays inside a 32-bit int.
@@ -17,9 +17,8 @@ const RING_SIZE = 4;
 const TIMESTAMP_BYTES = Math.ceil((MAX_PROFILE_SLOTS * 2 * 8) / 256) * 256;
 const COUNTS_OFFSET = TIMESTAMP_BYTES;
 const COUNTS_BYTES = ENGINE_CONSTANTS.NUM_BUCKETS * 4 * 4; // drawIndirect args per bucket
-/** The edge cull writes one drawIndirect arg block; its instanceCount is the drawn edge count. */
 const EDGE_COUNTS_OFFSET = COUNTS_OFFSET + COUNTS_BYTES;
-const EDGE_COUNTS_BYTES = 16;
+const EDGE_COUNTS_BYTES = (EDGE_CONSTANTS.EDGE_SCRATCH_CURVE_ARGS + 4) * 4;
 const READBACK_BYTES = EDGE_COUNTS_OFFSET + EDGE_COUNTS_BYTES;
 
 export interface ProfileSample {
@@ -210,7 +209,8 @@ export class Profiler {
     s.gpuTotalMs = e.complete && last >= first ? (last - first) / 1e6 : NaN;
     const c = COUNTS_OFFSET / 4;
     for (let b = 0; b < ENGINE_CONSTANTS.NUM_BUCKETS; b++) s.bucketCounts[b] = e.hasCounts ? words[c + b * 4 + 1]! : 0;
-    s.edgeCount = e.hasEdgeCounts ? words[EDGE_COUNTS_OFFSET / 4 + 1]! : 0;
+    const ec = EDGE_COUNTS_OFFSET / 4;
+    s.edgeCount = e.hasEdgeCounts ? words[ec + EDGE_CONSTANTS.EDGE_SCRATCH_DRAW_ARGS + 1]! + words[ec + EDGE_CONSTANTS.EDGE_SCRATCH_CURVE_ARGS + 1]! : 0;
     e.buffer.unmap();
     e.busy = false;
     this.onSample(s);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Flag } from "../src/api/types";
-import { CONSTANTS, FRAME, defineStruct } from "../src/data/Layouts";
+import { CONSTANTS, EDGE_CONSTANTS, FRAME, defineStruct, edgeStripVertices } from "../src/data/Layouts";
 import { emitLayoutsWgsl } from "../src/data/LayoutsWgsl";
 import { edgeStateBits } from "../src/data/Pack";
 import onDisk from "../src/shaders/common/layouts.wgsl?raw";
@@ -17,6 +17,7 @@ describe("Layouts", () => {
     expect(FRAME.offset.globalEdgeColor).toBe(100);
     expect(FRAME.offset.iconScale).toBe(104);
     expect(FRAME.offset.iconMinPx).toBe(108);
+    expect(FRAME.offset.dimmedAlpha).toBe(112);
   });
 
   it("applies WGSL alignment rules", () => {
@@ -52,6 +53,13 @@ describe("Layouts", () => {
     expect(((all << CONSTANTS.EDGE_STATE_SHIFT) >>> 0) & CONSTANTS.EDGE_END_MASK).toBe(0);
     expect(CONSTANTS.EDGE_END_MASK + 1).toBe(2 ** CONSTANTS.EDGE_STATE_SHIFT);
     expect((((all << CONSTANTS.EDGE_STATE_SHIFT) | CONSTANTS.EDGE_END_MASK) >>> 0)).toBe(0xffffffff);
+  });
+
+  it("edge strip vertex counts match the shader strips", () => {
+    expect(edgeStripVertices(false, false)).toBe(4);
+    expect(edgeStripVertices(true, false)).toBe(10);
+    expect(edgeStripVertices(false, true)).toBe(2 * (EDGE_CONSTANTS.EDGE_CURVE_PIECES + 1));
+    expect(edgeStripVertices(true, true)).toBe(2 * (EDGE_CONSTANTS.EDGE_CURVE_PIECES + 1) + 6);
   });
 
   it("checked-in layouts.wgsl is up to date (run `npm run gen`)", () => {

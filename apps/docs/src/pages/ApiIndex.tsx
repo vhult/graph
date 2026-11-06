@@ -1,21 +1,21 @@
-import api from "virtual:api";
-import content from "virtual:content";
+import { useApi } from "../content/api";
 import { Shell } from "../layout/Shell";
 import { Blocks, slug } from "../render/Blocks";
 import { Inline } from "../render/Inline";
 
 export function ApiIndex({ path }: { path: string }) {
-  const toc = content.api.map((g) => ({ id: slug(g.title), label: g.title }));
+  const api = useApi();
+  const toc = api.groups.map((g) => ({ id: slug(g.title), label: g.title }));
   return (
     <Shell area="api" path={path} toc={toc}>
       <p className="eyebrow">Reference</p>
       <h1>API</h1>
       <p className="lead">
-        Every export of <code>@vhult/graph</code> {content.version}, {api.entries.length} in total. The groups follow the
+        Every export of <code>@vhult/graph</code> {api.version}, {api.entries.length} in total. The groups follow the
         way you use the engine: <code>Graph.create</code> gives you a graph, and each part of it, like{" "}
         <code>graph.nodes</code> or <code>graph.camera</code>, has its own group.
       </p>
-      {content.api.map((g) => (
+      {api.groups.map((g) => (
         <section key={g.id}>
           <h2 id={slug(g.title)}>{g.title}</h2>
           {g.intro && (

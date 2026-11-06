@@ -4,6 +4,7 @@
  */
 import camera from "./common/camera.wgsl";
 import cullState from "./common/cull_state.wgsl";
+import edgeCurve from "./common/edge_curve.wgsl";
 import edgeSegment from "./common/edge_segment.wgsl";
 import edges from "./common/edges.wgsl";
 import iconCurves from "./common/icon_curves.wgsl";
@@ -47,6 +48,7 @@ export const SHADERS: ShaderFs = {
   "common/nodes.wgsl": nodes,
   "common/edges.wgsl": edges,
   "common/edge_segment.wgsl": edgeSegment,
+  "common/edge_curve.wgsl": edgeCurve,
   "common/icon_curves.wgsl": iconCurves,
   "common/icons.wgsl": icons,
   "common/labels.wgsl": labels,

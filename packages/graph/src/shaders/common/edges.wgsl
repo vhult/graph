@@ -68,7 +68,17 @@ fn arrowFitPx(arrowLen : f32, edgeLenPx : f32) -> f32 {
   return arrowLen * clamp(t, 0.0, 1.0);
 }
 
-fn edgeStripVertices(arrows : bool) -> u32 {
+override EDGE_CURVE : bool = false;
+const EDGE_CURVE_MAX : f32 = f32(EDGE_CURVE_MASK) / f32(EDGE_CURVE_SCALE);
+
+fn edgeCurveBend(style : u32) -> f32 {
+  return f32((style >> EDGE_CURVE_SHIFT) & EDGE_CURVE_MASK) / f32(EDGE_CURVE_SCALE);
+}
+
+fn edgeStripVertices(arrows : bool, curved : bool) -> u32 {
+  if (curved) {
+    return 2u * (EDGE_CURVE_PIECES + 1u) + select(0u, 6u, arrows);
+  }
   return select(4u, 10u, arrows);
 }
 
@@ -161,4 +171,12 @@ fn edgeChunkAt(c : u32, chunks : u32) -> u32 {
 
 fn edgeMoveAt(chunks : u32) -> u32 {
   return EDGE_SCRATCH_LIST + 2u * chunks + 1u + chunks * EDGE_CHUNK_WORDS;
+}
+
+fn edgeCurveOffsetsAt(chunks : u32) -> u32 {
+  return edgeMoveAt(chunks) + MOVE_LIST + chunks;
+}
+
+fn edgeCurveMaskAt(c : u32, chunks : u32) -> u32 {
+  return edgeCurveOffsetsAt(chunks) + chunks + 1u + c * 2u * EDGE_CHUNK_MASK_WORDS;
 }

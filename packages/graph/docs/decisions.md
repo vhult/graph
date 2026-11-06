@@ -8,6 +8,145 @@ bandwidth), Edge 153, 1M nodes / 3M edges at fit unless stated.
 
 ---
 
+## 0080 — The node scatter ranks with a bitmask, not a scan
+
+`cull_scatter` sets one bit per drawn node in two 32-word workgroup masks
+(normal and foreground), waits on one barrier, and takes each node's slot from
+`countOneBits` of the bits before it. The four packed 16-bit Hillis–Steele
+scans, about 80 barriers per chunk, are gone, and so are `wgScanVec2`,
+`field16` and `oneHot16`. Slots are the same, so 24 views at 1M and 10M
+(fit to ×512, rotated, with 51k selected nodes) are byte-identical.
+
+AMD Radeon 890M, median of 3 runs: `cull.scatter` on `xlarge-zoom` 0.575 →
+0.514 ms, on `xlarge-zoom-curve-mixed` 0.568 → 0.500 ms; `xlarge`, `large`,
+`large-zoom` and `deep-zoom` unchanged. GPU mean / p95 on `xlarge-zoom`
+9.08 / 14.94 → 8.90 / 14.37 ms, within the 0.2–0.4 ms run-to-run noise. The
+review's 1.0–2.5 ms estimate came from Intel runs; here the pass was never
+bound by its barriers.
+
+---
+
+## 0079 — Curve strips have 4 pieces, not 8
+
+This replaces the 8 pieces of 0077. The strip is only the hull: each fragment
+finds its exact distance to the curve, so fewer pieces only make the hull
+looser. At 8 pieces each curved edge redid the full curve setup in each of
+its 18 vertices (24 with arrows), and the curve draw was bound by vertex work. A per-chunk
+choice of 4 or 8 pieces was not needed: 38 views at 1M (bend 0.2 and 0.25,
+1 and 6 px wide, arrows and patterns, fit to ×1000 rotated) differ from
+8 pieces by at most 2/255 on nearly all pixels, and by up to 6/255 on 9 pixels.
+
+AMD Radeon 890M, GPU mean / p95 ms, two runs each: `xlarge-zoom-curve`
+30.8–32.2 / 57.8–59.7 → 15.1–15.2 / 21.1–21.4, `large-zoom-curve`
+8.6–8.8 → 7.8, `large-curve-dashed` 6.4 → 5.8, `xlarge-zoom-curve-mixed`
+11.7–11.8 → 11.4–11.5.
+
+---
+
+## 0078 — Straight and curved edges each draw only their own list
+
+This replaces the "same list twice" part of 0077. The bounds pass stores one
+bit per edge for "curved" in each chunk, plus the count of curved bits before
+each word. The cull counts the curved edges in each drawn prefix with 2 loads,
+and `edge.expand` writes straight edges to the front of the draw list and
+curved ones after them, each in chunk order, so each draw gets exactly its own
+edges and the picture is unchanged (20 views byte-identical). A curve bit on
+the sort key was rejected: curved edges would get their own chunks and thinning
+density, and every curve toggle would need a re-sort.
+
+AMD Radeon 890M, GPU mean / p95 ms, 1 edge in 64 curved:
+`xlarge-zoom-curve-mixed` 15.34 / 18.99 → 11.69 / 14.95 (straight
+`xlarge-zoom` is 11.2 / 14.5), `large-zoom-curve-mixed` 7.24 / 9.47 →
+6.40 / 8.83. `edge.cull` at 10M goes 0.063 → 0.098 ms; straight-only graphs
+are unchanged.
+
+---
+
+## 0077 — Curved edges: an SDF on a clipped 8-piece strip
+
+`packEdgeStyle({ curve })` bends one edge into a symmetric parabola whose peak
+sits curve × length off the straight line (0 to 0.25 in steps of 1/60, bits
+13 to 16 of the style word). This reverses the "curves dropped" part of 0075.
+A curved edge is one triangle strip of 8 pieces over its on-screen part; the
+fragment finds the exact distance in 3 Newton steps (under 0.01 px in float32
+up to 0.25), so width, round caps, patterns, taper, arrowheads, hover, looks,
+pick and labels all follow the same curve. The bend is limited per edge so the
+strip never folds. The arrowhead is its own box, and each pixel belongs to the
+strip or the box by one test on its position, so a translucent edge is never
+drawn twice. The store counts curved edges like directed ones: with none, the
+straight pipelines run as before. With one or more, the edge pass draws the
+same list twice from two indirect args: the straight pipeline drops curved
+edges and the curve pipeline drops straight ones, each right after reading the
+style word, so a straight edge costs its 4 vertices plus 18 near-empty ones.
+Curved edges draw over straight ones.
+
+Spike, AMD Radeon 890M, every edge bent 0.2, 6 runs, edge pass mean / p95 ms,
+`large` then `large-zoom`. Straight 2.19 / 3.62, 2.70 / 4.26. SDF strip
+3.85 / 7.30, 4.74 / 9.36. One quad around the curve 22.07 / 56.06,
+19.15 / 63.34. Loop-Blinn on the same strip 3.77 / 7.19, 4.65 / 9.14: a tie,
+with an approximate width and flat ends. A 16-piece polyline 4.60 / 9.13,
+5.99 / 11.49, with visible kinks. The spike used a closed-form Bézier distance
+and no clip; the final version is not measured yet, nor the cost for straight
+edges in a graph with some curves. The suite has `large-curve`,
+`large-zoom-curve`, `large-dashed` and `large-curve-dashed` for it.
+
+---
+
+## 0076 — A long touch or pen press opens the context menu
+
+PointerInput sends the menu record itself when a single touch or pen
+press is held 500 ms within 3 CSS px, the click slop, so a press becomes
+a drag or a menu, never both. iOS never fires `contextmenu`, so the event
+did not work there. The native touch menu is still prevented but no
+longer forwarded, so Android does not open it twice. A menu record now
+ends a camera pan, so the view no longer follows the finger under an
+open menu. Main thread only, no frame cost. Checked in Edge with CDP
+touch: a hold on a node or on empty space opens one menu, a 30 px move
+cancels, a short tap stays a click, right click is unchanged.
+
+---
+
+## 0075 — Edge line patterns and taper live in the style word, in their own shader variant
+
+`packEdgeStyle` takes `pattern` (`solid`, `dashed`, `dotted`, `dashDot`,
+`double`) and `tapered`, in the bits the unused curve fields held (pattern at
+bit 8, taper at bit 12). Curves and multi-edge grouping were dropped: they
+touch cull, pick, labels and arrowheads for little gain. Edges stay one quad;
+the pattern is a distance in the fragment shader, sized from the edge width
+with a 2 CSS px unit, starting at the source, stopping before the arrowhead.
+A thinned stand-in edge closes its gaps as its weight nears 2 and is solid
+from there, so crowded areas keep their ink and skip the pattern work.
+`double` needs 3 CSS px. The store counts patterned edges like directed ones;
+the pattern code is a third style level of the edge pipeline (6 variants, 12
+with arrows), so graphs without patterns run the same shader as before. The
+hover and look highlights stay a plain solid line: they are drawn over the
+edge, twice its width, which covers any pattern or taper.
+
+AMD Radeon 890M, 2 alternating rounds per side, 3 runs each, edge pass
+mean / p95 ms, old -> new. No patterns: `large` 2.159 / 3.551 -> 2.112 / 3.460,
+`large-zoom` 2.749 / 4.152 -> 2.651 / 4.084; suite GPU within -2.8% to +1.4%
+on every case. Cost of a pattern on every edge, `large`, against solid of the
+same width: dashed 2.121 -> 2.200, dotted 2.188, dashDot 2.230, tapered 2.141,
+double (3 px) 2.071 -> 2.173.
+
+---
+
+## 0074 — The build strips comments, indentation and blank lines from WGSL
+
+`scripts/build.mjs` strips comments, indentation and blank lines from every
+`.wgsl` file before esbuild bundles it; `#include` lines are kept. Watch mode
+keeps the full source so dev shader errors point to real lines. The WGSL is
+~40% of `worker.js`: 366.3 -> 333.4 KB raw, 104.5 -> 93.1 KB gzip,
+87.7 -> 79.0 KB brotli. Also removing spaces around symbols and joining lines
+saves only 0.6 KB more brotli and can merge tokens (`a - -b` -> `a--b`), so it
+is not done. Renaming identifiers was estimated at ~2.8 KB more brotli; it
+needs a real WGSL parser and would break shader error messages, so it is not
+done. All 23 pass shaders compile clean on the GPU, raw and stripped. Frame
+cost unchanged, `large` bench, AMD Radeon 890M, one run each: frame
+4.90 / 9.54 -> 4.97 / 9.71 ms (mean / p95), GPU 3.84 / 7.89 -> 3.78 / 7.95 ms.
+
+---
+
 ## 0073 — The node reserve is an init option, 100 by default; an add inside it marks STYLE | STATE
 
 The reserve of 0055 is `GraphOptions.nodeReserve` (user decision): an integer

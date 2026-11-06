@@ -144,6 +144,8 @@ export class DoomGame {
   private readonly held = new Set<number>();
   private frameWidth = 0;
   private frameHeight = 0;
+  private frame = -1;
+  private readonly source = new Uint32Array(DOOM.width * DOOM.height);
   private raf = 0;
   private last = 0;
   private due = 0;
@@ -157,14 +159,11 @@ export class DoomGame {
     const text = (ptr: number, length: number) => new TextDecoder().decode(new Uint8Array(game.exports.memory.buffer, ptr, length).slice());
     const imports = {
       loading: {
-        onGameInit: (width: number, height: number) => {
-          game.frameWidth = width;
-          game.frameHeight = height;
-        },
+        onGameInit: (width: number, height: number) => game.size(width, height),
         wadSizes: () => {},
         readWads: () => {},
       },
-      ui: { drawFrame: (ptr: number) => game.draw(ptr) },
+      ui: { drawFrame: (ptr: number) => (game.frame = ptr) },
       runtimeControl: { timeInMilliseconds: () => BigInt(Math.trunc(performance.now())) },
       console: {
         onInfoMessage: () => {},
@@ -202,8 +201,20 @@ export class DoomGame {
       this.exports.tickGame();
       this.due -= step;
     }
+    if (this.frame >= 0) this.draw(this.frame);
+    this.frame = -1;
     this.raf = requestAnimationFrame(this.tick);
   };
+
+  private size(fw: number, fh: number): void {
+    this.frameWidth = fw;
+    this.frameHeight = fh;
+    const { width: w, height: h } = DOOM;
+    for (let y = 0; y < h; y++) {
+      const row = Math.floor((y * fh) / h) * fw;
+      for (let x = 0; x < w; x++) this.source[y * w + x] = (row + Math.floor((x * fw) / w)) * 4;
+    }
+  }
 
   private draw(ptr: number): void {
     const fw = this.frameWidth;
@@ -211,13 +222,10 @@ export class DoomGame {
     if (fw === 0 || fh === 0) return;
     const src = new Uint8Array(this.exports.memory.buffer, ptr, fw * fh * 4);
     const out = this.stream.colors;
-    const { width: w, height: h } = DOOM;
-    for (let y = 0; y < h; y++) {
-      const row = Math.floor((y * fh) / h) * fw;
-      for (let x = 0; x < w; x++) {
-        const k = (row + Math.floor((x * fw) / w)) * 4;
-        out[y * w + x] = src[k + 2]! | (src[k + 1]! << 8) | (src[k]! << 16) | 0xff000000;
-      }
+    const at = this.source;
+    for (let i = 0; i < at.length; i++) {
+      const k = at[i]!;
+      out[i] = src[k + 2]! | (src[k + 1]! << 8) | (src[k]! << 16) | 0xff000000;
     }
     this.stream.commit();
   }

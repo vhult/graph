@@ -5,52 +5,27 @@ import "./welcome.css";
 <Meta title="Welcome" />
 
 <div className="sb-unstyled vg-welcome">
-  <header className="vg-hero">
+  <header className="vg-intro">
     <h1 className="vg-title">@vhult/graph</h1>
-    <p className="vg-tagline">The WebGPU graph renderer built for speed.</p>
-    <p className="vg-lead">Millions of nodes and edges</p>
+    <p className="vg-lead">The WebGPU graph renderer built for speed.</p>
     <div className="vg-links">
       <a className="vg-button vg-primary" href="https://www.npmjs.com/package/@vhult/graph" target="_blank" rel="noreferrer">npm</a>
       <a className="vg-button" href="https://graph.vhult.com/storybook/" target="_blank" rel="noreferrer">Storybook</a>
-      <a className="vg-button" href="https://dev.graph.vhult.com/storybook/" target="_blank" rel="noreferrer">Dev Storybook</a>
+      <a className="vg-button" href="https://github.com/vhult/graph" target="_blank" rel="noreferrer">GitHub</a>
     </div>
-    <code className="vg-install">npm install @vhult/graph</code>
-    <ul className="vg-points">
-      <li>Millions of nodes and edges</li>
-      <li>Zero runtime dependencies</li>
-      <li>Runs in a Web Worker</li>
-    </ul>
   </header>
 
-  <div className="vg-graph">
+  <figure className="vg-graph">
+    <figcaption>
+      <span>Live</span>
+      <span>drag a node · hover it · scroll to zoom</span>
+    </figcaption>
     <Story of={SmallGraph.SmallGraph} />
-  </div>
-  <p className="vg-hint">Drag a node · hover it · scroll to zoom</p>
+  </figure>
 
-  <nav className="vg-cards">
-    <a className="vg-card" href="./?path=/story/showcase-small-graph--small-graph" target="_top">
-      <strong>Showcase</strong>
-      <span>The small graph and a large graph with four generated layouts (cosmic web, brain, rivers, deep field), up to 10 million nodes.</span>
-    </a>
-    <a className="vg-card" href="./?path=/story/nodes-styles--styles" target="_top">
-      <strong>Nodes</strong>
-      <span>Colours, sizes, shapes, z-index and icons.</span>
-    </a>
-    <a className="vg-card" href="./?path=/story/edges-styles--styles" target="_top">
-      <strong>Edges</strong>
-      <span>Widths, arrowheads, colours, gradients and labels.</span>
-    </a>
-    <a className="vg-card" href="./?path=/story/stress-scale--scale" target="_top">
-      <strong>Stress</strong>
-      <span>The memory ceiling.</span>
-    </a>
-    <a className="vg-card" href="./?path=/story/developer-sandbox--sandbox" target="_top">
-      <strong>Developer</strong>
-      <span>The sandbox with every option, benchmarks and correctness checks.</span>
-    </a>
-    <a className="vg-card" href="./?path=/story/experiments-galaxy--galaxy" target="_top">
-      <strong>Experiments</strong>
-      <span>A galaxy, a black hole in 2D and in 3D, water ripples, the Lorenz attractor and Doom, moving every frame.</span>
-    </a>
-  </nav>
+  <ul className="vg-points">
+    <li><span className="vg-index">01</span><span>Millions of nodes and edges</span></li>
+    <li><span className="vg-index">02</span><span>Zero runtime dependencies</span></li>
+    <li><span className="vg-index">03</span><span>Runs in a Web Worker</span></li>
+  </ul>
 </div>

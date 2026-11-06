@@ -54,7 +54,7 @@ describe("Controls hold", () => {
 });
 
 describe("Controls menu record", () => {
-  it("leaves the camera, the pointer and a drag in progress alone", () => {
+  it("ends a pan in progress and leaves the camera and the pointer alone", () => {
     const { camera, controls } = make();
     controls.apply(rec(INPUT.POINTER_DOWN, 100, 100, 0, 0, 1), camera);
     const view = { x: camera.x, y: camera.y, zoom: camera.zoom };
@@ -62,7 +62,8 @@ describe("Controls menu record", () => {
     expect({ x: camera.x, y: camera.y, zoom: camera.zoom }).toEqual(view);
     expect(controls.pointerX).toBe(100);
     expect(controls.pointerY).toBe(100);
-    expect(controls.apply(rec(INPUT.POINTER_MOVE, 140, 120, 0, 0, 1), camera)).toBe(true);
+    expect(controls.apply(rec(INPUT.POINTER_MOVE, 140, 120, 0, 0, 1), camera)).toBe(false);
+    expect({ x: camera.x, y: camera.y, zoom: camera.zoom }).toEqual(view);
   });
 });
 

@@ -69,6 +69,7 @@ const PLACE: Table = {
   edgeTreeBox: [24, "read-only-storage"],
   edgeBits: [25, "read-only-storage"],
   edgeTreeLen: [26, "read-only-storage"],
+  edgeStyles: [27, "read-only-storage"],
 };
 
 const MARK: Table = {
@@ -97,7 +98,7 @@ const PLACE_ENTRIES = {
   label_traverse_edges: ["params", "treeBox", "edgeTreeBox", "edgeTreeLen", "work"],
   label_job_args: ["work", "args"],
   label_emit: ["scratch", "params", "positions", "sizes", "states", "order", "widths", "labelIndex", "candidates", "work"],
-  label_emit_edges: ["params", "positions", "states", "ends", "edgeOrder", "edgeWidths", "edgeTops", "edgeBits", "candidates", "work", "phase"],
+  label_emit_edges: ["params", "positions", "states", "ends", "edgeOrder", "edgeWidths", "edgeTops", "edgeBits", "edgeStyles", "candidates", "work", "phase"],
   label_count: ["params", "candidates", "work", "cellCount"],
   label_scan: ["params", "work", "args", "cellCount", "cellStart"],
   label_scatter: ["params", "candidates", "work", "cellCount", "cellStart", "cellItems", "decision"],
@@ -783,6 +784,7 @@ export class LabelPass implements ComputeNode {
       order: g.order,
       widths: this.labels.nodeWidths,
       ends: g.buffers.edgeIdx,
+      edgeStyles: g.buffers.edgeStyle,
       edgeState,
       edgeOrder,
       edgeWidths: this.labels.edgeWidths,

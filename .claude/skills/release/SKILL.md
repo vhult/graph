@@ -17,7 +17,30 @@ This skill helps, it does not automate. It proposes and the user decides. It nev
 - Skip every `docs` commit.
 - Every later step uses only the kept commits, including the version bump.
 
-## 2. Bring the docs up to date
+## 2. Freeze the old major
+
+Only when the release is a major bump (a kept commit is breaking, see step 5) and the current version is 1.0.0 or later. Confirm the major bump with the user before this step.
+
+The API docs of the old major are frozen in `apps/docs/content/api/v<N>/`, from `main`, which is the last release of that major. They are served at `/v<N>/api` and never change again. Only the API pages are frozen: the landing, the guides and the Storybook stay latest only.
+
+```
+git worktree add ../graph-freeze main
+cd ../graph-freeze && npm ci && npm run build && cd -
+node apps/docs/scripts/freeze.mjs ../graph-freeze
+git worktree remove ../graph-freeze
+```
+
+`freeze.mjs` copies the API YAML and `graph.api.json` of that checkout, and writes its version and group order in `archive.json`. It stops if the folder already exists.
+
+This is its own commit on `dev`, before the docs update:
+
+```
+docs: freeze the v1 api docs
+```
+
+Show the new folder and the message, then ask `Commit? [Y/n]`. Commit only on `Y`.
+
+## 3. Bring the docs up to date
 
 The docs site must match the version being released. Apply the `update-docs` skill with `main` as the base: `git diff main...dev -- packages/graph/api/graph.api.md` lists the API changes, and the commits kept in step 1 say why.
 
@@ -41,9 +64,9 @@ The docs changes are their own commit on `dev`, before the release commit:
 docs: update the docs for v0.2.0
 ```
 
-Show the diff and the message, then ask `Commit? [Y/n]`. Commit only on `Y`. When the docs are already up to date (all three pass and no API change is left undocumented), say so and make no docs commit. The docs read their version from `packages/graph/package.json`, so the bump in step 6 updates it with nothing to edit.
+Show the diff and the message, then ask `Commit? [Y/n]`. Commit only on `Y`. When the docs are already up to date (all three pass and no API change is left undocumented), say so and make no docs commit. The docs read their version from `packages/graph/package.json`, so the bump in step 7 updates it with nothing to edit.
 
-## 3. Find each author's GitHub login
+## 4. Find each author's GitHub login
 
 For each commit, take the first that works:
 
@@ -53,7 +76,7 @@ For each commit, take the first that works:
 
 Skip authorship for the maintainer (`hihubble` or `hihubbIe`): their lines get no `@login`.
 
-## 4. Pick the version
+## 5. Pick the version
 
 Read the current version from `packages/graph/package.json`, then propose a bump:
 
@@ -63,7 +86,7 @@ Read the current version from `packages/graph/package.json`, then propose a bump
 
 State the proposed version and the reason. If the user names another bump, use theirs.
 
-## 5. Write the CHANGELOG entry
+## 6. Write the CHANGELOG entry
 
 `CHANGELOG.md` sits at the repo root. New entries always go at the top, under the `# Changelog` title. Never edit older entries. Create the file if it is missing.
 
@@ -94,7 +117,7 @@ Entry format:
 - A performance line carries the frame and p95 numbers from the commit's `Perf` block.
 - Rewrite a summary only to make it clear. Never change what it says.
 
-## 6. Bump the version
+## 7. Bump the version
 
 Set the new version in:
 
@@ -102,7 +125,7 @@ Set the new version in:
 - `packages/graph/package.json`
 - `package-lock.json`: the top `version`, `packages[""].version` and `packages["packages/graph"].version`
 
-## 7. Propose the commit
+## 8. Propose the commit
 
 The commit goes on `dev`.
 
@@ -114,7 +137,7 @@ chore(release): v0.2.0
 
 Show the full diff and the message, then ask `Commit? [Y/n]`. Commit only on `Y`. On `n`, change what the user asks and propose again. The commit body is also the description of the dev to main PR.
 
-## 8. Give the commands
+## 9. Give the commands
 
 After the commit, print these for the user to run. Do not run them.
 

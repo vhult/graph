@@ -1,7 +1,9 @@
 import content from "virtual:content";
 import { useEffect, useRef, useState } from "react";
-import { labelOf } from "../content/api";
+import { useApi, type Api } from "../content/api";
 import { Link } from "../router";
+import { SearchBox } from "./SearchBox";
+import { VersionPicker } from "./Versions";
 
 export type Area = "docs" | "api";
 
@@ -22,11 +24,11 @@ interface Group {
   parts: Part[];
 }
 
-function apiItem(name: string): Item {
-  return { label: labelOf(name), href: `/api/${name}`, code: true };
+function apiItem(api: Api, name: string): Item {
+  return { label: api.labelOf(name), href: api.itemHref(name), code: true };
 }
 
-function groups(area: Area): Group[] {
+function groups(area: Area, api: Api): Group[] {
   if (area === "docs") {
     return content.site.docs.map((s) => ({
       title: s.section,
@@ -35,28 +37,40 @@ function groups(area: Area): Group[] {
     }));
   }
   return [
-    { title: "Reference", fold: false, parts: [{ items: [{ label: "Overview", href: "/api", code: false }] }] },
-    ...content.api.map((g) => ({
+    { title: "Reference", fold: false, parts: [{ items: [{ label: "Overview", href: api.base, code: false }] }] },
+    ...api.groups.map((g) => ({
       title: g.title,
       fold: true,
       parts: [
-        { items: g.namespace ? [apiItem(g.namespace)] : [] },
-        { title: "Types", items: g.types.map(apiItem) },
-        { title: "Values", items: g.values.map(apiItem) },
+        { items: g.namespace ? [apiItem(api, g.namespace)] : [] },
+        { title: "Types", items: g.types.map((name) => apiItem(api, name)) },
+        { title: "Values", items: g.values.map((name) => apiItem(api, name)) },
       ].filter((p) => p.items.length > 0),
     })),
   ];
 }
 
-function holds(g: Group, path: string): boolean {
-  return g.parts.some((p) => p.items.some((i) => i.href === path));
+function partKey(g: Group, part: Part): string {
+  return `${g.title}/${part.title}`;
+}
+
+function openKeys(list: Group[], path: string): string[] {
+  const keys: string[] = [];
+  for (const g of list) {
+    for (const part of g.parts) {
+      if (!part.items.some((i) => i.href === path)) continue;
+      if (g.fold) keys.push(g.title);
+      if (part.title) keys.push(partKey(g, part));
+    }
+  }
+  return keys;
 }
 
 interface ListProps {
   list: Group[];
   path: string;
   open: Set<string>;
-  toggle: (title: string) => void;
+  toggle: (key: string) => void;
 }
 
 function List({ list, path, open, toggle }: ListProps) {
@@ -74,20 +88,30 @@ function List({ list, path, open, toggle }: ListProps) {
               <p className="side-title">{g.title}</p>
             )}
             {shown &&
-              g.parts.map((part, i) => (
-                <div key={i} className="side-part">
-                  {part.title && <p className="side-sub">{part.title}</p>}
-                  <ul>
-                    {part.items.map((l) => (
-                      <li key={l.href}>
-                        <Link href={l.href} className={path === l.href ? "active" : undefined}>
-                          {l.code ? <code>{l.label}</code> : l.label}
-                        </Link>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ))}
+              g.parts.map((part, i) => {
+                const key = partKey(g, part);
+                const items = !part.title || open.has(key);
+                return (
+                  <div key={i} className="side-part">
+                    {part.title && (
+                      <button type="button" className={items ? "side-sub side-fold open" : "side-sub side-fold"} onClick={() => toggle(key)}>
+                        {part.title}
+                      </button>
+                    )}
+                    {items && (
+                      <ul>
+                        {part.items.map((l) => (
+                          <li key={l.href}>
+                            <Link href={l.href} className={path === l.href ? "active" : undefined}>
+                              {l.code ? <code>{l.label}</code> : l.label}
+                            </Link>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                );
+              })}
           </div>
         );
       })}
@@ -95,16 +119,28 @@ function List({ list, path, open, toggle }: ListProps) {
   );
 }
 
+function Menu({ area, ...props }: ListProps & { area: Area }) {
+  if (area !== "api") return <List {...props} />;
+  return (
+    <>
+      <List {...props} list={props.list.slice(0, 1)} />
+      <SearchBox />
+      <List {...props} list={props.list.slice(1)} />
+    </>
+  );
+}
+
 export function Sidebar({ area, path }: { area: Area; path: string }) {
   const aside = useRef<HTMLElement>(null);
-  const list = groups(area);
-  const [open, setOpen] = useState(() => new Set(list.filter((g) => holds(g, path)).map((g) => g.title)));
+  const api = useApi();
+  const list = groups(area, api);
+  const [open, setOpen] = useState(() => new Set(openKeys(list, path)));
   const [seen, setSeen] = useState(path);
 
   if (seen !== path) {
     setSeen(path);
-    const current = list.find((g) => g.fold && holds(g, path));
-    if (current && !open.has(current.title)) setOpen(new Set(open).add(current.title));
+    const keys = openKeys(list, path).filter((k) => !open.has(k));
+    if (keys.length > 0) setOpen(new Set([...open, ...keys]));
   }
 
   useEffect(() => {
@@ -115,21 +151,23 @@ export function Sidebar({ area, path }: { area: Area; path: string }) {
     if (top < el.scrollTop || top + item.offsetHeight > el.scrollTop + el.clientHeight) el.scrollTop = top - el.clientHeight / 3;
   }, [area, path]);
 
-  const toggle = (title: string) =>
+  const toggle = (key: string) =>
     setOpen((prev) => {
       const next = new Set(prev);
-      if (!next.delete(title)) next.add(title);
+      if (!next.delete(key)) next.add(key);
       return next;
     });
 
   return (
     <>
       <aside className="sidebar" ref={aside}>
-        <List list={list} path={path} open={open} toggle={toggle} />
+        {area === "api" && <VersionPicker path={path} />}
+        <Menu area={area} list={list} path={path} open={open} toggle={toggle} />
       </aside>
       <details className="side-menu">
         <summary>Menu</summary>
-        <List list={list} path={path} open={open} toggle={toggle} />
+        {area === "api" && <VersionPicker path={path} />}
+        <Menu area={area} list={list} path={path} open={open} toggle={toggle} />
       </details>
     </>
   );

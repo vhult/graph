@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { Plugin } from "vite";
 import { readApi } from "./api.ts";
-import { loadContent } from "./content.ts";
+import { archiveIds, loadArchives, loadContent } from "./content.ts";
 import { llmsFiles } from "./llms.ts";
 
 const CONTENT = "virtual:content";
@@ -19,9 +19,10 @@ export function docsData(paths: DataPaths): Plugin {
   const apiFile = resolve(paths.api);
 
   const load = () => {
-    const api = readApi(apiFile);
     const version = (JSON.parse(readFileSync(paths.pkg, "utf8")) as { version: string }).version;
-    return { api, ...loadContent(contentDir, api, version) };
+    const latest = loadContent(contentDir, readApi(apiFile), version);
+    const archives = loadArchives(contentDir, latest.content.pages);
+    return { ...latest, archives: archives.versions, files: [apiFile, ...latest.files, ...archives.files] };
   };
 
   const llms = () => {
@@ -32,16 +33,25 @@ export function docsData(paths: DataPaths): Plugin {
   return {
     name: "docs-data",
     resolveId(id) {
-      if (id === CONTENT || id === API) return `\0${id}`;
+      if (id === CONTENT || id === API || id.startsWith(`${API}/`)) return `\0${id}`;
     },
     load(id) {
       if (id === `\0${API}`) {
-        this.addWatchFile(apiFile);
-        return `export default ${JSON.stringify(readApi(apiFile))};`;
+        const { api, archives, files } = load();
+        for (const file of files) this.addWatchFile(file);
+        const list = archives.map((a) => `{ id: ${JSON.stringify(a.id)}, version: ${JSON.stringify(a.version)}, load: () => import("${API}/${a.id}") }`);
+        return `export const latest = ${JSON.stringify(api)};\nexport const archives = [${list.join(", ")}];`;
+      }
+      if (id.startsWith(`\0${API}/`)) {
+        const { archives, files } = load();
+        for (const file of files) this.addWatchFile(file);
+        const archive = archives.find((a) => `\0${API}/${a.id}` === id);
+        if (!archive) this.error(`no frozen API version for ${id.slice(1)}`);
+        return `export default ${JSON.stringify(archive)};`;
       }
       if (id === `\0${CONTENT}`) {
         const { content, warnings, files } = load();
-        for (const file of [apiFile, ...files]) this.addWatchFile(file);
+        for (const file of files) this.addWatchFile(file);
         for (const w of warnings) this.warn(w);
         return `export default ${JSON.stringify(content)};`;
       }
@@ -64,7 +74,7 @@ export function docsData(paths: DataPaths): Plugin {
         const path = resolve(file);
         if (path !== apiFile && !path.startsWith(contentDir)) return;
         const graph = server.environments.client.moduleGraph;
-        for (const id of [`\0${CONTENT}`, `\0${API}`]) {
+        for (const id of [`\0${CONTENT}`, `\0${API}`, ...archiveIds(contentDir).map((a) => `\0${API}/${a}`)]) {
           const mod = graph.getModuleById(id);
           if (mod) graph.invalidateModule(mod);
         }
